@@ -1,7 +1,7 @@
 data_mode: historical
 
 historical:
-  days:    1
+  days:    365
   hours:   0
   minutes: 0
 
@@ -10,6 +10,7 @@ algorithms:
 
 active_strategies:
   - goog_amzn
+  - aapl_msft
 
 strategies:
   - name: aapl_msft

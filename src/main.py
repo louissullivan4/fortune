@@ -95,41 +95,61 @@ async def get_trades():
 
 @app.post("/analysis", response_model=AnalysisResponse)
 async def analyze_perf(req: AnalysisRequest, strategy: Optional[str] = None):
-    q = {} if not strategy else {"strategy": strategy}
-    docs = await storage.signals.find(q, sort=[("timestamp", 1)]).to_list(None)
+    RISK_PER_TRADE = 0.02
+
+    equity = req.initial_capital  
+
+    docs = await storage.signals.find(
+        {} if not strategy else {"strategy": strategy},
+        sort=[("timestamp", 1)]
+    ).to_list(None)
+
     if not docs:
         raise HTTPException(404, "No signals found")
+
     total_profit = n_ent = n_ex = buys = sells = wins = losses = 0
     last = None
+
     for sig in docs:
-        qty = sig["leg1_qty"]
         if sig["signal_type"] == "ENTRY" and last is None:
-            last = sig
+            price = sig["leg1_price"]
+            max_notional = equity * RISK_PER_TRADE
+            qty = int(max_notional / price) or 1
+
+            last = sig.copy()
+            last["leg1_qty"] = qty
+
             n_ent += 1
             buys += (sig["leg1_action"] == "BUY") + (sig["leg2_action"] == "BUY")
             sells += (sig["leg1_action"] == "SELL") + (sig["leg2_action"] == "SELL")
+
         elif sig["signal_type"] == "EXIT" and last:
+            qty = last["leg1_qty"]
             p1 = (last["leg1_price"] - sig["leg1_price"]) * qty
             p2 = (sig["leg2_price"] - last["leg2_price"]) * qty
             pnl = p1 + p2
+
             total_profit += pnl
             n_ex += 1
             buys += (sig["leg1_action"] == "BUY") + (sig["leg2_action"] == "BUY")
             sells += (sig["leg1_action"] == "SELL") + (sig["leg2_action"] == "SELL")
-            if pnl >= 0:
-                wins += 1
-            else:
-                losses += 1
+            wins   += (pnl >= 0)
+            losses += (pnl <  0)
+
+            equity += pnl
+
             last = None
+
     return AnalysisResponse(
-        initial_capital=req.initial_capital,
-        total_profit=round(total_profit, 2),
-        return_pct=round((total_profit / req.initial_capital) * 100, 2),
-        n_trades=n_ex,
-        n_entries=n_ent,
-        n_exits=n_ex,
-        total_buy_actions=buys,
-        total_sell_actions=sells,
-        winning_trades=wins,
-        losing_trades=losses,
+        initial_capital   = req.initial_capital,
+        total_profit      = round(equity - req.initial_capital, 2),
+        return_pct        = round((equity / req.initial_capital - 1) * 100, 2),
+        n_trades          = n_ex,
+        n_entries         = n_ent,
+        n_exits           = n_ex,
+        total_buy_actions = buys,
+        total_sell_actions= sells,
+        winning_trades    = wins,
+        losing_trades     = losses,
     )
+
