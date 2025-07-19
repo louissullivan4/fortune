@@ -1,0 +1,87 @@
+.input-section {
+  margin-bottom: 40px;
+}
+
+.input-card {
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 30px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  text-align: center;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.input-card h2 {
+  font-size: 1.5rem;
+  margin-bottom: 20px;
+  color: #161616;
+  font-weight: 600;
+}
+
+.input-group {
+  position: relative;
+  margin-bottom: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.currency {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #0f62fe;
+  margin-right: 10px;
+}
+
+.input-group input {
+  width: 200px;
+  padding: 12px 16px;
+  border: 1px solid #8d8d8d;
+  border-radius: 4px;
+  font-size: 1.1rem;
+  font-weight: 400;
+  text-align: center;
+  transition: all 0.2s ease;
+  background: #ffffff;
+  color: #161616;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: #0f62fe;
+  box-shadow: 0 0 0 2px rgba(15, 98, 254, 0.2);
+}
+
+.analyze-btn {
+  background: #0f62fe;
+  color: #ffffff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.analyze-btn:hover {
+  background: #0043ce;
+  transform: translateY(-1px);
+}
+
+.analyze-btn:active {
+  background: #002d9c;
+  transform: translateY(0);
+}
+
+@media (max-width: 768px) {
+  .input-card {
+    padding: 20px;
+  }
+  
+  .input-group input {
+    width: 150px;
+  }
+} 

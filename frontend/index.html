@@ -1,121 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fortune Trading Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=2">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-</head>
-<body>
-    <div class="container">
-        <header class="header">
-            <h1>📈 Fortune Trading Dashboard</h1>
-            <p>Real-time strategy performance analysis</p>
-        </header>
-
-        <div class="input-section">
-            <div class="input-card">
-                <h2>Initial Capital</h2>
-                <div class="input-group">
-                    <span class="currency">$</span>
-                    <input type="number" id="initialCapital" placeholder="10000" min="100" step="100" value="10000">
-                </div>
-                <button id="analyzeBtn" class="analyze-btn">Analyze Performance</button>
-            </div>
-        </div>
-
-        <div class="results-section" id="resultsSection" style="display: none;">
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <div class="metric-icon">💰</div>
-                    <div class="metric-content">
-                        <h3>Total Profit</h3>
-                        <p id="totalProfit" class="metric-value">$0.00</p>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon">📊</div>
-                    <div class="metric-content">
-                        <h3>Return %</h3>
-                        <p id="returnPct" class="metric-value">0.00%</p>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon">🔄</div>
-                    <div class="metric-content">
-                        <h3>Total Trades</h3>
-                        <p id="totalTrades" class="metric-value">0</p>
-                    </div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-icon">✅</div>
-                    <div class="metric-content">
-                        <h3>Win Rate</h3>
-                        <p id="winRate" class="metric-value">0.00%</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="charts-section">
-                <div class="chart-container">
-                    <h3>Profit/Loss Distribution</h3>
-                    <canvas id="pnlChart"></canvas>
-                </div>
-                <div class="chart-container">
-                    <h3>Trading Activity</h3>
-                    <canvas id="activityChart"></canvas>
-                </div>
-            </div>
-
-            <div class="detailed-stats">
-                <div class="stats-card">
-                    <h3>Detailed Statistics</h3>
-                    <div class="stats-grid">
-                        <div class="stat-item">
-                            <span class="stat-label">Initial Capital:</span>
-                            <span id="initialCapitalDisplay" class="stat-value">$0.00</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Total Entries:</span>
-                            <span id="totalEntries" class="stat-value">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Total Exits:</span>
-                            <span id="totalExits" class="stat-value">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Buy Actions:</span>
-                            <span id="buyActions" class="stat-value">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Sell Actions:</span>
-                            <span id="sellActions" class="stat-value">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Winning Trades:</span>
-                            <span id="winningTrades" class="stat-value">0</span>
-                        </div>
-                        <div class="stat-item">
-                            <span class="stat-label">Losing Trades:</span>
-                            <span id="losingTrades" class="stat-value">0</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="loading" id="loading" style="display: none;">
-            <div class="spinner"></div>
-            <p>Analyzing performance...</p>
-        </div>
-
-        <div class="error" id="error" style="display: none;">
-            <p>❌ Error loading data. Please try again.</p>
-        </div>
-    </div>
-
-    <script src="script.js"></script>
-</body>
-</html> 
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
