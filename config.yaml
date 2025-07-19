@@ -1,0 +1,39 @@
+data_mode: historical
+
+historical:
+  days:    1
+  hours:   0
+  minutes: 0
+
+algorithms:
+  - PairTrading
+
+active_strategies:
+  - goog_amzn
+
+strategies:
+  - name: aapl_msft
+    symbol1: AAPL
+    symbol2: MSFT
+    window:   60
+    entry_z:  2.5
+    exit_z:   0.25
+    qty:      1
+
+  - name: goog_amzn
+    symbol1: GOOG
+    symbol2: AMZN
+    window:   60
+    entry_z:  2.5
+    exit_z:   0.5
+    qty:      1
+
+  - name: ko_pep
+    algorithm: hedged
+    symbol1: KO
+    symbol2: PEP
+    window_beta: 180
+    window_z:    120
+    entry_z:     2.0
+    exit_z:      0.2
+    qty:         2
