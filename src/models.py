@@ -38,18 +38,7 @@ class Trade(BaseModel):
     exit_order: Order
 
 
-class AnalysisRequest(BaseModel):
+class InitialCapitalRequest(BaseModel):
     initial_capital: float
 
 
-class AnalysisResponse(BaseModel):
-    initial_capital: float
-    total_profit: float
-    return_pct: float
-    n_trades: int
-    n_entries: int
-    n_exits: int
-    total_buy_actions: int
-    total_sell_actions: int
-    winning_trades: int
-    losing_trades: int

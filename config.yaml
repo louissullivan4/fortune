@@ -1,7 +1,7 @@
 data_mode: historical
 
-historical:
-  days:    365
+timeframe:
+  days:    1
   hours:   0
   minutes: 0
 
@@ -28,13 +28,3 @@ strategies:
     entry_z:  2.5
     exit_z:   0.5
     qty:      1
-
-  - name: ko_pep
-    algorithm: hedged
-    symbol1: KO
-    symbol2: PEP
-    window_beta: 180
-    window_z:    120
-    entry_z:     2.0
-    exit_z:      0.2
-    qty:         2
