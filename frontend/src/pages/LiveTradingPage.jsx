@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Lightning,
   ChartLine,
@@ -11,7 +11,7 @@ import {
   Play,
   Stop,
   Pause,
-  Resume
+  Security
 } from '@carbon/icons-react';
 import { FeatureCard } from '../components/common/CommonComponents';
 import { 
@@ -28,8 +28,11 @@ import {
   resumeLiveTrading,
   getLiveTradingStatus,
   getLivePositions,
-  getLiveTradingMetrics
+  getLiveTradingMetrics,
+  getRiskLevel,
+  getMarketStatus
 } from '../services/api';
+import PositionManagement from '../components/PositionManagement/PositionManagement';
 import '../components/common/CommonComponents.css';
 import './LiveTradingPage.css';
 
@@ -37,37 +40,147 @@ const LiveTradingPage = () => {
   const [liveStatus, setLiveStatus] = useState(null);
   const [positions, setPositions] = useState([]);
   const [metrics, setMetrics] = useState(null);
+  const [risk, setRisk] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [marketStatus, setMarketStatus] = useState(null);
+  const [isStopping, setIsStopping] = useState(false);
+  
+  // Live feed states
+  const [currentQuote, setCurrentQuote] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState(null);
+  const prevPrices = useRef({});
+  const wsRef = useRef(null);
 
-  // Demo data fallback
-  const demoMetrics = {
-    totalProfit: 15420.50,
-    totalLoss: -3240.75,
-    totalTrades: 247,
-    winRate: 68.4,
-    currentPositions: 12,
-    dailyPnL: 1250.00,
-    weeklyPnL: 8900.00,
-    monthlyPnL: 15420.50
+  // WebSocket URL for live feed
+  const WS_URL =
+    window.location.protocol === "https:"
+      ? `wss://${window.location.host}/live-trading/ws/live-feed`
+      : `ws://${window.location.hostname}:8000/live-trading/ws/live-feed`;
+
+  // Helper functions for live feed
+  const getPriceDirection = (prev, curr) => {
+    if (prev == null || curr == null) return null;
+    if (curr > prev) return "up";
+    if (curr < prev) return "down";
+    return "same";
   };
+
+  const formatPrice = (price) => {
+    if (price == null) return "-";
+    return Number(price).toFixed(2);
+  };
+
+  const formatTime = (timestamp) => {
+    if (!timestamp) return "-";
+    try {
+      return new Date(timestamp).toLocaleTimeString([], { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit' 
+      });
+    } catch {
+      return "-";
+    }
+  };
+
+  useEffect(() => {
+    if (!liveStatus || liveStatus.status !== 'running') {
+      setCurrentQuote(null);
+      setError(null);
+      setIsConnected(false);
+      setLastUpdateTime(null);
+      return;
+    }
+
+    wsRef.current = new window.WebSocket(WS_URL);
+    
+    wsRef.current.onopen = () => {
+      console.log('WebSocket connected');
+      setError(null);
+      setIsConnected(true);
+    };
+    
+    wsRef.current.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "quote" && msg.data) {
+          setCurrentQuote(msg.data);
+          setLastUpdateTime(Date.now());
+          setIsConnected(true);
+        } else if (msg.type === "error" && msg.message) {
+          setError(msg.message);
+        }
+      } catch (e) {
+        console.error('Error parsing WebSocket message:', e);
+      }
+    };
+    
+    wsRef.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setError('WebSocket connection error');
+      setIsConnected(false);
+    };
+    
+    wsRef.current.onclose = (event) => {
+      console.log('WebSocket disconnected:', event.code, event.reason);
+      setIsConnected(false);
+      if (event.code !== 1000) {
+        setError('WebSocket connection lost');
+      }
+    };
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close(1000, 'Component unmounting');
+        wsRef.current = null;
+      }
+    };
+  }, [liveStatus?.status]);
+
+  // Check if we're receiving live data (received update in last 10 seconds)
+  const isReceivingLiveFeed = isConnected && lastUpdateTime && (Date.now() - lastUpdateTime) < 10000;
+
+  // Process current quote
+  const processedQuote = currentQuote ? (() => {
+    const symbol = currentQuote.symbol || currentQuote.S || "?";
+    const bidPrice = currentQuote.bp || currentQuote.bid_price || null;
+    const askPrice = currentQuote.ap || currentQuote.ask_price || null;
+    
+    // Use mid-price for direction calculation
+    const midPrice = bidPrice && askPrice ? (bidPrice + askPrice) / 2 : null;
+    const prev = prevPrices.current[symbol];
+    const direction = getPriceDirection(prev, midPrice);
+    prevPrices.current[symbol] = midPrice;
+
+    return {
+      symbol,
+      bidPrice,
+      askPrice,
+      direction,
+      timestamp: currentQuote.timestamp || currentQuote.t
+    };
+  })() : null;
 
   // Fetch live trading data
   const fetchLiveData = async () => {
     try {
       setError(null);
-      const [statusData, positionsData, metricsData] = await Promise.all([
+      const [statusData, positionsData, metricsData, riskData, marketStatusData] = await Promise.all([
         getLiveTradingStatus(),
         getLivePositions(),
-        getLiveTradingMetrics()
+        getLiveTradingMetrics(),
+        getRiskLevel(),
+        getMarketStatus()
       ]);
-      
       setLiveStatus(statusData);
       setPositions(positionsData);
       setMetrics(metricsData);
+      setRisk(riskData);
+      setMarketStatus(marketStatusData);
     } catch (err) {
-      console.warn('Live trading API not available, using demo data');
-      setError('Live trading API not available - showing demo data');
+      setError('Live trading API not available.');
     }
   };
 
@@ -86,13 +199,40 @@ const LiveTradingPage = () => {
 
   const handleStop = async () => {
     setLoading(true);
+    setIsStopping(true);
     try {
-      await stopLiveTrading();
+      // First attempt
+      let response = await stopLiveTrading();
+      
+      // If there's a warning, try one more time after a short delay
+      if (response.warning) {
+        setError('Stopping system... (this may take a moment)');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+        
+        // Second attempt
+        response = await stopLiveTrading();
+      }
+      
+      // Check final result
+      if (response.warning) {
+        setError(`System stopped with warnings: ${response.message}`);
+      } else {
+        setError(null);
+      }
+      
       await fetchLiveData();
     } catch (err) {
-      setError(err.message);
+      // Handle different types of errors more gracefully
+      if (err.message.includes('timeout') || err.message.includes('network')) {
+        setError('Connection timeout - system may still be stopping. Please refresh the page in a few seconds.');
+      } else if (err.message.includes('500')) {
+        setError('System stop completed with some issues. Please refresh to confirm status.');
+      } else {
+        setError(`Stop failed: ${err.message}`);
+      }
     } finally {
       setLoading(false);
+      setIsStopping(false);
     }
   };
 
@@ -120,17 +260,22 @@ const LiveTradingPage = () => {
     }
   };
 
-  // Auto-refresh data
+  // Auto-refresh data only when live trading is running
   useEffect(() => {
     fetchLiveData();
-    const interval = setInterval(fetchLiveData, 5000); // Refresh every 5 seconds
-    return () => clearInterval(interval);
-  }, []);
+    
+    // Only set up polling if live trading is running
+    if (liveStatus?.status === 'running') {
+      const interval = setInterval(fetchLiveData, 5000); // Refresh every 5 seconds
+      return () => clearInterval(interval);
+    }
+  }, [liveStatus?.status]); // Re-run effect when status changes
 
-  // Use real data if available, otherwise fallback to demo
-  const currentMetrics = metrics || demoMetrics;
-  const currentStatus = liveStatus?.status || 'stopped';
-  const currentPositions = positions.length > 0 ? positions.length : demoMetrics.currentPositions;
+  // Compute current status, but force offline if error
+  const currentStatus = error
+    ? 'offline'
+    : liveStatus?.status || 'stopped';
+  const activeStrategies = liveStatus?.active_strategies || [];
 
   const features = [
     { 
@@ -155,103 +300,135 @@ const LiveTradingPage = () => {
     }
   ];
 
+  // Helper for safe metric display
+  const safeMetric = (val, digits = 2) =>
+    typeof val === 'number' && !isNaN(val) ? val.toFixed(digits) : 'N/A';
+
+  // Status indicator color class
+  const statusClass =
+    currentStatus === 'running'
+      ? 'status-indicator--success'
+      : currentStatus === 'paused'
+      ? 'status-indicator--warning'
+      : 'status-indicator--error';
+
+  // Risk color class
+  const riskColorClass =
+    risk?.risk_level === 'low'
+      ? 'risk-indicator--success'
+      : risk?.risk_level === 'medium'
+      ? 'risk-indicator--warning'
+      : risk?.risk_level === 'high'
+      ? 'risk-indicator--error'
+      : 'risk-indicator--neutral';
+
+  const riskTextClass =
+    risk?.risk_level === 'low'
+      ? 'risk-text--success'
+      : risk?.risk_level === 'medium'
+      ? 'risk-text--warning'
+      : risk?.risk_level === 'high'
+      ? 'risk-text--error'
+      : 'risk-text--neutral';
+
   return (
     <div className="live-trading-page">
       {/* Page Header */}
       <div className="page-header">
-        <div className="flex items-center mb-4">
-          <div className="mr-3 p-2 bg-primary-accent-bg rounded-lg">
-            <Lightning size={24} className="text-primary" />
-          </div>
-          <div>
+        <div className="header-content">
+          <div className="header-left">
             <h1 className="page-title">Live Trading Dashboard</h1>
-            <p className="page-subtitle">
-              Real-time monitoring and control of your trading strategies
-            </p>
           </div>
-        </div>
-        
-        <div className="page-actions">
-          <div className="flex items-center space-x-4">
-            {/* Status Indicators */}
-            <div className={`status-indicator ${currentStatus === 'running' ? 'status-success' : currentStatus === 'paused' ? 'status-warning' : 'status-error'}`}>
-              <div className={`w-2 h-2 rounded-full mr-2 ${currentStatus === 'running' ? 'bg-success' : currentStatus === 'paused' ? 'bg-warning' : 'bg-error'}`}></div>
-              {currentStatus === 'running' ? 'System Online' : currentStatus === 'paused' ? 'System Paused' : 'System Offline'}
-            </div>
-            
-            {liveStatus?.last_update && (
-              <div className="status-indicator status-info">
-                <div className="w-2 h-2 bg-primary rounded-full mr-2"></div>
-                Last Update: {new Date(liveStatus.last_update).toLocaleTimeString()}
-              </div>
-            )}
-
-            {/* Control Buttons */}
-            <div className="flex items-center space-x-2">
+          
+          <div className="header-right">
+            <div className="control-buttons">
               {currentStatus === 'stopped' && (
-                <button
-                  onClick={handleStart}
-                  disabled={loading}
-                  className="btn btn-primary flex items-center space-x-2"
-                >
-                  <Play size={16} />
-                  <span>Start</span>
+                <button onClick={handleStart} disabled={loading} className="btn btn-primary">
+                  Connect to market...
                 </button>
               )}
-              
               {currentStatus === 'running' && (
                 <>
-                  <button
-                    onClick={handlePause}
-                    disabled={loading}
-                    className="btn btn-secondary flex items-center space-x-2"
-                  >
+                  <button onClick={handlePause} disabled={loading} className="btn btn-secondary">
                     <Pause size={16} />
-                    <span>Pause</span>
+                    Pause
                   </button>
-                  <button
-                    onClick={handleStop}
-                    disabled={loading}
-                    className="btn btn-danger flex items-center space-x-2"
-                  >
+                  <button onClick={handleStop} disabled={loading || isStopping} className="btn btn-danger">
                     <Stop size={16} />
-                    <span>Stop</span>
+                    {isStopping ? 'Stopping...' : 'Stop'}
                   </button>
                 </>
               )}
-              
               {currentStatus === 'paused' && (
                 <>
-                  <button
-                    onClick={handleResume}
-                    disabled={loading}
-                    className="btn btn-primary flex items-center space-x-2"
-                  >
-                    <Resume size={16} />
-                    <span>Resume</span>
+                  <button onClick={handleResume} disabled={loading} className="btn btn-primary">
+                    <Play size={16} />
+                    Resume
                   </button>
-                  <button
-                    onClick={handleStop}
-                    disabled={loading}
-                    className="btn btn-danger flex items-center space-x-2"
-                  >
+                  <button onClick={handleStop} disabled={loading} className="btn btn-danger">
                     <Stop size={16} />
-                    <span>Stop</span>
+                    Stop
                   </button>
                 </>
               )}
             </div>
           </div>
+        </div>
+
+        {/* Status Information Row */}
+        <div className="status-row">
+          <div className={`status-item status-item--system ${statusClass}`}>
+            <span className="status-dot"></span>
+            <span className="status-label">System:</span>
+            <span className="status-value">
+              {currentStatus === 'running' ? 'Online' : currentStatus === 'paused' ? 'Paused' : 'Offline'}
+            </span>
+          </div>
+
+          {liveStatus?.last_update && (
+            <div className="status-item status-item--update">
+              <span className="status-dot"></span>
+              <span className="status-label">Last Update:</span>
+              <span className="status-value">
+                {new Date(new Date(liveStatus.last_update).getTime() + 60 * 60 * 1000).toLocaleTimeString('en-GB', { timeZone: 'Europe/Dublin' })}
+              </span>
+            </div>
+          )}
+
+          {marketStatus && (
+            <div className={`status-item status-item--markets ${marketStatus.is_open ? 'status-item--success' : 'status-item--error'}`}>
+              <span className="status-dot"></span>
+              <span className="status-label">US Markets:</span>
+              <span className="status-value">
+                {marketStatus.is_open ? 'OPEN' : 'CLOSED'}
+              </span>
+            </div>
+          )}
+
+          {marketStatus && (
+            <div className="status-item status-item--time">
+              <span className="status-dot"></span>
+              <span className="status-label">
+                {marketStatus.is_open ? 'Closes in:' : 'Opens in:'}
+              </span>
+              <span className="status-value">
+                {marketStatus.is_open && marketStatus.time_until_close && (
+                  `${marketStatus.time_until_close.hours}h ${marketStatus.time_until_close.minutes}m`
+                )}
+                {!marketStatus.is_open && marketStatus.time_until_open && (
+                  `${marketStatus.time_until_open.days > 0 ? `${marketStatus.time_until_open.days}d ` : ''}${marketStatus.time_until_open.hours}h ${marketStatus.time_until_open.minutes}m`
+                )}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Error Display */}
       {error && (
-        <div className="mb-6 p-4 bg-error-bg border border-error rounded-lg">
-          <div className="flex items-center">
-            <div className="w-2 h-2 bg-error rounded-full mr-3"></div>
-            <span className="text-error font-medium">{error}</span>
-          </div>
+        <div className="error-banner">
+          <div className="error-banner__dot"></div>
+          <span className="error-banner__text">{error}</span>
         </div>
       )}
 
@@ -264,30 +441,66 @@ const LiveTradingPage = () => {
       </div>
 
       <div className="content-grid content-grid-4">
-        <ProfitMetricCard
-          title="Total P&L"
-          value={formatCurrency(metrics?.performance?.total_pnl || demoMetrics.totalProfit)}
-          trend={metrics?.performance?.total_pnl >= 0 ? "up" : "down"}
-          trendValue={metrics?.performance?.total_pnl >= 0 ? "+" : "" + formatPercentage(metrics?.performance?.total_pnl / 100000 * 100 || 12.5)}
-        />
-        <LossMetricCard
-          title="Daily P&L"
-          value={formatCurrency(metrics?.performance?.daily_pnl || demoMetrics.dailyPnL)}
-          trend={metrics?.performance?.daily_pnl >= 0 ? "up" : "down"}
-          trendValue={metrics?.performance?.daily_pnl >= 0 ? "+" : "" + formatPercentage(metrics?.performance?.daily_pnl / 10000 * 100 || 2.4)}
-        />
-        <TradeMetricCard
-          title="Total Trades"
-          value={(metrics?.performance?.total_trades || demoMetrics.totalTrades).toString()}
-          trend="up"
-          trendValue="+15"
-        />
-        <PerformanceMetricCard
-          title="Win Rate"
-          value={formatPercentage(metrics?.performance?.win_rate || demoMetrics.winRate)}
-          trend="up"
-          trendValue="+2.1%"
-        />
+        {/* Total P&L Card */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Total P&L</h3>
+            <ArrowUp size={16} className="metric-card__icon metric-card__icon--trend" />
+          </div>
+          <div className="metric-card__values">
+            <span className={`metric-card__value ${metrics?.performance?.total_pnl >= 0 ? 'metric-card__value--success' : 'metric-card__value--error'}`}>
+              {metrics ? formatCurrency(metrics.performance?.total_pnl) : 'N/A'}
+            </span>
+            <span className={`metric-card__trend ${metrics?.performance?.total_pnl >= 0 ? 'metric-card__trend--success' : 'metric-card__trend--error'}`}>
+              {metrics ? (metrics.performance?.total_pnl >= 0 ? '+' : '') + formatPercentage((metrics.performance?.total_pnl / (metrics.positions?.total_market_value || 1)) * 100) : 'N/A'}
+            </span>
+          </div>
+        </div>
+        {/* Daily P&L Card */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Daily P&L</h3>
+            <ArrowUp size={16} className="metric-card__icon metric-card__icon--trend" />
+          </div>
+          <div className="metric-card__values">
+            <span className={`metric-card__value ${metrics?.performance?.daily_pnl >= 0 ? 'metric-card__value--success' : 'metric-card__value--error'}`}>
+              {metrics ? formatCurrency(metrics.performance?.daily_pnl) : 'N/A'}
+            </span>
+            <span className={`metric-card__trend ${metrics?.performance?.daily_pnl >= 0 ? 'metric-card__trend--success' : 'metric-card__trend--error'}`}>
+              {metrics ? (metrics.performance?.daily_pnl >= 0 ? '+' : '') + formatPercentage((metrics.performance?.daily_pnl / (metrics.positions?.total_market_value || 1)) * 100) : 'N/A'}
+            </span>
+          </div>
+        </div>
+        {/* Total Trades Card */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Total Trades</h3>
+            <ChartBar size={16} className="metric-card__icon metric-card__icon--primary" />
+          </div>
+          <div className="metric-card__values">
+            <span className="metric-card__value metric-card__value--neutral">
+              {metrics ? metrics.performance?.total_trades?.toString() : 'N/A'}
+            </span>
+            <span className="metric-card__trend metric-card__trend--neutral">
+              {metrics ? '+' + (metrics.performance?.total_trades || 0) : 'N/A'}
+            </span>
+          </div>
+        </div>
+        {/* Win Rate Card */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Win Rate</h3>
+            <ArrowUp size={16} className="metric-card__icon metric-card__icon--trend" />
+          </div>
+          <div className="metric-card__values">
+            <span className="metric-card__value metric-card__value--neutral">
+              {metrics ? formatPercentage(metrics.performance?.win_rate) : 'N/A'}
+            </span>
+            <span className="metric-card__trend metric-card__trend--neutral">
+              {metrics ? '+' + formatPercentage(metrics.performance?.win_rate) : 'N/A'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Daily Performance */}
@@ -298,133 +511,100 @@ const LiveTradingPage = () => {
         </p>
       </div>
 
-      <div className="content-grid content-grid-3">
+      <div className="content-grid content-grid-4">
         <div className="metric-card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="caption text-neutral font-medium uppercase tracking-wide">
-              Daily P&L
-            </h3>
-            <ArrowUp size={16} className={metrics?.performance?.daily_pnl >= 0 ? "text-success" : "text-error"} />
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Daily P&L</h3>
+            <ArrowUp size={16} className="metric-card__icon metric-card__icon--trend" />
           </div>
-          <div className="flex items-baseline">
-            <span className={`display-small font-semibold ${metrics?.performance?.daily_pnl >= 0 ? "text-success" : "text-error"}`}>
-              {formatCurrency(metrics?.performance?.daily_pnl || demoMetrics.dailyPnL)}
+          <div className="metric-card__values">
+            <span className={`metric-card__value ${metrics?.performance?.daily_pnl >= 0 ? 'metric-card__value--success' : 'metric-card__value--error'}`}>
+              {metrics ? formatCurrency(metrics.performance?.daily_pnl) : 'N/A'}
             </span>
-            <span className={`ml-2 body-small font-medium ${metrics?.performance?.daily_pnl >= 0 ? "text-success" : "text-error"}`}>
-              {metrics?.performance?.daily_pnl >= 0 ? "+" : ""}{formatPercentage(metrics?.performance?.daily_pnl / 10000 * 100 || 2.4)}
+            <span className={`metric-card__trend ${metrics?.performance?.daily_pnl >= 0 ? 'metric-card__trend--success' : 'metric-card__trend--error'}`}>
+              {metrics ? (metrics.performance?.daily_pnl >= 0 ? '+' : '') + formatPercentage((metrics.performance?.daily_pnl / (metrics.positions?.total_market_value || 1)) * 100) : 'N/A'}
             </span>
           </div>
         </div>
 
         <div className="metric-card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="caption text-neutral font-medium uppercase tracking-wide">
-              Active Positions
-            </h3>
-            <ChartScatter size={16} className="text-primary" />
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Active Positions</h3>
+            <ChartScatter size={16} className="metric-card__icon metric-card__icon--primary" />
           </div>
-          <div className="flex items-baseline">
-            <span className="display-small font-semibold text-gray-900">
-              {metrics?.positions?.total_positions || currentPositions}
+          <div className="metric-card__values">
+            <span className="metric-card__value metric-card__value--neutral">
+              {metrics ? metrics.positions?.total_positions : 'N/A'}
             </span>
-            <span className="ml-2 body-small font-medium text-neutral">
+            <span className="metric-card__trend metric-card__trend--neutral">
               positions
             </span>
           </div>
         </div>
 
         <div className="metric-card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="caption text-neutral font-medium uppercase tracking-wide">
-              Risk Level
-            </h3>
-            <div className="w-3 h-3 bg-success rounded-full"></div>
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Risk Level</h3>
+            <Security size={16} className="metric-card__icon metric-card__icon--primary" />
           </div>
-          <div className="flex items-baseline">
-            <span className="display-small font-semibold text-success">
-              Low
+          <div className="metric-card__values">
+            <span className={`metric-card__value ${riskTextClass}`}>
+              {risk ? (risk.risk_level?.charAt(0).toUpperCase() + risk.risk_level?.slice(1)) : 'N/A'}
             </span>
-            <span className="ml-2 body-small font-medium text-neutral">
+            <span className="metric-card__trend metric-card__trend--neutral">
               Risk
             </span>
           </div>
         </div>
-      </div>
 
-      {/* Coming Soon Features */}
-      <div className="section-header">
-        <h2 className="section-title">Advanced Features</h2>
-        <p className="section-description">
-          Enhanced trading capabilities coming soon
-        </p>
-      </div>
-
-      <div className="content-grid content-grid-4">
-        {features.map((feature, index) => (
-          <FeatureCard
-            key={index}
-            icon={feature.icon}
-            title={feature.title}
-            description={feature.description}
-          />
-        ))}
-      </div>
-
-      {/* System Status */}
-      <div className="section-header">
-        <h2 className="section-title">System Status</h2>
-        <p className="section-description">
-          Current system health and connectivity status
-        </p>
-      </div>
-
-      <div className="content-grid content-grid-2">
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="caption text-neutral font-medium uppercase tracking-wide">
-              Data Feed Status
-            </h3>
-            <div className="w-2 h-2 bg-success rounded-full animate-pulse"></div>
+        {/* Live Feed Box as a metric card with title */}
+        <div className="metric-card metric-card--live-feed">
+          {/* Status indicator dot */}
+          <div className={`status-dot ${isReceivingLiveFeed ? 'status-dot-green' : 'status-dot-red'}`}></div>
+          
+          <div className="metric-card__header">
+            <h3 className="metric-card__caption">Live Feed</h3>
           </div>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <span className="body-small text-neutral">Market Data</span>
-              <span className="body-small text-success">Connected</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="body-small text-neutral">Order Execution</span>
-              <span className="body-small text-success">Active</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="body-small text-neutral">Risk Management</span>
-              <span className="body-small text-success">Enabled</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="caption text-neutral font-medium uppercase tracking-wide">
-              Performance Summary
-            </h3>
-            <ChartBar size={16} className="text-primary" />
-          </div>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <span className="body-small text-neutral">Weekly P&L</span>
-              <span className="body-small text-success">{formatCurrency(demoMetrics.weeklyPnL)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="body-small text-neutral">Monthly P&L</span>
-              <span className="body-small text-success">{formatCurrency(demoMetrics.monthlyPnL)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="body-small text-neutral">Sharpe Ratio</span>
-              <span className="body-small text-success">1.85</span>
-            </div>
+          <div className="live-feed-compact">
+            {error ? (
+              <div className="live-feed-error-compact">
+                <span className="error-icon">⚠️</span>
+                {error}
+              </div>
+            ) : (
+              <div className="live-feed-content-compact">
+                {!processedQuote ? (
+                  <div className="live-feed-empty-compact">
+                    <span className="empty-text">
+                      {liveStatus?.status === 'running' ? "Waiting..." : "No connection"}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="live-feed-quote-compact quote-animate">
+                    <div className="quote-header">
+                      <span className="quote-symbol-compact">{processedQuote.symbol}</span>
+                      <span className="quote-time-compact">{formatTime(processedQuote.timestamp)}</span>
+                    </div>
+                    <div className="quote-prices">
+                      <span className={`quote-price-compact price-${processedQuote.direction || "same"}`}>
+                        {processedQuote.direction === "up" && <span className="arrow-compact">▲</span>}
+                        {processedQuote.direction === "down" && <span className="arrow-compact">▼</span>}
+                        <span className="bid-price">{formatPrice(processedQuote.bidPrice)}</span>
+                        <span className="separator">/</span>
+                        <span className="ask-price">{formatPrice(processedQuote.askPrice)}</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Current Positions */}
+      <PositionManagement positions={positions} loading={loading} />
+
     </div>
   );
 };

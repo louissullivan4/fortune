@@ -1,0 +1,137 @@
+.position-management {
+  width: 100%;
+}
+
+.positions-table {
+  border-collapse: collapse;
+}
+
+.positions-table th {
+  background-color: #f8f9fa;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+}
+
+.positions-table td,
+.positions-table th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.positions-table tbody tr:hover {
+  background-color: #f9fafb;
+  transition: background-color 0.15s ease-in-out;
+}
+
+.positions-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+/* Responsive table */
+@media (max-width: 768px) {
+  .positions-table {
+    font-size: 0.875rem;
+  }
+  
+  .positions-table td,
+  .positions-table th {
+    padding: 0.5rem 0.75rem;
+  }
+  
+  /* Hide less important columns on mobile */
+  .positions-table th:nth-child(5),
+  .positions-table td:nth-child(5),
+  .positions-table th:nth-child(7),
+  .positions-table td:nth-child(7),
+  .positions-table th:nth-child(9),
+  .positions-table td:nth-child(9) {
+    display: none;
+  }
+}
+
+/* Loading animation */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Status indicators */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.status-success {
+  color: #059669;
+}
+
+.status-warning {
+  color: #d97706;
+}
+
+.status-error {
+  color: #dc2626;
+}
+
+.status-info {
+  color: #2563eb;
+}
+
+/* Button styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: all 0.15s ease-in-out;
+  border: none;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background-color: #007d79;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: #006666;
+}
+
+.btn-secondary {
+  background-color: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: #e5e7eb;
+}
+
+.btn-danger {
+  background-color: #dc2626;
+  color: white;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+.btn svg {
+  margin-right: 0.5rem;
+} 

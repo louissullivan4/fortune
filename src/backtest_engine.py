@@ -5,39 +5,47 @@ from src.storage import MongoStorage
 from src.models import BacktestResult, StrategyStatus
 from src.data_feed import HistoricalDataFeed
 from src.strategies.strategy_factory import StrategyFactory
+from src.utils.logger import get_logger
 
 
 class BacktestEngine:
     def __init__(self, storage=None):
         self.storage = storage or MongoStorage()
+        self.logger = get_logger("backtest_engine")
 
     async def run_backtest(self, strategy_id, initial_capital, test_duration_days):
-        from src.utils.logger import get_logger
-        logger = get_logger("backtest_engine")
-        logger.info(f"[run_backtest] Called with strategy_id={strategy_id}, initial_capital={initial_capital}, test_duration_days={test_duration_days}")
+        self.logger.info(f"Starting backtest for strategy_id={strategy_id}, initial_capital={initial_capital}, test_duration_days={test_duration_days}")
+        
         try:
+            # Get strategy from database
             strat_doc = await self.storage.get_strategy(strategy_id)
-            logger.info(f"[run_backtest] Loaded strategy: {strat_doc}")
             if not strat_doc or strat_doc.status == StrategyStatus.DELETED:
-                logger.warning(f"[run_backtest] Strategy not found or deleted: {strategy_id}")
+                self.logger.warning(f"Strategy not found or deleted: {strategy_id}")
                 raise ValueError("Strategy not found or deleted")
+            
+            # Validate strategy configuration
             cfg = strat_doc.config.copy()
             if "risk_per_trade" not in cfg:
-                logger.warning(f"[run_backtest] Missing 'risk_per_trade' in config for strategy_id={strategy_id}")
+                self.logger.warning(f"Missing 'risk_per_trade' in config for strategy_id={strategy_id}")
                 return None
 
+            # Create strategy instance
             risk_pct = cfg.get("risk_per_trade") / 100.0
             strat = StrategyFactory.create(cfg)
 
+            # Run historical data feed
             lookback = timedelta(days=test_duration_days)
             q = asyncio.Queue()
+            
             async def on_tick(t):
                 q.put_nowait(t)
+                
             await HistoricalDataFeed(
                 on_tick=on_tick, lookback=lookback
             ).run([strat.s1, strat.s2])
             q.put_nowait(None)
 
+            # Process backtest
             equity = initial_capital
             eq_curve, trades, last = [], [], None
 
@@ -45,6 +53,7 @@ class BacktestEngine:
                 tick = await q.get()
                 if tick is None:
                     break
+                    
                 sig = strat.on_tick(tick)
                 if sig and sig.signal_type == "ENTRY" and last is None:
                     qty = max(1, int(equity * risk_pct / sig.leg1_price))
@@ -74,6 +83,7 @@ class BacktestEngine:
                     {"timestamp": tick.timestamp.isoformat(), "equity": round(equity, 2)}
                 )
 
+            # Calculate metrics
             total_profit = round(equity - initial_capital, 2)
             return_pct = (
                 round(total_profit / initial_capital * 100, 2) if initial_capital else 0.0
@@ -98,6 +108,7 @@ class BacktestEngine:
                 else 0.0
             )
 
+            # Create and save result
             result = BacktestResult(
                 id=None,
                 strategy_id=strategy_id,
@@ -114,10 +125,11 @@ class BacktestEngine:
                 equity_curve=eq_curve,
                 trades=trades,
             )
-            logger.info(f"[run_backtest] BacktestResult created: {result}")
+            
+            self.logger.info(f"Backtest completed for strategy_id={strategy_id}")
             await self.storage.save_backtest_result(result)
-            logger.info(f"[run_backtest] BacktestResult saved for strategy_id={strategy_id}")
             return result
+            
         except Exception as e:
-            logger.exception(f"[run_backtest] Exception: {e}")
+            self.logger.exception(f"Backtest failed for strategy_id={strategy_id}: {e}")
             raise

@@ -213,7 +213,7 @@
 }
 
 .metric-card {
-  background: var(--gray-10);
+  background: #fff;
   border: 1px solid var(--gray-20);
   border-radius: var(--radius-medium);
   padding: var(--spacing-l);

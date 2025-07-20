@@ -3,6 +3,9 @@ import logging
 import sys
 from typing import Optional
 from colorama import Fore, Back, Style, init
+from dotenv import load_dotenv
+
+load_dotenv()
 
 init(autoreset=True)
 
@@ -70,26 +73,6 @@ class TradingLogger:
         if name:
             return logging.getLogger(f"trading_system.{name}")
         return self._logger
-
-    def debug(self, message: str, logger_name: str = None):
-        """Log debug message."""
-        self.get_logger(logger_name).debug(message)
-
-    def info(self, message: str, logger_name: str = None):
-        """Log info message."""
-        self.get_logger(logger_name).info(message)
-
-    def warning(self, message: str, logger_name: str = None):
-        """Log warning message."""
-        self.get_logger(logger_name).warning(message)
-
-    def error(self, message: str, logger_name: str = None):
-        """Log error message."""
-        self.get_logger(logger_name).error(message)
-
-    def critical(self, message: str, logger_name: str = None):
-        """Log critical message."""
-        self.get_logger(logger_name).critical(message)
 
 
 logger = TradingLogger()

@@ -1,3 +1,5 @@
+import { ConnectionSignal, ChartScatter, Settings } from '@carbon/icons-react';
+
 export const API_ENDPOINTS = {
   ANALYSIS: '/analysis',
   SIGNALS: '/signals',
@@ -32,20 +34,31 @@ export const ROUTES = {
 }
 
 export const NAV_ITEMS = [
-  { path: ROUTES.LIVE, icon: '⚡', text: 'Live Trading' },
-  { path: ROUTES.STRATEGIES, icon: '🎯', text: 'Strategies' },
-  { path: ROUTES.SETTINGS, icon: '⚙️', text: 'Configuration' }
+  { path: ROUTES.LIVE, icon: ConnectionSignal, text: 'Live Trading' },
+  { path: ROUTES.STRATEGIES, icon: ChartScatter, text: 'Strategies' },
+  { path: ROUTES.SETTINGS, icon: Settings, text: 'Settings' },
 ]
 
 // Field tips for CreateStrategyPage
 export const FIELD_TIPS = {
-  algorithm: 'The trading algorithm to use.',
-  symbol1: 'The first asset to trade in the pair.',
-  symbol2: 'The second asset to trade. Should be different from Symbol 1.',
-  window: 'The lookback window (in periods) for calculating statistics like mean and standard deviation.',
-  entry_z: 'The Z-score threshold for entering a trade. Higher values mean fewer, more extreme signals.',
-  exit_z: 'The Z-score threshold for exiting a trade. Lower values mean quicker exits.',
-  risk_per_trade: 'The percentage of your capital to risk on each trade. Must be between 1 and 100.'
+  algorithm: `Select the statistical pairing method to run.  
+Choose based on your preference for model complexity vs. responsiveness.`,
+
+  window: `Number of lookback periods used to compute rolling statistics (e.g. mean, σ).  
+A shorter window (e.g. 20) reacts quickly to regime shifts but may overfit noise;  
+a longer window (e.g. 60) smooths volatility but can lag during trend changes.`,
+
+  entry_z: `Z‑score threshold at which to open a position in the spread.  
+Higher values (e.g. ≥2) capture more extreme divergences—fewer signals but higher conviction;  
+lower values (e.g. 1–1.5) generate earlier entries but risk mean‑reversion failing.`,
+
+  exit_z: `Z‑score threshold to close an open spread trade.  
+Set this below entry_z to lock in gains (e.g. exit at 0 or ±0.5);  
+a value near zero ensures you exit once mean‐reversion completes.`,
+
+  risk_per_trade: `Portion of total equity risked per position, expressed as a percentage.  
+For example, “2” risks 2% of capital on a single paired trade.  
+Keep between 1–5% for balanced drawdown control; never exceed 10%.`
 };
 
 // Algorithm descriptions for CreateStrategyPage

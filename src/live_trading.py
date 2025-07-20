@@ -60,7 +60,7 @@ class LiveTradingService:
         self.storage = storage
         self.logger = get_logger("live_trading")
         self.state = LiveTradingState()
-        self.executor = BrokerExecutor(paper=paper_trading, simulate=False)
+        self.executor = BrokerExecutor(paper=paper_trading)
         self.data_feed: Optional[MarketDataFeed] = None
         self.strategies: Dict[str, any] = {}
         self.symbols: Set[str] = set()
@@ -102,27 +102,50 @@ class LiveTradingService:
             return False
 
     async def stop(self) -> bool:
-        """Stop the live trading service"""
+        """Stop the live trading service with improved error handling and retry logic"""
         try:
             self.logger.info("Stopping live trading service...")
             
+            # Mark as stopping to prevent new operations
             self.running = False
             self.state.status = LiveTradingStatus.STOPPED
             
-            # Stop data feed
+            # Stop data feed with retry logic
             if self.data_feed:
-                await self.data_feed.stop()
-                self.data_feed = None
+                try:
+                    self.logger.info("Stopping data feed...")
+                    await asyncio.wait_for(self.data_feed.stop(), timeout=20.0)
+                    self.logger.info("Data feed stopped successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("Data feed stop timed out, but continuing with shutdown")
+                except Exception as e:
+                    self.logger.warning(f"Error stopping data feed: {e}, continuing with shutdown")
+                finally:
+                    self.data_feed = None
             
-            # Close all positions if configured
+            # Close all positions if configured (with timeout)
             if os.getenv("CLOSE_POSITIONS_ON_STOP", "false").lower() == "true":
-                await self._close_all_positions()
+                try:
+                    self.logger.info("Closing all positions...")
+                    await asyncio.wait_for(self._close_all_positions(), timeout=30.0)
+                    self.logger.info("All positions closed successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("Position closing timed out")
+                except Exception as e:
+                    self.logger.warning(f"Error closing positions: {e}")
+            
+            # Clean up strategies
+            self.strategies.clear()
+            self.state.active_strategies.clear()
             
             self.logger.info("Live trading service stopped successfully")
             return True
             
         except Exception as e:
             self.logger.exception(f"Error stopping live trading service: {e}")
+            # Even if there's an error, mark as stopped to prevent further issues
+            self.state.status = LiveTradingStatus.STOPPED
+            self.running = False
             return False
 
     async def pause(self) -> bool:

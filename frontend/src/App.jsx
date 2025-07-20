@@ -5,7 +5,6 @@ import StrategiesPage from './pages/StrategiesPage'
 import CreateStrategyPage from './pages/CreateStrategyPage'
 import StrategyTabsPage from './pages/StrategyTabsPage';
 import StrategyTestPage from './pages/StrategyTestPage'
-import ConfigPage from './pages/ConfigPage'
 
 function App() {
   return (
@@ -17,7 +16,6 @@ function App() {
         <Route path="/strategies/create" element={<CreateStrategyPage />} />
         <Route path="/strategies/:strategyId/edit" element={<StrategyTabsPage />} />
         <Route path="/strategies/:strategyId/test" element={<StrategyTestPage />} />
-        <Route path="/settings" element={<ConfigPage />} />
       </Routes>
     </Layout>
   )

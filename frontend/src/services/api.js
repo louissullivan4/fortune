@@ -300,5 +300,32 @@ export const getLiveTradingMetrics = async () => {
   }
 }
 
+export const getRiskLevel = async () => {
+  try {
+    const response = await api.get('/live-trading/risk');
+    return response.data;
+  } catch (error) {
+    throw createApiError(handleApiError(error, 'Failed to fetch risk level'));
+  }
+}
+
+export const getMarketStatus = async () => {
+  try {
+    const response = await api.get('/market/market-status');
+    return response.data;
+  } catch (error) {
+    throw createApiError(handleApiError(error, 'Failed to fetch market status'));
+  }
+}
+
+export const getMarketHours = async () => {
+  try {
+    const response = await api.get('/market/market-hours');
+    return response.data;
+  } catch (error) {
+    throw createApiError(handleApiError(error, 'Failed to fetch market hours'));
+  }
+}
+
 // Export the api instance for direct use if needed
 export { api } 

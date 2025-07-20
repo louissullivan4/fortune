@@ -39,23 +39,6 @@ class Trade(BaseModel):
     exit_order: Order
 
 
-class AnalysisRequest(BaseModel):
-    initial_capital: float
-
-
-class AnalysisResponse(BaseModel):
-    initial_capital: float
-    total_profit: float
-    return_pct: float
-    n_trades: int
-    n_entries: int
-    n_exits: int
-    total_buy_actions: int
-    total_sell_actions: int
-    winning_trades: int
-    losing_trades: int
-
-
 class StrategyStatus(str, Enum):
     DRAFT = "draft"
     PUBLISHED = "published"
@@ -108,16 +91,3 @@ class StrategyUpdate(BaseModel):
 class BacktestRequest(BaseModel):
     initial_capital: float
     test_duration_days: int = 30
-
-
-class StrategyConfig(BaseModel):
-    name: str = Field(..., description="Unique name for this strategy instance")
-    algorithm: Literal["pair", "PairTrading", "hedged", "HedgedPairTrading"]
-    symbol1: str
-    symbol2: str
-    window: Optional[int] = None
-    window_beta: Optional[int] = None
-    window_z: Optional[int] = None
-    entry_z: float
-    exit_z: float
-    qty: float

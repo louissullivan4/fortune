@@ -160,7 +160,6 @@ async def run_backtest(
     strategy_id: str = Path(..., description="ID of the strategy"),
     storage: MongoStorage = Depends(get_storage),
 ):
-    logger.info(f"[run_backtest] Called with strategy_id={strategy_id}, initial_capital={backtest_request.initial_capital}, test_duration_days={backtest_request.test_duration_days}")
     engine = BacktestEngine(storage=storage)
     try:
         result = await engine.run_backtest(
@@ -168,16 +167,13 @@ async def run_backtest(
             backtest_request.initial_capital,
             backtest_request.test_duration_days,
         )
-        logger.info(f"[run_backtest] Backtest completed for strategy_id={strategy_id}, result_id={getattr(result, 'id', None)}")
         if result is None:
-            logger.warning(f"[run_backtest] Invalid strategy configuration for strategy_id={strategy_id}")
             raise HTTPException(400, "Invalid strategy configuration")
         return result
     except ValueError as e:
-        logger.error(f"[run_backtest] ValueError: {e}")
         raise HTTPException(404, str(e))
     except Exception as e:
-        logger.exception(f"[run_backtest] Exception: {e}")
+        logger.exception(f"Backtest failed: {e}")
         raise HTTPException(500, f"Backtest failed: {e}")
 
 
@@ -190,17 +186,14 @@ async def get_backtest_history(
     strategy_id: str = Path(..., description="ID of the strategy"),
     storage: MongoStorage = Depends(get_storage),
 ):
-    logger.info(f"[get_backtest_history] Called with strategy_id={strategy_id}")
     strategy = await storage.get_strategy(strategy_id)
     if not strategy:
-        logger.warning(f"[get_backtest_history] Strategy not found: {strategy_id}")
         raise HTTPException(404, f"Strategy with ID '{strategy_id}' not found")
     try:
         results = await storage.get_backtest_results(strategy_id)
-        logger.info(f"[get_backtest_history] Retrieved {len(results)} backtest results for strategy_id={strategy_id}")
         return results
     except Exception as e:
-        logger.exception(f"[get_backtest_history] Exception: {e}")
+        logger.exception(f"Failed to retrieve backtest results: {e}")
         raise HTTPException(500, f"Failed to retrieve backtest results: {e}")
 
 

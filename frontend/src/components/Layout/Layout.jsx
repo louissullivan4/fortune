@@ -1,9 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { 
-  Lightning,
-  ChartScatter,
-  Settings,
   Menu,
   Close
 } from '@carbon/icons-react'
@@ -17,19 +14,6 @@ const Layout = ({ children }) => {
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen)
   const closeSidebar = () => setSidebarOpen(false)
-
-  const getIconForPath = (path) => {
-    switch (path) {
-      case '/live':
-        return Lightning
-      case '/strategies':
-        return ChartScatter
-      case '/settings':
-        return Settings
-      default:
-        return Lightning
-    }
-  }
 
   return (
     <div className="layout">
@@ -52,13 +36,22 @@ const Layout = ({ children }) => {
       {/* Sidebar Navigation */}
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
-          <h1>Fortune Trading</h1>
-          <p>Strategy Dashboard</p>
+          <div className="logo-icon">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+              <rect width="32" height="32" rx="6" fill="#ffffff"/>
+              <path d="M6 22L10 18L14 20L18 14L22 16L26 10" stroke="#000000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="10" cy="18" r="1.5" fill="#000000"/>
+              <circle cx="14" cy="20" r="1.5" fill="#000000"/>
+              <circle cx="18" cy="14" r="1.5" fill="#000000"/>
+              <circle cx="22" cy="16" r="1.5" fill="#000000"/>
+              <circle cx="26" cy="10" r="1.5" fill="#000000"/>
+            </svg>
+          </div>
         </div>
         
         <nav className="sidebar-nav">
           {NAV_ITEMS.map((item, index) => {
-            const IconComponent = getIconForPath(item.path)
+            const IconComponent = item.icon
             const isActive = location.pathname === item.path
             
             return (
@@ -67,18 +60,18 @@ const Layout = ({ children }) => {
                 to={item.path} 
                 className={`sidebar-link ${isActive ? 'active' : ''}`}
                 onClick={closeSidebar}
+                title={item.text}
               >
                 <span className="nav-icon">
-                  <IconComponent size={20} />
+                  <IconComponent size={24} />
                 </span>
-                <span className="nav-text">{item.text}</span>
               </Link>
             )
           })}
         </nav>
 
         {/* Mobile Close Button */}
-        <div className="lg:hidden p-4 border-t border-gray-200">
+        <div className="lg:hidden p-4 border-t border-gray-600">
           <IconButton
             icon={Close}
             onClick={closeSidebar}

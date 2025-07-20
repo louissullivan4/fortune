@@ -6,7 +6,8 @@ import {
   Save,
   ArrowLeft,
   Warning,
-  ChevronRight
+  ChevronRight,
+  CaretDown
 } from '@carbon/icons-react';
 import { createStrategy } from '../services/api';
 import {
@@ -315,7 +316,11 @@ const CreateStrategyPage = () => {
           </Card>
         </div>
         <div className="tips-section-wrapper">
-          <ContentCard title="Strategy Tips">
+          <ContentCard title={
+            <div className="flex items-center justify-between">
+              <span>Strategy Tips</span>
+            </div>
+          }>
             <ul className="tips-list">
               {Object.entries(FIELD_TIPS).map(([field, tip]) => (
                 <li key={field} className="tip-item">
@@ -323,6 +328,9 @@ const CreateStrategyPage = () => {
                 </li>
               ))}
             </ul>
+            <div className="caret-down">
+              <CaretDown size={25} className="text-gray-400" />
+            </div>
           </ContentCard>
           <ContentCard title="Algorithm Types">
             <ul className="tips-list">

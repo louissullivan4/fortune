@@ -1,0 +1,452 @@
+.live-strategy-management {
+  width: 100%;
+}
+
+.strategy-card {
+  transition: all 0.2s ease-in-out;
+}
+
+.strategy-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.status-active {
+  color: #059669;
+  background-color: #d1fae5;
+}
+
+.status-inactive {
+  color: #6b7280;
+  background-color: #f3f4f6;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.btn-sm svg {
+  margin-right: 0.25rem;
+}
+
+/* Success background for active strategy indicator */
+.bg-success-bg {
+  background-color: #d1fae5;
+}
+
+.border-success {
+  border-color: #059669;
+}
+
+.text-success {
+  color: #059669;
+}
+
+/* Error styles */
+.bg-error-bg {
+  background-color: #fee2e2;
+}
+
+.border-error {
+  border-color: #dc2626;
+}
+
+.text-error {
+  color: #dc2626;
+}
+
+/* Neutral colors */
+.text-neutral {
+  color: #6b7280;
+}
+
+.text-neutral-light {
+  color: #9ca3af;
+}
+
+.bg-neutral-light {
+  background-color: #9ca3af;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .strategy-card {
+    margin-bottom: 1rem;
+  }
+  
+  .strategy-card .flex {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .strategy-card .ml-4 {
+    margin-left: 0;
+    margin-top: 1rem;
+  }
+  
+  .strategy-card .flex.items-center.justify-between {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+}
+
+/* Live Feed Styles - New and Improved */
+.live-feed-container {
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+.live-feed-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.live-feed-error {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  padding: 1rem;
+  text-align: center;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.error-icon {
+  font-size: 1.2em;
+}
+
+.live-feed-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  color: #6b7280;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  opacity: 0.6;
+}
+
+.empty-text {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.live-feed-header {
+  display: grid;
+  grid-template-columns: 1.2fr 1.5fr 2fr 1.5fr 1.5fr;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+  border-bottom: 2px solid #e2e8f0;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.live-feed-rows {
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.live-feed-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.5fr 2fr 1.5fr 1.5fr;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background-color 0.15s ease;
+  align-items: center;
+}
+
+.live-feed-row:hover {
+  background-color: #f9fafb;
+}
+
+.live-feed-row:last-child {
+  border-bottom: none;
+}
+
+.quote-symbol {
+  font-weight: 700;
+  color: #1f2937;
+  font-size: 0.95rem;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+}
+
+.quote-price {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.95rem;
+}
+
+.price-up {
+  color: #059669;
+}
+
+.price-down {
+  color: #dc2626;
+}
+
+.price-same {
+  color: #374151;
+}
+
+.arrow {
+  font-size: 0.8em;
+  font-weight: bold;
+}
+
+.quote-bidask {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.9rem;
+}
+
+.quote-bidask .bid {
+  color: #059669;
+  font-weight: 600;
+}
+
+.quote-bidask .ask {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.quote-bidask .separator {
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.quote-size {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.quote-size .bid-size {
+  color: #059669;
+}
+
+.quote-size .ask-size {
+  color: #dc2626;
+}
+
+.quote-size .separator {
+  color: #9ca3af;
+}
+
+.quote-time {
+  color: #6b7280;
+  font-size: 0.85rem;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  text-align: right;
+}
+
+/* Compact Live Feed Styles */
+.live-feed-compact {
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  min-height: 60px;
+  position: relative;
+}
+
+/* Status indicator dot */
+.status-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: blink 1.5s infinite;
+  z-index: 10;
+}
+
+.status-dot-green {
+  background-color: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.status-dot-red {
+  background-color: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0.3;
+  }
+}
+
+.live-feed-content-compact {
+  padding: 0.5rem;
+}
+
+.live-feed-error-compact {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  padding: 0.5rem;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.live-feed-empty-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem 0.5rem;
+  color: #6b7280;
+  text-align: center;
+  min-height: 50px;
+}
+
+.live-feed-quote-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.quote-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.quote-symbol-compact {
+  font-weight: 700;
+  color: #1f2937;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.9rem;
+}
+
+.quote-time-compact {
+  color: #6b7280;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.quote-prices {
+  display: flex;
+  justify-content: center;
+}
+
+.quote-price-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  font-size: 1rem;
+  padding: 0.25rem 0.5rem;
+  background: #f8fafc;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.arrow-compact {
+  font-size: 0.7em;
+  font-weight: bold;
+}
+
+.quote-price-compact .bid-price {
+  color: #059669;
+}
+
+.quote-price-compact .ask-price {
+  color: #dc2626;
+}
+
+.quote-price-compact .separator {
+  color: #6b7280;
+  font-weight: 400;
+  margin: 0 0.1rem;
+}
+
+/* Scrollbar styling */
+.live-feed-content::-webkit-scrollbar,
+.live-feed-rows::-webkit-scrollbar {
+  width: 6px;
+}
+
+.live-feed-content::-webkit-scrollbar-track,
+.live-feed-rows::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.live-feed-content::-webkit-scrollbar-thumb,
+.live-feed-rows::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.live-feed-content::-webkit-scrollbar-thumb:hover,
+.live-feed-rows::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Responsive design for live feed */
+@media (max-width: 768px) {
+  .live-feed-header,
+  .live-feed-row {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    font-size: 0.8rem;
+  }
+  
+  .header-size,
+  .header-time,
+  .quote-size,
+  .quote-time {
+    display: none;
+  }
+  
+  .live-feed-header {
+    font-size: 0.75rem;
+  }
+} 

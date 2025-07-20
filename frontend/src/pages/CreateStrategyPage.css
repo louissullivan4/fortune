@@ -275,6 +275,14 @@
   min-width: 120px;
 }
 
+.caret-down {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .create-strategy-page {

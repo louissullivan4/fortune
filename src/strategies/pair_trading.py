@@ -29,29 +29,16 @@ class PairTrading(StrategyBase):
     def on_tick(self, tick: Tick):
         if tick.symbol == self.s1:
             self.buf1.append(tick.price)
-            self.logger.debug(
-                f"Added {tick.symbol} price {tick.price} to buffer 1 (size: {len(self.buf1)})"
-            )
         elif tick.symbol == self.s2:
             self.buf2.append(tick.price)
-            self.logger.debug(
-                f"Added {tick.symbol} price {tick.price} to buffer 2 (size: {len(self.buf2)})"
-            )
 
         if len(self.buf1) < self.window or len(self.buf2) < self.window:
-            self.logger.debug(
-                f"Buffers not full yet: buf1={len(self.buf1)}/{self.window}, buf2={len(self.buf2)}/{self.window}"
-            )
             return None
 
         spread = np.array(self.buf1) - np.array(self.buf2)
         m, s = spread.mean(), spread.std()
         z = (spread[-1] - m) / s if s else 0
         now = datetime.utcnow()
-
-        self.logger.debug(
-            f"Spread analysis: mean={m:.4f}, std={s:.4f}, z-score={z:.4f}, in_position={self.in_position}"
-        )
 
         if not self.in_position and z > self.entry_z:
             self.in_position = True

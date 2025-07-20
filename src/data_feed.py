@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Callable
 
@@ -18,42 +19,157 @@ load_dotenv()
 class MarketDataFeed:
     def __init__(self, on_tick: Callable[[Tick], None]):
         self.logger = get_logger("data_feed")
+        
+        # Get API credentials from environment variables
+        api_key = os.getenv('ALPACA_API_KEY')
+        secret_key = os.getenv('ALPACA_SECRET_KEY')
+        
+        if not api_key or not secret_key:
+            raise ValueError("ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in environment variables")
+        
+        use_test = os.getenv('ALPACA_USE_TEST', 'true').lower() == 'true'
+        
+        if use_test:
+            url_override = "wss://stream.data.alpaca.markets/v2/test"
+            self.logger.info("Using Alpaca test data stream")
+        else:
+            url_override = "wss://stream.data.alpaca.markets/v2"
+            self.logger.info("Using Alpaca live data stream")
+        
         self._stream = StockDataStream(
-            api_key=os.getenv("APCA_API_KEY"),
-            api_secret=os.getenv("APCA_API_SECRET_KEY"),
-            data_stream_url="wss://stream.data.sandbox.alpaca.markets/v2/iex",
+            api_key=api_key,
+            secret_key=secret_key,
+            url_override=url_override,
         )
         self._on_tick = on_tick
 
     async def run(self, symbols: list[str]):
-        for sym in symbols:
-            self._stream.subscribe_quotes(sym, self._handle_quote)
-            self.logger.info(f"Subscribed to QUOTES for {sym}")
+        self._stream.subscribe_quotes(self._handle_quote, *symbols)
+        self.logger.info(f"Subscribed to QUOTES for {symbols}")
         self._task = asyncio.create_task(self._stream._run_forever())
         self.logger.info("Market data stream started")
 
     async def _handle_quote(self, quote):
-        price = quote.ask_price or quote.bid_price
-        if price is None:
-            return
-        tick = Tick(symbol=quote.symbol, price=price, timestamp=quote.timestamp)
-        await self._on_tick(tick)
+        try:
+            price = quote.ask_price or quote.bid_price
+            if price is None:
+                return
+            tick = Tick(symbol=quote.symbol, price=price, timestamp=quote.timestamp)
+            self.logger.info(f"Received tick: {tick}")
+            await self._on_tick(tick)
+            
+            await self._broadcast_to_websocket_clients(quote)
+            
+        except Exception as e:
+            self.logger.error(f"Error in _handle_quote: {e}")
+
+    async def _broadcast_to_websocket_clients(self, quote):
+        """Broadcast quote data to connected WebSocket clients"""
+        try:
+            from src.routes.live_trading import live_feed_clients
+            
+            if live_feed_clients:
+                quote_data = {
+                    "T": "q",
+                    "S": quote.symbol,
+                    "symbol": quote.symbol,
+                    "bp": quote.bid_price,
+                    "bs": quote.bid_size,
+                    "ap": quote.ask_price,
+                    "as": quote.ask_size,
+                    "t": quote.timestamp.isoformat() if quote.timestamp else None,
+                    "timestamp": quote.timestamp.isoformat() if quote.timestamp else None,
+                }
+                
+                data = {"type": "quote", "data": quote_data}
+                
+                # Broadcast to all connected clients
+                self.logger.info(f"Broadcasting to {len(live_feed_clients)} WebSocket clients: {data}")
+                for ws in list(live_feed_clients):
+                    try:
+                        await ws.send_text(json.dumps(data))
+                    except Exception as e:
+                        self.logger.error(f"Error sending to WebSocket client: {e}")
+                        pass  # Ignore send errors
+        except Exception as e:
+            # Don't let WebSocket broadcast errors affect the main data feed
+            self.logger.debug(f"Error broadcasting to WebSocket clients: {e}")
 
     async def stop(self):
-        if hasattr(self, "_task"):
-            self._task.cancel()
-        await self._stream.stop()
-        self.logger.info("MarketDataFeed stopped")
+        """Stop the market data feed with improved timeout handling and retry logic"""
+        try:
+            self.logger.info("Stopping MarketDataFeed...")
+            
+            # Cancel the main task first
+            if hasattr(self, "_task") and not self._task.done():
+                self._task.cancel()
+                try:
+                    await asyncio.wait_for(self._task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning("Task cancellation timed out, forcing stop")
+                except asyncio.CancelledError:
+                    self.logger.info("Task cancelled successfully")
+            
+            # Stop the Alpaca stream with extended timeout and retry logic
+            if self._stream and hasattr(self._stream, '_loop') and self._stream._loop is not None:
+                try:
+                    # First attempt with extended timeout
+                    self.logger.info("Attempting to stop Alpaca stream...")
+                    await asyncio.wait_for(self._stream.stop(), timeout=15.0)
+                    self.logger.info("Alpaca stream stopped successfully")
+                except asyncio.TimeoutError:
+                    self.logger.warning("First stop attempt timed out, trying alternative method...")
+                    try:
+                        # Alternative: try to close the WebSocket directly
+                        if hasattr(self._stream, '_ws') and self._stream._ws:
+                            await asyncio.wait_for(self._stream._ws.close(), timeout=5.0)
+                            self.logger.info("WebSocket closed via alternative method")
+                        else:
+                            self.logger.warning("No WebSocket found to close")
+                    except Exception as e:
+                        self.logger.warning(f"Alternative stop method failed: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Error stopping Alpaca stream: {e}")
+                    # Don't let stream stop errors prevent the overall stop
+            else:
+                self.logger.info("No active stream to stop")
+            
+            self.logger.info("MarketDataFeed stopped successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error in MarketDataFeed stop: {e}")
+            # Don't raise the exception - we want to stop gracefully even if there are errors
+        finally:
+            # Clean up any remaining references
+            if hasattr(self, "_task"):
+                delattr(self, "_task")
+            self.logger.info("MarketDataFeed cleanup completed")
 
 
 class HistoricalDataFeed:
     def __init__(self, on_tick: Callable[[Tick], None], lookback: timedelta):
         self.logger = get_logger("data_feed.historical")
+        
+        # Get API credentials from environment variables
+        api_key = os.getenv('ALPACA_API_KEY')
+        secret_key = os.getenv('ALPACA_SECRET_KEY')
+        
+        if not api_key or not secret_key:
+            raise ValueError("ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in environment variables")
+        
+        # Determine if we're using test or live environment
+        use_test = os.getenv('ALPACA_USE_TEST', 'true').lower() == 'true'
+        
+        if use_test:
+            self.logger.info("Using Alpaca test historical data")
+        else:
+            self.logger.info("Using Alpaca live historical data")
+        
         self._client = StockHistoricalDataClient(
-            api_key=os.getenv("APCA_API_KEY"),
-            secret_key=os.getenv("APCA_API_SECRET_KEY"),
+            api_key=api_key,
+            secret_key=secret_key,
             use_basic_auth=True,
-            sandbox=True,
+            sandbox=use_test,
         )
         self._on_tick = on_tick
         self.lookback = lookback

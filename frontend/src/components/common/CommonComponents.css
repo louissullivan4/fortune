@@ -60,10 +60,9 @@
 
 /* Metric Card */
 .metric-card {
-  background: var(--gray-100);
+  background: #fff;
   border-radius: var(--radius-large);
   padding: var(--spacing-l);
-  box-shadow: var(--shadow-light);
   border: 1px solid var(--gray-20);
   transition: all var(--transition-normal);
 }

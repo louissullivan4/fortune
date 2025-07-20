@@ -21,19 +21,14 @@ class MongoStorage:
         self.strategies = self.db["strategies"]
         self.backtest_results = self.db["backtest_results"]
         self.logger.info(f"MongoDB storage initialized with URI: {uri}")
-        self.logger.debug("Connected to trading database")
 
     async def save_signal(self, sig: Signal):
-        self.logger.debug(
-            f"Saving signal: {sig.signal_type} for {sig.leg1_symbol}/{sig.leg2_symbol}"
-        )
+        self.logger.debug(f"Saving signal: {sig.signal_type} for {sig.leg1_symbol}/{sig.leg2_symbol}")
         await self.signals.insert_one(sig.dict())
-        self.logger.debug("Signal saved successfully")
 
     async def save_trade(self, trade: Trade):
         self.logger.debug(f"Saving trade for signal: {trade.signal.signal_type}")
         await self.trades.insert_one(trade.dict())
-        self.logger.debug("Trade saved successfully")
 
     async def save_strategy(self, strategy: Strategy) -> str:
         strategy_dict = strategy.model_dump()
@@ -94,29 +89,25 @@ class MongoStorage:
         return False
 
     async def save_backtest_result(self, result: BacktestResult) -> str:
-        self.logger.info(f"[save_backtest_result] Called with result: {result}")
         try:
             result_dict = result.model_dump()
             if result.id:
-                self.logger.info(f"[save_backtest_result] Updating existing result with id={result.id}")
                 await self.backtest_results.replace_one({"_id": result.id}, result_dict)
             else:
                 if "id" in result_dict:
                     del result_dict["id"]
                 db_result = await self.backtest_results.insert_one(result_dict)
                 result.id = str(db_result.inserted_id)
-                self.logger.info(f"[save_backtest_result] Inserted new result with id={result.id}")
             return result.id
         except Exception as e:
-            self.logger.exception(f"[save_backtest_result] Exception: {e}")
+            self.logger.exception(f"Error saving backtest result: {e}")
             raise
 
     async def get_backtest_results(self, strategy_id: str) -> List[BacktestResult]:
-        self.logger.info(f"[get_backtest_results] Called with strategy_id={strategy_id}")
         try:
             strategy = await self.get_strategy(strategy_id)
             if not strategy:
-                self.logger.warning(f"[get_backtest_results] Strategy not found: {strategy_id}")
+                self.logger.warning(f"Strategy not found: {strategy_id}")
                 return []
             cursor = self.backtest_results.find({"strategy_id": strategy_id}).sort(
                 "timestamp", -1
@@ -127,9 +118,8 @@ class MongoStorage:
                 try:
                     results.append(BacktestResult(**doc))
                 except Exception as e:
-                    self.logger.exception(f"[get_backtest_results] Failed to parse BacktestResult: {e}, doc={doc}")
-            self.logger.info(f"[get_backtest_results] Returning {len(results)} results for strategy_id={strategy_id}")
+                    self.logger.exception(f"Failed to parse BacktestResult: {e}")
             return results
         except Exception as e:
-            self.logger.exception(f"[get_backtest_results] Exception: {e}")
+            self.logger.exception(f"Error getting backtest results: {e}")
             raise
