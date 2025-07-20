@@ -1,8 +1,9 @@
-import os
 import logging
+import os
 import sys
 from typing import Optional
-from colorama import Fore, Back, Style, init
+
+from colorama import Back, Fore, Style, init
 from dotenv import load_dotenv
 
 load_dotenv()

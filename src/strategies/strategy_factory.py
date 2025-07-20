@@ -1,4 +1,5 @@
 from typing import Dict, Type
+
 from src.strategies.pair_trading import PairTrading
 
 
@@ -14,7 +15,7 @@ class StrategyFactory:
         StrategyClass = cls._registry.get(alg)
         if not StrategyClass:
             raise ValueError(f"Unknown algorithm '{alg}'")
-        
+
         return StrategyClass(
             symbol1=cfg["symbol1"],
             symbol2=cfg["symbol2"],

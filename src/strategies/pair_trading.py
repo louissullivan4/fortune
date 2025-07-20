@@ -1,7 +1,9 @@
 from collections import deque
 from datetime import datetime
+
 import numpy as np
-from src.models import Tick, Signal
+
+from src.models import Signal, Tick
 from src.strategies.base import StrategyBase
 from src.utils.logger import get_logger
 
@@ -18,7 +20,12 @@ class PairTrading(StrategyBase):
     ):
         self.logger = get_logger("pair_trading")
         self.s1, self.s2 = symbol1, symbol2
-        self.window, self.entry_z, self.exit_z, self.risk_per_trade = window, entry_z, exit_z, risk_per_trade
+        self.window, self.entry_z, self.exit_z, self.risk_per_trade = (
+            window,
+            entry_z,
+            exit_z,
+            risk_per_trade,
+        )
         self.buf1 = deque(maxlen=window)
         self.buf2 = deque(maxlen=window)
         self.in_position = False

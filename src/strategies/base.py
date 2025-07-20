@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from src.models import Tick, Signal
+
+from src.models import Signal, Tick
 
 
 class StrategyBase(ABC):

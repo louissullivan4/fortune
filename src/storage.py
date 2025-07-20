@@ -1,11 +1,13 @@
 import os
-from motor.motor_asyncio import AsyncIOMotorClient
-from src.models import Signal, Trade, Strategy, BacktestResult
-from dotenv import load_dotenv
-from src.utils.logger import get_logger
 from datetime import datetime
 from typing import List, Optional
+
 from bson import ObjectId
+from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
+
+from src.models import BacktestResult, Signal, Strategy, Trade
+from src.utils.logger import get_logger
 
 load_dotenv()
 
@@ -23,7 +25,9 @@ class MongoStorage:
         self.logger.info(f"MongoDB storage initialized with URI: {uri}")
 
     async def save_signal(self, sig: Signal):
-        self.logger.debug(f"Saving signal: {sig.signal_type} for {sig.leg1_symbol}/{sig.leg2_symbol}")
+        self.logger.debug(
+            f"Saving signal: {sig.signal_type} for {sig.leg1_symbol}/{sig.leg2_symbol}"
+        )
         await self.signals.insert_one(sig.dict())
 
     async def save_trade(self, trade: Trade):

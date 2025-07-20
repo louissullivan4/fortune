@@ -1,15 +1,19 @@
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
-from typing import List, Optional
-
-from src.models import Strategy, StrategyStatus
-from src.storage import MongoStorage
-from src.live_trading import LiveTradingService, LiveTradingState, Position
-from src.utils.logger import get_logger
-
 import asyncio
-import json
 import os
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
+
+from src.live_trading import LiveTradingService
+from src.models import StrategyStatus
+from src.storage import MongoStorage
+from src.utils.logger import get_logger
 
 router = APIRouter(tags=["live_trading"])
 logger = get_logger("live_trading_routes")
@@ -25,8 +29,7 @@ async def get_live_trading_service(request: Request) -> LiveTradingService:
         storage = request.app.state.storage
         paper_trading = os.getenv("ALPACA_USE_TEST", "true").lower() == True
         request.app.state.live_trading_service = LiveTradingService(
-            storage=storage, 
-            paper_trading=paper_trading
+            storage=storage, paper_trading=paper_trading
         )
     return request.app.state.live_trading_service
 
@@ -40,7 +43,10 @@ async def start_live_trading(
     try:
         success = await live_service.start()
         if success:
-            return {"message": "Live trading service started successfully", "status": "running"}
+            return {
+                "message": "Live trading service started successfully",
+                "status": "running",
+            }
         else:
             raise HTTPException(500, "Failed to start live trading service")
     except Exception as e:
@@ -55,34 +61,45 @@ async def stop_live_trading(
     """Stop the live trading service with improved error handling"""
     try:
         logger.info("Received stop request for live trading service")
-        
+
         # Check current status
         current_state = await live_service.get_state()
         if current_state.status.value == "stopped":
-            return {"message": "Live trading service is already stopped", "status": "stopped"}
-        
+            return {
+                "message": "Live trading service is already stopped",
+                "status": "stopped",
+            }
+
         # Attempt to stop with timeout
         try:
             success = await asyncio.wait_for(live_service.stop(), timeout=45.0)
         except asyncio.TimeoutError:
-            logger.warning("Stop operation timed out, but service should be marked as stopped")
+            logger.warning(
+                "Stop operation timed out, but service should be marked as stopped"
+            )
             # Even if timeout, the service should be marked as stopped
             success = True
-        
+
         if success:
             logger.info("Live trading service stopped successfully")
-            return {"message": "Live trading service stopped successfully", "status": "stopped"}
+            return {
+                "message": "Live trading service stopped successfully",
+                "status": "stopped",
+            }
         else:
             logger.warning("Stop operation returned False, but continuing gracefully")
-            return {"message": "Live trading service stop completed with warnings", "status": "stopped"}
-            
+            return {
+                "message": "Live trading service stop completed with warnings",
+                "status": "stopped",
+            }
+
     except Exception as e:
         logger.exception(f"Error stopping live trading: {e}")
         # Don't throw 500 error, instead return a warning response
         return {
-            "message": f"Live trading service stop completed with errors: {str(e)}", 
+            "message": f"Live trading service stop completed with errors: {str(e)}",
             "status": "stopped",
-            "warning": True
+            "warning": True,
         }
 
 
@@ -133,7 +150,7 @@ async def get_live_trading_status(
             "total_trades": state.total_trades,
             "last_update": state.last_update.isoformat(),
             "error_message": state.error_message,
-            "paper_trading": live_service.paper_trading
+            "paper_trading": live_service.paper_trading,
         }
     except Exception as e:
         logger.exception(f"Error getting live trading status: {e}")
@@ -159,7 +176,7 @@ async def get_positions(
                 "strategy_id": pos.strategy_id,
                 "strategy_name": pos.strategy_name,
                 "entry_time": pos.entry_time.isoformat(),
-                "last_updated": pos.last_updated.isoformat()
+                "last_updated": pos.last_updated.isoformat(),
             }
             for pos in positions
         ]
@@ -182,7 +199,7 @@ async def get_available_strategies(
                 "description": strategy.description,
                 "status": strategy.status.value,
                 "created_at": strategy.created_at.isoformat(),
-                "updated_at": strategy.updated_at.isoformat()
+                "updated_at": strategy.updated_at.isoformat(),
             }
             for strategy in strategies
         ]
@@ -191,7 +208,9 @@ async def get_available_strategies(
         raise HTTPException(500, f"Failed to get available strategies: {str(e)}")
 
 
-@router.post("/strategies/{strategy_id}/enable", summary="Enable strategy for live trading")
+@router.post(
+    "/strategies/{strategy_id}/enable", summary="Enable strategy for live trading"
+)
 async def enable_strategy(
     strategy_id: str,
     live_service: LiveTradingService = Depends(get_live_trading_service),
@@ -203,17 +222,17 @@ async def enable_strategy(
         strategy = await storage.get_strategy(strategy_id)
         if not strategy:
             raise HTTPException(404, f"Strategy with ID '{strategy_id}' not found")
-        
+
         if strategy.status != StrategyStatus.PUBLISHED:
             raise HTTPException(400, f"Strategy '{strategy.name}' is not published")
-        
+
         # Enable strategy
         success = await live_service.enable_strategy(strategy_id)
         if success:
             return {"message": f"Strategy '{strategy.name}' enabled for live trading"}
         else:
             raise HTTPException(500, f"Failed to enable strategy '{strategy.name}'")
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -221,7 +240,9 @@ async def enable_strategy(
         raise HTTPException(500, f"Failed to enable strategy: {str(e)}")
 
 
-@router.post("/strategies/{strategy_id}/disable", summary="Disable strategy from live trading")
+@router.post(
+    "/strategies/{strategy_id}/disable", summary="Disable strategy from live trading"
+)
 async def disable_strategy(
     strategy_id: str,
     live_service: LiveTradingService = Depends(get_live_trading_service),
@@ -233,14 +254,17 @@ async def disable_strategy(
         strategy = await storage.get_strategy(strategy_id)
         if not strategy:
             raise HTTPException(404, f"Strategy with ID '{strategy_id}' not found")
-        
+
         # Disable strategy
         success = await live_service.disable_strategy(strategy_id)
         if success:
             return {"message": f"Strategy '{strategy.name}' disabled from live trading"}
         else:
-            raise HTTPException(400, f"Strategy '{strategy.name}' is not currently active in live trading")
-            
+            raise HTTPException(
+                400,
+                f"Strategy '{strategy.name}' is not currently active in live trading",
+            )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -256,38 +280,40 @@ async def get_live_trading_metrics(
     try:
         state = await live_service.get_state()
         positions = await live_service.get_positions()
-        
+
         # Calculate additional metrics
         total_positions = len(positions)
         total_market_value = sum(pos.market_value for pos in positions)
         total_unrealized_pnl = sum(pos.unrealized_pnl for pos in positions)
-        
+
         # Calculate win rate from positions (simplified)
         profitable_positions = sum(1 for pos in positions if pos.unrealized_pnl > 0)
-        win_rate = (profitable_positions / total_positions * 100) if total_positions > 0 else 0
-        
+        win_rate = (
+            (profitable_positions / total_positions * 100) if total_positions > 0 else 0
+        )
+
         return {
             "performance": {
                 "total_pnl": state.total_pnl,
                 "daily_pnl": state.daily_pnl,
                 "total_trades": state.total_trades,
-                "win_rate": round(win_rate, 2)
+                "win_rate": round(win_rate, 2),
             },
             "positions": {
                 "total_positions": total_positions,
                 "total_market_value": total_market_value,
-                "total_unrealized_pnl": total_unrealized_pnl
+                "total_unrealized_pnl": total_unrealized_pnl,
             },
             "system": {
                 "status": state.status.value,
                 "active_strategies": len(state.active_strategies),
                 "paper_trading": live_service.paper_trading,
-                "last_update": state.last_update.isoformat()
-            }
+                "last_update": state.last_update.isoformat(),
+            },
         }
     except Exception as e:
         logger.exception(f"Error getting live trading metrics: {e}")
-        raise HTTPException(500, f"Failed to get live trading metrics: {str(e)}") 
+        raise HTTPException(500, f"Failed to get live trading metrics: {str(e)}")
 
 
 @router.get("/risk", summary="Get current risk level")
@@ -313,22 +339,25 @@ async def get_risk_level(
             "risk_level": risk_level,
             "risk_score": round(risk_score, 4),
             "total_market_value": total_market_value,
-            "total_unrealized_pnl": total_unrealized_pnl
+            "total_unrealized_pnl": total_unrealized_pnl,
         }
     except Exception as e:
         logger.exception(f"Error getting risk level: {e}")
-        return {"risk_level": "unknown", "risk_score": None} 
+        return {"risk_level": "unknown", "risk_score": None}
+
 
 # Global set of connected WebSocket clients
 live_feed_clients = set()
+
 
 @router.get("/ws-status", summary="Get WebSocket client status")
 async def get_websocket_status():
     """Get current WebSocket client connection status"""
     return {
         "connected_clients": len(live_feed_clients),
-        "has_clients": len(live_feed_clients) > 0
+        "has_clients": len(live_feed_clients) > 0,
     }
+
 
 @router.websocket("/ws/live-feed")
 async def websocket_live_feed(websocket: WebSocket):
@@ -344,4 +373,6 @@ async def websocket_live_feed(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
     finally:
         live_feed_clients.discard(websocket)
-        logger.info(f"WebSocket client removed. Total clients: {len(live_feed_clients)}") 
+        logger.info(
+            f"WebSocket client removed. Total clients: {len(live_feed_clients)}"
+        )

@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Literal, Optional, List, Dict, Any
 from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field
 
 
 class Tick(BaseModel):

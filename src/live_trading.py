@@ -1,15 +1,15 @@
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
-from dataclasses import dataclass, field
-from enum import Enum
 import os
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Optional, Set
 
-from src.models import Signal, Trade, Strategy, StrategyStatus
-from src.storage import MongoStorage
-from src.execution import BrokerExecutor
-from src.strategies.strategy_factory import StrategyFactory
 from src.data_feed import MarketDataFeed
+from src.execution import BrokerExecutor
+from src.models import Signal, StrategyStatus
+from src.storage import MongoStorage
+from src.strategies.strategy_factory import StrategyFactory
 from src.utils.logger import get_logger
 
 
@@ -71,10 +71,10 @@ class LiveTradingService:
         """Start the live trading service"""
         try:
             self.logger.info("Starting live trading service...")
-            
+
             # Load published strategies
             await self._load_published_strategies()
-            
+
             if not self.strategies:
                 self.logger.warning("No published strategies found for live trading")
                 self.state.status = LiveTradingStatus.ERROR
@@ -83,18 +83,18 @@ class LiveTradingService:
 
             # Initialize data feed
             self.data_feed = MarketDataFeed(on_tick=self._on_tick)
-            
+
             # Start data feed
             symbols_list = list(self.symbols)
             self.logger.info(f"Starting data feed for symbols: {symbols_list}")
             asyncio.create_task(self.data_feed.run(symbols_list))
-            
+
             self.running = True
             self.state.status = LiveTradingStatus.RUNNING
             self.state.error_message = None
             self.logger.info("Live trading service started successfully")
             return True
-            
+
         except Exception as e:
             self.logger.exception(f"Failed to start live trading service: {e}")
             self.state.status = LiveTradingStatus.ERROR
@@ -105,11 +105,11 @@ class LiveTradingService:
         """Stop the live trading service with improved error handling and retry logic"""
         try:
             self.logger.info("Stopping live trading service...")
-            
+
             # Mark as stopping to prevent new operations
             self.running = False
             self.state.status = LiveTradingStatus.STOPPED
-            
+
             # Stop data feed with retry logic
             if self.data_feed:
                 try:
@@ -117,12 +117,16 @@ class LiveTradingService:
                     await asyncio.wait_for(self.data_feed.stop(), timeout=20.0)
                     self.logger.info("Data feed stopped successfully")
                 except asyncio.TimeoutError:
-                    self.logger.warning("Data feed stop timed out, but continuing with shutdown")
+                    self.logger.warning(
+                        "Data feed stop timed out, but continuing with shutdown"
+                    )
                 except Exception as e:
-                    self.logger.warning(f"Error stopping data feed: {e}, continuing with shutdown")
+                    self.logger.warning(
+                        f"Error stopping data feed: {e}, continuing with shutdown"
+                    )
                 finally:
                     self.data_feed = None
-            
+
             # Close all positions if configured (with timeout)
             if os.getenv("CLOSE_POSITIONS_ON_STOP", "false").lower() == "true":
                 try:
@@ -133,14 +137,14 @@ class LiveTradingService:
                     self.logger.warning("Position closing timed out")
                 except Exception as e:
                     self.logger.warning(f"Error closing positions: {e}")
-            
+
             # Clean up strategies
             self.strategies.clear()
             self.state.active_strategies.clear()
-            
+
             self.logger.info("Live trading service stopped successfully")
             return True
-            
+
         except Exception as e:
             self.logger.exception(f"Error stopping live trading service: {e}")
             # Even if there's an error, mark as stopped to prevent further issues
@@ -171,25 +175,25 @@ class LiveTradingService:
             if not strategy:
                 self.logger.error(f"Strategy not found: {strategy_id}")
                 return False
-            
+
             if strategy.status != StrategyStatus.PUBLISHED:
                 self.logger.error(f"Strategy {strategy.name} is not published")
                 return False
-            
+
             # Create strategy instance
             strategy_instance = StrategyFactory.create_from_config(strategy.config)
             self.strategies[strategy_id] = strategy_instance
-            
+
             # Add symbols to tracking
-            if hasattr(strategy_instance, 's1'):
+            if hasattr(strategy_instance, "s1"):
                 self.symbols.add(strategy_instance.s1)
-            if hasattr(strategy_instance, 's2'):
+            if hasattr(strategy_instance, "s2"):
                 self.symbols.add(strategy_instance.s2)
-            
+
             self.state.active_strategies.add(strategy_id)
             self.logger.info(f"Enabled strategy for live trading: {strategy.name}")
             return True
-            
+
         except Exception as e:
             self.logger.exception(f"Error enabling strategy {strategy_id}: {e}")
             return False
@@ -200,14 +204,14 @@ class LiveTradingService:
             if strategy_id in self.strategies:
                 del self.strategies[strategy_id]
                 self.state.active_strategies.discard(strategy_id)
-                
+
                 # Close positions for this strategy
                 await self._close_strategy_positions(strategy_id)
-                
+
                 self.logger.info(f"Disabled strategy from live trading: {strategy_id}")
                 return True
             return False
-            
+
         except Exception as e:
             self.logger.exception(f"Error disabling strategy {strategy_id}: {e}")
             return False
@@ -224,26 +228,30 @@ class LiveTradingService:
     async def _load_published_strategies(self):
         """Load all published strategies from database"""
         try:
-            strategies = await self.storage.get_strategies(StrategyStatus.PUBLISHED.value)
+            strategies = await self.storage.get_strategies(
+                StrategyStatus.PUBLISHED.value
+            )
             self.logger.info(f"Found {len(strategies)} published strategies")
-            
+
             for strategy in strategies:
                 try:
-                    strategy_instance = StrategyFactory.create_from_config(strategy.config)
+                    strategy_instance = StrategyFactory.create_from_config(
+                        strategy.config
+                    )
                     self.strategies[strategy.id] = strategy_instance
                     self.state.active_strategies.add(strategy.id)
-                    
+
                     # Add symbols to tracking
-                    if hasattr(strategy_instance, 's1'):
+                    if hasattr(strategy_instance, "s1"):
                         self.symbols.add(strategy_instance.s1)
-                    if hasattr(strategy_instance, 's2'):
+                    if hasattr(strategy_instance, "s2"):
                         self.symbols.add(strategy_instance.s2)
-                        
+
                     self.logger.info(f"Loaded strategy: {strategy.name}")
-                    
+
                 except Exception as e:
                     self.logger.error(f"Failed to load strategy {strategy.name}: {e}")
-                    
+
         except Exception as e:
             self.logger.exception(f"Error loading published strategies: {e}")
             raise
@@ -252,11 +260,11 @@ class LiveTradingService:
         """Handle incoming market data tick"""
         if not self.running or self.state.status != LiveTradingStatus.RUNNING:
             return
-        
+
         try:
             # Update position prices
             await self._update_position_prices(tick)
-            
+
             # Process strategies
             for strategy_id, strategy in self.strategies.items():
                 try:
@@ -265,31 +273,33 @@ class LiveTradingService:
                         await self._process_signal(signal, strategy_id)
                 except Exception as e:
                     self.logger.error(f"Error processing strategy {strategy_id}: {e}")
-                    
+
         except Exception as e:
             self.logger.exception(f"Error processing tick: {e}")
 
     async def _process_signal(self, signal: Signal, strategy_id: str):
         """Process a trading signal"""
         try:
-            self.logger.info(f"Processing signal: {signal.signal_type} for {signal.leg1_symbol}")
-            
+            self.logger.info(
+                f"Processing signal: {signal.signal_type} for {signal.leg1_symbol}"
+            )
+
             # Save signal to database
             await self.storage.save_signal(signal)
-            
+
             # Execute trade
             trade = self.executor.execute(signal)
             await self.storage.save_trade(trade)
-            
+
             # Update positions
             await self._update_positions_from_signal(signal, strategy_id)
-            
+
             # Update metrics
             self.state.total_trades += 1
             self.state.last_update = datetime.utcnow()
-            
+
             self.logger.info(f"Signal processed successfully: {signal.signal_type}")
-            
+
         except Exception as e:
             self.logger.exception(f"Error processing signal: {e}")
 
@@ -299,35 +309,39 @@ class LiveTradingService:
             strategy = await self.storage.get_strategy(strategy_id)
             if not strategy:
                 return
-            
+
             # Handle entry signals
             if signal.signal_type == "ENTRY":
                 # Create new position
                 position = Position(
                     symbol=signal.leg1_symbol,
-                    quantity=signal.leg1_qty if signal.leg1_action == "BUY" else -signal.leg1_qty,
+                    quantity=signal.leg1_qty
+                    if signal.leg1_action == "BUY"
+                    else -signal.leg1_qty,
                     entry_price=signal.leg1_price,
                     current_price=signal.leg1_price,
                     unrealized_pnl=0.0,
                     strategy_id=strategy_id,
                     strategy_name=strategy.name,
                     entry_time=signal.timestamp,
-                    last_updated=signal.timestamp
+                    last_updated=signal.timestamp,
                 )
                 self.state.positions[signal.leg1_symbol] = position
-                
+
             # Handle exit signals
             elif signal.signal_type == "EXIT":
                 if signal.leg1_symbol in self.state.positions:
                     position = self.state.positions[signal.leg1_symbol]
                     # Calculate realized P&L
-                    realized_pnl = (signal.leg1_price - position.entry_price) * abs(position.quantity)
+                    realized_pnl = (signal.leg1_price - position.entry_price) * abs(
+                        position.quantity
+                    )
                     self.state.total_pnl += realized_pnl
                     self.state.daily_pnl += realized_pnl
-                    
+
                     # Remove position
                     del self.state.positions[signal.leg1_symbol]
-                    
+
         except Exception as e:
             self.logger.exception(f"Error updating positions: {e}")
 
@@ -338,10 +352,12 @@ class LiveTradingService:
                 position = self.state.positions[tick.symbol]
                 position.current_price = tick.price
                 position.last_updated = tick.timestamp
-                
+
                 # Calculate unrealized P&L
-                position.unrealized_pnl = (tick.price - position.entry_price) * position.quantity
-                
+                position.unrealized_pnl = (
+                    tick.price - position.entry_price
+                ) * position.quantity
+
         except Exception as e:
             self.logger.exception(f"Error updating position prices: {e}")
 
@@ -357,13 +373,14 @@ class LiveTradingService:
         """Close all positions for a specific strategy"""
         try:
             positions_to_close = [
-                (symbol, position) for symbol, position in self.state.positions.items()
+                (symbol, position)
+                for symbol, position in self.state.positions.items()
                 if position.strategy_id == strategy_id
             ]
-            
+
             for symbol, position in positions_to_close:
                 await self._close_position(symbol, position)
-                
+
         except Exception as e:
             self.logger.exception(f"Error closing strategy positions: {e}")
 
@@ -382,11 +399,11 @@ class LiveTradingService:
                 leg2_symbol="",
                 leg2_action="",
                 leg2_qty=0,
-                leg2_price=0
+                leg2_price=0,
             )
-            
+
             # Execute exit
             await self._process_signal(signal, position.strategy_id)
-            
+
         except Exception as e:
-            self.logger.exception(f"Error closing position {symbol}: {e}") 
+            self.logger.exception(f"Error closing position {symbol}: {e}")
