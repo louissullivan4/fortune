@@ -14,16 +14,16 @@ class PairTrading(StrategyBase):
         window: int,
         entry_z: float,
         exit_z: float,
-        qty: float,
+        risk_per_trade: float,
     ):
         self.logger = get_logger("pair_trading")
         self.s1, self.s2 = symbol1, symbol2
-        self.window, self.entry_z, self.exit_z, self.qty = window, entry_z, exit_z, qty
+        self.window, self.entry_z, self.exit_z, self.risk_per_trade = window, entry_z, exit_z, risk_per_trade
         self.buf1 = deque(maxlen=window)
         self.buf2 = deque(maxlen=window)
         self.in_position = False
         self.logger.info(
-            f"Pair trading strategy initialized: {symbol1}/{symbol2}, window={window}, entry_z={entry_z}, exit_z={exit_z}, qty={qty}"
+            f"Pair trading strategy initialized: {symbol1}/{symbol2}, window={window}, entry_z={entry_z}, exit_z={exit_z}, risk_per_trade={risk_per_trade}"
         )
 
     def on_tick(self, tick: Tick):
@@ -64,11 +64,11 @@ class PairTrading(StrategyBase):
                 signal_type="ENTRY",
                 leg1_symbol=self.s1,
                 leg1_action="SELL",
-                leg1_qty=self.qty,
+                leg1_qty=self.risk_per_trade,
                 leg1_price=self.buf1[-1],
                 leg2_symbol=self.s2,
                 leg2_action="BUY",
-                leg2_qty=self.qty,
+                leg2_qty=self.risk_per_trade,
                 leg2_price=self.buf2[-1],
             )
         if self.in_position and abs(z) < self.exit_z:
@@ -82,11 +82,11 @@ class PairTrading(StrategyBase):
                 signal_type="EXIT",
                 leg1_symbol=self.s1,
                 leg1_action="BUY",
-                leg1_qty=self.qty,
+                leg1_qty=self.risk_per_trade,
                 leg1_price=self.buf1[-1],
                 leg2_symbol=self.s2,
                 leg2_action="SELL",
-                leg2_qty=self.qty,
+                leg2_qty=self.risk_per_trade,
                 leg2_price=self.buf2[-1],
             )
         return None

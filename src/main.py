@@ -1,69 +1,78 @@
 import os
 import yaml
 import asyncio
-from datetime import timedelta
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
+
 from dotenv import load_dotenv
 
-from src.data_feed import MarketDataFeed, HistoricalDataFeed
-from src.models import Tick, AnalysisRequest, AnalysisResponse
-from src.execution import BrokerExecutor, HistoricalExecutor
+from src.data_feed import MarketDataFeed
+from src.models import Tick
+from src.execution import BrokerExecutor
 from src.storage import MongoStorage
 from src.strategies.strategy_factory import StrategyFactory
 from src.utils.logger import get_logger
+from src.routes.strategy_management import router as strategy_router
+from src.routes.emergency import router as emergency_router
+from src.routes.live_trading import router as live_trading_router
 
 load_dotenv()
 
 with open(os.getenv("CONFIG_PATH", "config.yaml")) as f:
     config = yaml.safe_load(f)
 
-data_mode     = config.get("data_mode", "live").lower()
+data_mode = config.get("data_mode", "live").lower()
 allowed_algos = set(config.get("algorithms", []))
-active_names  = set(config.get("active_strategies", [])) or {s["name"] for s in config["strategies"]}
+active_names = set(config.get("active_strategies", [])) or {
+    s["name"] for s in config["strategies"]
+}
 
 app = FastAPI()
+app.state.strategy_configs = {}
+app.state.strategies = {}
+app.state.symbols = set()
+app.state.paused = False
+app.state.config = config
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
-    allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-logger   = get_logger("main")
-storage  = MongoStorage()
-executor = HistoricalExecutor() if data_mode == "historical" else BrokerExecutor(paper=True)
+logger = get_logger("main")
+storage = MongoStorage()
+executor = BrokerExecutor(paper=True)
 
-strategies = []
-symbols    = set()
+app.state.storage = storage
 
 for sconf in config["strategies"]:
     name = sconf["name"]
     if name not in active_names:
         continue
     strat = StrategyFactory.create(sconf)
-    cls_name = strat.__class__.__name__
-    if cls_name not in allowed_algos:
+    if strat.__class__.__name__ not in allowed_algos:
         continue
-    strategies.append(strat)
-    symbols.update([strat.s1, strat.s2])
 
-if not strategies:
+    app.state.strategy_configs[name] = sconf
+    app.state.strategies[name] = strat
+    app.state.symbols.update([strat.s1, strat.s2])
+
+if not app.state.strategies:
     raise RuntimeError("No strategies selected")
+
 
 @app.on_event("startup")
 async def startup():
     await storage.signals.delete_many({})
     await storage.trades.delete_many({})
-    syms = list(symbols)
-    if data_mode == "historical":
-        h = config["historical"]
-        lookback = timedelta(days=h["days"], hours=h["hours"], minutes=h["minutes"])
-        app.state.feed = HistoricalDataFeed(on_tick=on_tick, lookback=lookback)
-        await app.state.feed.run(syms)
-    else:
+    if data_mode == "live":
+        syms = list(app.state.symbols)
         app.state.feed = MarketDataFeed(on_tick=on_tick)
         asyncio.create_task(app.state.feed.run(syms))
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -71,85 +80,18 @@ async def shutdown():
     if feed and hasattr(feed, "stop"):
         await feed.stop()
 
+
 async def on_tick(tick: Tick):
-    for strat in strategies:
+    if app.state.paused:
+        return
+    for strat in app.state.strategies.values():
         sig = strat.on_tick(tick)
         if sig:
             await storage.save_signal(sig)
             trade = executor.execute(sig)
             await storage.save_trade(trade)
 
-@app.get("/signals")
-async def get_signals():
-    docs = await storage.signals.find().to_list(100)
-    for d in docs:
-        d["_id"] = str(d["_id"])
-    return docs
 
-@app.get("/trades")
-async def get_trades():
-    docs = await storage.trades.find().to_list(100)
-    for d in docs:
-        d["_id"] = str(d["_id"])
-    return docs
-
-@app.post("/analysis", response_model=AnalysisResponse)
-async def analyze_perf(req: AnalysisRequest, strategy: Optional[str] = None):
-    RISK_PER_TRADE = 0.02
-
-    equity = req.initial_capital  
-
-    docs = await storage.signals.find(
-        {} if not strategy else {"strategy": strategy},
-        sort=[("timestamp", 1)]
-    ).to_list(None)
-
-    if not docs:
-        raise HTTPException(404, "No signals found")
-
-    total_profit = n_ent = n_ex = buys = sells = wins = losses = 0
-    last = None
-
-    for sig in docs:
-        if sig["signal_type"] == "ENTRY" and last is None:
-            price = sig["leg1_price"]
-            max_notional = equity * RISK_PER_TRADE
-            qty = int(max_notional / price) or 1
-
-            last = sig.copy()
-            last["leg1_qty"] = qty
-
-            n_ent += 1
-            buys += (sig["leg1_action"] == "BUY") + (sig["leg2_action"] == "BUY")
-            sells += (sig["leg1_action"] == "SELL") + (sig["leg2_action"] == "SELL")
-
-        elif sig["signal_type"] == "EXIT" and last:
-            qty = last["leg1_qty"]
-            p1 = (last["leg1_price"] - sig["leg1_price"]) * qty
-            p2 = (sig["leg2_price"] - last["leg2_price"]) * qty
-            pnl = p1 + p2
-
-            total_profit += pnl
-            n_ex += 1
-            buys += (sig["leg1_action"] == "BUY") + (sig["leg2_action"] == "BUY")
-            sells += (sig["leg1_action"] == "SELL") + (sig["leg2_action"] == "SELL")
-            wins   += (pnl >= 0)
-            losses += (pnl <  0)
-
-            equity += pnl
-
-            last = None
-
-    return AnalysisResponse(
-        initial_capital   = req.initial_capital,
-        total_profit      = round(equity - req.initial_capital, 2),
-        return_pct        = round((equity / req.initial_capital - 1) * 100, 2),
-        n_trades          = n_ex,
-        n_entries         = n_ent,
-        n_exits           = n_ex,
-        total_buy_actions = buys,
-        total_sell_actions= sells,
-        winning_trades    = wins,
-        losing_trades     = losses,
-    )
-
+app.include_router(strategy_router, prefix="/strategies")
+app.include_router(emergency_router, prefix="/emergency")
+app.include_router(live_trading_router, prefix="/live-trading")

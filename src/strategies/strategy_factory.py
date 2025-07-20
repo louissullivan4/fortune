@@ -1,14 +1,11 @@
 from typing import Dict, Type
 from src.strategies.pair_trading import PairTrading
-from src.strategies.hedged_pair_trading import HedgedPairTrading
 
 
 class StrategyFactory:
     _registry: Dict[str, Type] = {
         "pair": PairTrading,
         "PairTrading": PairTrading,
-        "hedged": HedgedPairTrading,
-        "HedgedPairTrading": HedgedPairTrading,
     }
 
     @classmethod
@@ -24,7 +21,7 @@ class StrategyFactory:
                 window=cfg["window"],
                 entry_z=cfg["entry_z"],
                 exit_z=cfg["exit_z"],
-                qty=cfg["qty"],
+                risk_per_trade=cfg["risk_per_trade"],
             )
         else:
             return StrategyClass(
@@ -34,5 +31,14 @@ class StrategyFactory:
                 window_z=cfg["window_z"],
                 entry_z=cfg["entry_z"],
                 exit_z=cfg["exit_z"],
-                qty=cfg["qty"],
+                risk_per_trade=cfg["risk_per_trade"],
             )
+
+    @classmethod
+    def create_from_config(cls, config: dict):
+        """Create strategy instance from strategy config dictionary"""
+        # Extract the algorithm and parameters from the config
+        algorithm = config.get("algorithm", "pair")
+        
+        # Create strategy using the existing create method
+        return cls.create(config)

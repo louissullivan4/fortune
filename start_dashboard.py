@@ -44,7 +44,9 @@ def start_frontend():
         try:
             subprocess.run(["npm", "--version"], capture_output=True, check=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
-            print("❌ npm not found! Make sure Node.js and npm are installed and in your PATH.")
+            print(
+                "❌ npm not found! Make sure Node.js and npm are installed and in your PATH."
+            )
             return None
 
         # Use shell=True for better cross-platform compatibility
@@ -53,7 +55,7 @@ def start_frontend():
             cwd=frontend_dir,
             shell=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
 
         print("✅ Frontend server started on http://localhost:3000")

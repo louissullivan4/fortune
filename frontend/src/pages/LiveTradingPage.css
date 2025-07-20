@@ -1,0 +1,188 @@
+/* Live Trading Page - IBM Carbon Design System */
+
+.live-trading-page {
+  min-height: 100vh;
+}
+
+/* Page Header Enhancements */
+.live-trading-page .page-header {
+  background: var(--gray-100);
+  border-radius: var(--radius-large);
+  padding: var(--spacing-xl);
+  margin-bottom: var(--spacing-xl);
+  border: 1px solid var(--gray-20);
+}
+
+.live-trading-page .page-title {
+  color: var(--gray-90);
+  margin-bottom: var(--spacing-s);
+}
+
+.live-trading-page .page-subtitle {
+  color: var(--gray-70);
+  margin-bottom: 0;
+}
+
+/* Status Indicators */
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spacing-xs) var(--spacing-s);
+  border-radius: var(--radius-small);
+  font-size: var(--caption);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: var(--spacing-s);
+}
+
+.status-success {
+  background: var(--profit-bg);
+  color: var(--success-green);
+}
+
+.status-info {
+  background: var(--primary-accent-bg);
+  color: var(--primary-accent);
+}
+
+.status-warning {
+  background: #fff4e6;
+  color: var(--warning-orange);
+}
+
+.status-error {
+  background: var(--loss-bg);
+  color: var(--danger-red);
+}
+
+/* Metric Cards Enhancements */
+.live-trading-page .metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.live-trading-page .metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary-teal), var(--primary-accent));
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+}
+
+.live-trading-page .metric-card:hover::before {
+  opacity: 1;
+}
+
+/* Performance Cards */
+.performance-card {
+  background: var(--gray-100);
+  border-radius: var(--radius-large);
+  padding: var(--spacing-l);
+  border: 1px solid var(--gray-20);
+  transition: all var(--transition-normal);
+}
+
+.performance-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-medium);
+}
+
+/* System Status Cards */
+.system-status-card {
+  background: var(--gray-100);
+  border-radius: var(--radius-large);
+  padding: var(--spacing-l);
+  border: 1px solid var(--gray-20);
+  transition: all var(--transition-normal);
+}
+
+.system-status-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-medium);
+}
+
+/* Animated Elements */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .live-trading-page .page-header {
+    padding: var(--spacing-l);
+  }
+  
+  .live-trading-page .page-actions {
+    flex-wrap: wrap;
+  }
+  
+  .status-indicator {
+    margin-bottom: var(--spacing-s);
+  }
+}
+
+@media (max-width: 768px) {
+  .live-trading-page .page-header {
+    padding: var(--spacing-m);
+  }
+  
+  .live-trading-page .page-title {
+    font-size: var(--display-small);
+  }
+  
+  .live-trading-page .page-subtitle {
+    font-size: var(--body-small);
+  }
+  
+  .status-indicator {
+    font-size: 0.625rem;
+    padding: var(--spacing-xs);
+  }
+}
+
+/* Loading States */
+.live-trading-page .loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+/* Focus States */
+.live-trading-page .metric-card:focus-within {
+  outline: 2px solid var(--primary-teal);
+  outline-offset: 2px;
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .live-trading-page .metric-card,
+  .live-trading-page .performance-card,
+  .live-trading-page .system-status-card {
+    transition: none;
+  }
+  
+  .animate-pulse {
+    animation: none;
+  }
+} 

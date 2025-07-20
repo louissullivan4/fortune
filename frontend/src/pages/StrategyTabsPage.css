@@ -1,0 +1,32 @@
+.strategy-tabs-page {
+  /* Add any page-level styling if needed */
+}
+
+.tabs-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  border: none;
+}
+
+.tab-btn {
+  padding: 8px 24px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  /*round off corners*/
+  border-radius: 0.5rem 0.5rem 0 0;
+  background: none;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: border-bottom 0.2s, color 0.2s;
+}
+
+.tab-btn.active {
+  border-bottom: 2px solid var(--primary-teal);
+  color: var(--primary-teal);
+}
+
+.tab-content {
+  /* Add any content-level styling if needed */
+} 

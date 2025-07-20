@@ -28,7 +28,7 @@ class BrokerExecutor:
 
     def _place(self, symbol: str, side_str: str, qty: float) -> Order:
         side_enum = OrderSide.BUY if side_str.lower() == "buy" else OrderSide.SELL
-        now = datetime.utcnow()
+        now = datetime.now()
 
         req = MarketOrderRequest(
             symbol=symbol, qty=qty, side=side_enum, time_in_force=TimeInForce.GTC
@@ -40,35 +40,6 @@ class BrokerExecutor:
             self.logger.info(f"Order submitted: {resp.id}")
         else:
             self.logger.info(f"[SIM] Would place {side_enum.name} {qty} of {symbol}")
-
-        return Order(
-            symbol=symbol,
-            side=side_str.lower(),
-            qty=qty,
-            type="market",
-            time_in_force="gtc",
-            timestamp=now,
-        )
-
-
-class HistoricalExecutor:
-    def __init__(self):
-        self.logger = get_logger("execution.historical")
-        self.logger.info("HistoricalExecutor initialized (simulation mode)")
-
-    def execute(self, sig: Signal) -> Trade:
-        self.logger.info(f"[SIM] Executing signal {sig.signal_type}")
-        o1 = self._place(sig.leg1_symbol, sig.leg1_action, sig.leg1_qty)
-        o2 = None
-        if sig.leg2_symbol:
-            o2 = self._place(sig.leg2_symbol, sig.leg2_action, sig.leg2_qty)
-        return Trade(signal=sig, entry_order=o1, exit_order=o2)
-
-    def _place(self, symbol: str, side_str: str, qty: float) -> Order:
-        side_enum = OrderSide.BUY if side_str.lower() == "buy" else OrderSide.SELL
-        now = datetime.utcnow()
-
-        self.logger.info(f"[SIM] Built request for {side_enum.name} {qty} of {symbol}")
 
         return Order(
             symbol=symbol,

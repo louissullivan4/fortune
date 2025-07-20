@@ -61,8 +61,6 @@ class HistoricalDataFeed:
     async def run(self, symbols: list[str]):
         end_dt = datetime.utcnow()
         start_dt = end_dt - self.lookback
-        self.logger.info(f"Fetching bars from {start_dt} to {end_dt}")
-
         req = StockBarsRequest(
             symbol_or_symbols=symbols,
             timeframe=TimeFrame.Minute,
@@ -71,15 +69,12 @@ class HistoricalDataFeed:
             feed="iex",
         )
         bars = self._client.get_stock_bars(req)
-
-        for symbol, bar_list in bars.data.items():
-            self.logger.info(f"Retrieved {len(bar_list)} bars for {symbol}")
-            for bar in bar_list:
-                tick = Tick(symbol=symbol, price=bar.close, timestamp=bar.timestamp)
-                await self._on_tick(tick)
-                await asyncio.sleep(0)
-
-        self.logger.info("HistoricalDataFeed completed")
+        all_bars = [(sym, bar) for sym, bl in bars.data.items() for bar in bl]
+        all_bars.sort(key=lambda x: x[1].timestamp)
+        for sym, bar in all_bars:
+            tick = Tick(symbol=sym, price=bar.close, timestamp=bar.timestamp)
+            await self._on_tick(tick)
+            await asyncio.sleep(0)
 
     async def stop(self):
         self.logger.info("HistoricalDataFeed stopped")
