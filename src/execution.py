@@ -13,17 +13,10 @@ load_dotenv()
 
 
 class BrokerExecutor:
-    def __init__(self, paper: bool = True):
+    def __init__(self, paper_mode: bool = True):
         self.logger = get_logger("execution")
 
-        use_test = os.getenv("ALPACA_USE_TEST", "true").lower() == "true"
-
-        if use_test:
-            mode = "PAPER"
-        else:
-            mode = "LIVE"
-
-        self.logger.info(f"BrokerExecutor initialized in {mode} mode")
+        self.logger.info(f"BrokerExecutor initialized in with paper_mode: {paper_mode}")
 
         api_key = os.getenv("ALPACA_API_KEY")
         secret_key = os.getenv("ALPACA_SECRET_KEY")
@@ -33,16 +26,12 @@ class BrokerExecutor:
                 "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in environment variables"
             )
 
-        if use_test:
-            paper_trading = paper
-        else:
-            paper_trading = False
-            if paper:
-                self.logger.warning(
-                    "Live trading environment detected - forcing paper trading to False for safety"
-                )
+        if not paper_mode:
+            self.logger.warning(
+                "Live trading environment detected - forcing paper trading to False for safety"
+            )
 
-        self.client = TradingClient(api_key, secret_key, paper=paper_trading)
+        self.client = TradingClient(api_key, secret_key, paper=paper_mode)
 
     def execute(self, sig: Signal) -> Trade:
         self.logger.info(f"Executing signal {sig.signal_type}")
@@ -60,12 +49,9 @@ class BrokerExecutor:
             symbol=symbol, qty=qty, side=side_enum, time_in_force=TimeInForce.GTC
         )
 
-        if not self.simulate:
-            self.logger.info(f"Placing order: {side_enum.name} {qty} of {symbol}")
-            resp = self.client.submit_order(order_data=req)
-            self.logger.info(f"Order submitted: {resp.id}")
-        else:
-            self.logger.info(f"[SIM] Would place {side_enum.name} {qty} of {symbol}")
+        self.logger.info(f"Placing order: {side_enum.name} {qty} of {symbol}")
+        resp = self.client.submit_order(order_data=req)
+        self.logger.info(f"Order submitted: {resp.id}")
 
         return Order(
             symbol=symbol,

@@ -6,6 +6,7 @@ import numpy as np
 from src.models import Signal, Tick
 from src.strategies.base import StrategyBase
 from src.utils.logger import get_logger
+from src.utils.market_data import get_latest_price
 
 
 class PairTrading(StrategyBase):
@@ -47,6 +48,12 @@ class PairTrading(StrategyBase):
         z = (spread[-1] - m) / s if s else 0
         now = datetime.utcnow()
 
+        # Calculate quantities based on USD budget and latest prices
+        price1 = get_latest_price(self.s1)
+        price2 = get_latest_price(self.s2)
+        qty1 = max(int(self.risk_per_trade // price1), 1)
+        qty2 = max(int(self.risk_per_trade // price2), 1)
+
         if not self.in_position and z > self.entry_z:
             self.in_position = True
             self.logger.info(
@@ -58,11 +65,11 @@ class PairTrading(StrategyBase):
                 signal_type="ENTRY",
                 leg1_symbol=self.s1,
                 leg1_action="SELL",
-                leg1_qty=self.risk_per_trade,
+                leg1_qty=qty1,
                 leg1_price=self.buf1[-1],
                 leg2_symbol=self.s2,
                 leg2_action="BUY",
-                leg2_qty=self.risk_per_trade,
+                leg2_qty=qty2,
                 leg2_price=self.buf2[-1],
             )
         if self.in_position and abs(z) < self.exit_z:
@@ -76,11 +83,11 @@ class PairTrading(StrategyBase):
                 signal_type="EXIT",
                 leg1_symbol=self.s1,
                 leg1_action="BUY",
-                leg1_qty=self.risk_per_trade,
+                leg1_qty=qty1,
                 leg1_price=self.buf1[-1],
                 leg2_symbol=self.s2,
                 leg2_action="SELL",
-                leg2_qty=self.risk_per_trade,
+                leg2_qty=qty2,
                 leg2_price=self.buf2[-1],
             )
         return None

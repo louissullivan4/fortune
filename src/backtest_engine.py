@@ -21,13 +21,11 @@ class BacktestEngine:
         )
 
         try:
-            # Get strategy from database
             strat_doc = await self.storage.get_strategy(strategy_id)
             if not strat_doc or strat_doc.status == StrategyStatus.DELETED:
                 self.logger.warning(f"Strategy not found or deleted: {strategy_id}")
                 raise ValueError("Strategy not found or deleted")
 
-            # Validate strategy configuration
             cfg = strat_doc.config.copy()
             if "risk_per_trade" not in cfg:
                 self.logger.warning(
@@ -35,23 +33,32 @@ class BacktestEngine:
                 )
                 return None
 
-            # Create strategy instance
-            risk_pct = cfg.get("risk_per_trade") / 100.0
             strat = StrategyFactory.create(cfg)
 
-            # Run historical data feed
+            risk_pct = None
+            if hasattr(strat, 'risk_per_trade'):
+                if strat.risk_per_trade <= 1:
+                    risk_pct = strat.risk_per_trade
+                else:
+                    risk_pct = strat.risk_per_trade / initial_capital
+            else:
+                risk_pct = 0.02
+
             lookback = timedelta(days=test_duration_days)
             q = asyncio.Queue()
 
             async def on_tick(t):
                 q.put_nowait(t)
 
-            await HistoricalDataFeed(on_tick=on_tick, lookback=lookback).run(
-                [strat.s1, strat.s2]
-            )
+            if hasattr(strat, 's1') and hasattr(strat, 's2'):
+                symbols = [strat.s1, strat.s2]
+            elif hasattr(strat, 'symbol'):
+                symbols = [strat.symbol]
+            else:
+                raise ValueError('Strategy must define s1/s2 or symbol')
+            await HistoricalDataFeed(on_tick=on_tick, lookback=lookback).run(symbols)
             q.put_nowait(None)
 
-            # Process backtest
             equity = initial_capital
             eq_curve, trades, last = [], [], None
 
@@ -59,11 +66,11 @@ class BacktestEngine:
                 tick = await q.get()
                 if tick is None:
                     break
+                strat.risk_per_trade = equity * risk_pct
 
                 sig = strat.on_tick(tick)
                 if sig and sig.signal_type == "ENTRY" and last is None:
-                    qty = max(1, int(equity * risk_pct / sig.leg1_price))
-                    last = {**sig.dict(), "leg1_qty": qty, "leg2_qty": qty}
+                    last = sig.dict()
                 elif sig and sig.signal_type == "EXIT" and last:
                     p1 = (
                         (last["leg1_price"] - sig.leg1_price)
@@ -92,7 +99,6 @@ class BacktestEngine:
                     }
                 )
 
-            # Calculate metrics
             total_profit = round(equity - initial_capital, 2)
             return_pct = (
                 round(total_profit / initial_capital * 100, 2)

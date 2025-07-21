@@ -210,12 +210,12 @@ export const updateStrategyYaml = async (strategyId, yamlContent) => {
 }
 
 // Live Trading API functions
-export const startLiveTrading = async () => {
+export const startLiveTrading = async (riskPerTrade) => {
   try {
-    const response = await api.post('/live-trading/start')
-    return response.data
+    const response = await api.post('/live-trading/start', riskPerTrade !== undefined ? { risk_per_trade: riskPerTrade } : {});
+    return response.data;
   } catch (error) {
-    throw createApiError(handleApiError(error, 'Failed to start live trading'))
+    throw createApiError(handleApiError(error, 'Failed to start live trading'));
   }
 }
 

@@ -56,12 +56,20 @@ lower values (e.g. 1–1.5) generate earlier entries but risk mean‑reversion f
 Set this below entry_z to lock in gains (e.g. exit at 0 or ±0.5);  
 a value near zero ensures you exit once mean‐reversion completes.`,
 
-  risk_per_trade: `Portion of total equity risked per position, expressed as a percentage.  
-For example, “2” risks 2% of capital on a single paired trade.  
-Keep between 1–5% for balanced drawdown control; never exceed 10%.`
+  risk_per_trade: `Portion of total equity risked per position.  
+For Pair Trading, this is a percentage of capital (e.g. “2” risks 2% of capital per trade).  
+For Bollinger Reversion, this is a fixed dollar amount (e.g. “1000” risks $1000 per trade).  
+Keep between 1–5% or a modest dollar value for balanced drawdown control.`,
+
+  symbol1: `First asset in the pair. Use the instrument's ticker symbol (e.g. AAPL).`,
+  symbol2: `Second asset in the pair. Must differ from Symbol 1.`,
+  symbol: `Asset to trade. Use the instrument's ticker symbol (e.g. AAPL).`,
+  num_std: `Number of standard deviations for the Bollinger Bands.  
+Typical values are 2.0 (default). Higher values mean fewer trades, lower values mean more trades.`,
 };
 
 // Algorithm descriptions for CreateStrategyPage
 export const ALGORITHM_DESCRIPTIONS = {
   PairTrading: 'exploits the mean-reverting relationship between two correlated assets. It enters trades when their price spread diverges and exits when it converges.',
+  BollingerReversionStrategy: 'trades a single asset using Bollinger Bands. It enters long when price touches the lower band, short at the upper band, and exits when price reverts to the moving average.'
 }; 

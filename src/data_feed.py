@@ -20,7 +20,6 @@ class MarketDataFeed:
     def __init__(self, on_tick: Callable[[Tick], None]):
         self.logger = get_logger("data_feed")
 
-        # Get API credentials from environment variables
         api_key = os.getenv("ALPACA_API_KEY")
         secret_key = os.getenv("ALPACA_SECRET_KEY")
 
@@ -29,13 +28,15 @@ class MarketDataFeed:
                 "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in environment variables"
             )
 
-        use_test = os.getenv("ALPACA_USE_TEST", "true").lower() == "true"
+        use_test = True
+        # use_test = os.getenv("ALPACA_USE_TEST", "true").lower() == "true"
+        self.logger.info(f"use_test: {use_test}")
 
         if use_test:
             url_override = "wss://stream.data.alpaca.markets/v2/test"
             self.logger.info("Using Alpaca test data stream")
         else:
-            url_override = "wss://stream.data.alpaca.markets/v2"
+            url_override = "wss://stream.data.alpaca.markets/v2/iex"
             self.logger.info("Using Alpaca live data stream")
 
         self._stream = StockDataStream(
@@ -57,7 +58,6 @@ class MarketDataFeed:
             if price is None:
                 return
             tick = Tick(symbol=quote.symbol, price=price, timestamp=quote.timestamp)
-            self.logger.info(f"Received tick: {tick}")
             await self._on_tick(tick)
 
             await self._broadcast_to_websocket_clients(quote)
@@ -87,18 +87,13 @@ class MarketDataFeed:
 
                 data = {"type": "quote", "data": quote_data}
 
-                # Broadcast to all connected clients
-                self.logger.info(
-                    f"Broadcasting to {len(live_feed_clients)} WebSocket clients: {data}"
-                )
                 for ws in list(live_feed_clients):
                     try:
                         await ws.send_text(json.dumps(data))
                     except Exception as e:
                         self.logger.error(f"Error sending to WebSocket client: {e}")
-                        pass  # Ignore send errors
+                        pass
         except Exception as e:
-            # Don't let WebSocket broadcast errors affect the main data feed
             self.logger.debug(f"Error broadcasting to WebSocket clients: {e}")
 
     async def stop(self):
@@ -173,19 +168,9 @@ class HistoricalDataFeed:
                 "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in environment variables"
             )
 
-        # Determine if we're using test or live environment
-        use_test = os.getenv("ALPACA_USE_TEST", "true").lower() == "true"
-
-        if use_test:
-            self.logger.info("Using Alpaca test historical data")
-        else:
-            self.logger.info("Using Alpaca live historical data")
-
         self._client = StockHistoricalDataClient(
             api_key=api_key,
             secret_key=secret_key,
-            use_basic_auth=True,
-            sandbox=use_test,
         )
         self._on_tick = on_tick
         self.lookback = lookback

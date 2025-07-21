@@ -8,6 +8,7 @@ from fastapi import (
     Request,
     WebSocket,
     WebSocketDisconnect,
+    Body,
 )
 
 from src.live_trading import LiveTradingService
@@ -27,9 +28,9 @@ async def get_live_trading_service(request: Request) -> LiveTradingService:
     if not hasattr(request.app.state, "live_trading_service"):
         # Initialize live trading service if not exists
         storage = request.app.state.storage
-        paper_trading = os.getenv("ALPACA_USE_TEST", "true").lower() == True
+        paper_mode = True
         request.app.state.live_trading_service = LiveTradingService(
-            storage=storage, paper_trading=paper_trading
+            storage=storage, paper_mode=paper_mode
         )
     return request.app.state.live_trading_service
 
@@ -38,10 +39,11 @@ async def get_live_trading_service(request: Request) -> LiveTradingService:
 async def start_live_trading(
     storage: MongoStorage = Depends(get_storage),
     live_service: LiveTradingService = Depends(get_live_trading_service),
+    risk_per_trade: float = Body(None, embed=True, description="USD budget per trade for this session"),
 ):
-    """Start the live trading service with all published strategies"""
+    """Start the live trading service with all published strategies, allowing session risk_per_trade override"""
     try:
-        success = await live_service.start()
+        success = await live_service.start(risk_per_trade=risk_per_trade)
         if success:
             return {
                 "message": "Live trading service started successfully",
@@ -150,7 +152,7 @@ async def get_live_trading_status(
             "total_trades": state.total_trades,
             "last_update": state.last_update.isoformat(),
             "error_message": state.error_message,
-            "paper_trading": live_service.paper_trading,
+            "paper_mode": live_service.paper_mode,
         }
     except Exception as e:
         logger.exception(f"Error getting live trading status: {e}")
@@ -307,7 +309,7 @@ async def get_live_trading_metrics(
             "system": {
                 "status": state.status.value,
                 "active_strategies": len(state.active_strategies),
-                "paper_trading": live_service.paper_trading,
+                "paper_mode": live_service.paper_mode,
                 "last_update": state.last_update.isoformat(),
             },
         }

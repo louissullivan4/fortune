@@ -36,6 +36,33 @@ import PositionManagement from '../components/PositionManagement/PositionManagem
 import '../components/common/CommonComponents.css';
 import './LiveTradingPage.css';
 
+// Add a simple error boundary for debugging
+class DebugErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo);
+    this.setState({ errorInfo });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ color: 'red', padding: 16 }}>
+          <h2>Something went wrong in LiveTradingPage.</h2>
+          <pre>{this.state.error && this.state.error.toString()}</pre>
+          <pre>{this.state.errorInfo && this.state.errorInfo.componentStack}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const LiveTradingPage = () => {
   const [liveStatus, setLiveStatus] = useState(null);
   const [positions, setPositions] = useState([]);
@@ -45,6 +72,7 @@ const LiveTradingPage = () => {
   const [error, setError] = useState(null);
   const [marketStatus, setMarketStatus] = useState(null);
   const [isStopping, setIsStopping] = useState(false);
+  const [riskPerTrade, setRiskPerTrade] = useState(10); // Default to $10 per trade
   
   // Live feed states
   const [currentQuote, setCurrentQuote] = useState(null);
@@ -85,15 +113,34 @@ const LiveTradingPage = () => {
     }
   };
 
+  // Debug: Log all major state changes
+  useEffect(() => {
+    console.debug('LiveTradingPage: liveStatus changed', liveStatus);
+  }, [liveStatus]);
+  useEffect(() => {
+    console.debug('LiveTradingPage: positions changed', positions);
+  }, [positions]);
+  useEffect(() => {
+    console.debug('LiveTradingPage: metrics changed', metrics);
+  }, [metrics]);
+  useEffect(() => {
+    console.debug('LiveTradingPage: risk changed', risk);
+  }, [risk]);
+  useEffect(() => {
+    console.debug('LiveTradingPage: error changed', error);
+  }, [error]);
+
   useEffect(() => {
     if (!liveStatus || liveStatus.status !== 'running') {
       setCurrentQuote(null);
       setError(null);
       setIsConnected(false);
       setLastUpdateTime(null);
+      console.debug('WebSocket: Not running, skipping connection');
       return;
     }
 
+    console.debug('WebSocket: Connecting to', WS_URL);
     wsRef.current = new window.WebSocket(WS_URL);
     
     wsRef.current.onopen = () => {
@@ -105,6 +152,7 @@ const LiveTradingPage = () => {
     wsRef.current.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        console.debug('WebSocket message:', msg);
         if (msg.type === "quote" && msg.data) {
           setCurrentQuote(msg.data);
           setLastUpdateTime(Date.now());
@@ -133,6 +181,7 @@ const LiveTradingPage = () => {
 
     return () => {
       if (wsRef.current) {
+        console.debug('WebSocket: Closing connection on unmount');
         wsRef.current.close(1000, 'Component unmounting');
         wsRef.current = null;
       }
@@ -188,7 +237,7 @@ const LiveTradingPage = () => {
   const handleStart = async () => {
     setLoading(true);
     try {
-      await startLiveTrading();
+      await startLiveTrading(riskPerTrade);
       await fetchLiveData();
     } catch (err) {
       setError(err.message);
@@ -332,7 +381,7 @@ const LiveTradingPage = () => {
       : 'risk-text--neutral';
 
   return (
-    <div className="live-trading-page">
+    <DebugErrorBoundary>
       {/* Page Header */}
       <div className="page-header">
         <div className="header-content">
@@ -343,9 +392,30 @@ const LiveTradingPage = () => {
           <div className="header-right">
             <div className="control-buttons">
               {currentStatus === 'stopped' && (
+                <div className="control-buttons-container">
                 <button onClick={handleStart} disabled={loading} className="btn btn-primary">
                   Connect to market...
                 </button>
+                  <div className="risk-per-trade-group status-item status-item--right">
+                    <label htmlFor="risk-per-trade-input" className="risk-per-trade-label">
+                      Invest per trade:
+                    </label>
+                    <div className="risk-per-trade-input-wrapper">
+                      <span className="risk-per-trade-prefix">$</span>
+                      <input
+                        id="risk-per-trade-input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={riskPerTrade}
+                        onChange={e => setRiskPerTrade(Number(e.target.value))}
+                        className="risk-per-trade-input"
+                        placeholder="Amount"
+                        title="USD budget per trade"
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
               {currentStatus === 'running' && (
                 <>
@@ -396,7 +466,7 @@ const LiveTradingPage = () => {
           )}
 
           {marketStatus && (
-            <div className={`status-item status-item--markets ${marketStatus.is_open ? 'status-item--success' : 'status-item--error'}`}>
+            <div className={`status-item status-item--markets ${marketStatus.is_open ? 'status-item--success' : 'status-item--error'}`}> 
               <span className="status-dot"></span>
               <span className="status-label">US Markets:</span>
               <span className="status-value">
@@ -605,7 +675,7 @@ const LiveTradingPage = () => {
       {/* Current Positions */}
       <PositionManagement positions={positions} loading={loading} />
 
-    </div>
+    </DebugErrorBoundary>
   );
 };
 

@@ -56,24 +56,24 @@ class LiveTradingState:
 
 
 class LiveTradingService:
-    def __init__(self, storage: MongoStorage, paper_trading: bool = True):
+    def __init__(self, storage: MongoStorage, paper_mode: bool = True):
         self.storage = storage
         self.logger = get_logger("live_trading")
         self.state = LiveTradingState()
-        self.executor = BrokerExecutor(paper=paper_trading)
+        self.executor = BrokerExecutor(paper_mode=paper_mode)
         self.data_feed: Optional[MarketDataFeed] = None
         self.strategies: Dict[str, any] = {}
         self.symbols: Set[str] = set()
         self.running = False
-        self.paper_trading = paper_trading
+        self.paper_mode = paper_mode
 
-    async def start(self) -> bool:
-        """Start the live trading service"""
+    async def start(self, risk_per_trade: float = None) -> bool:
+        """Start the live trading service, optionally overriding risk_per_trade for this session"""
         try:
             self.logger.info("Starting live trading service...")
 
             # Load published strategies
-            await self._load_published_strategies()
+            await self._load_published_strategies(risk_per_trade=risk_per_trade)
 
             if not self.strategies:
                 self.logger.warning("No published strategies found for live trading")
@@ -225,8 +225,8 @@ class LiveTradingService:
         """Get all current positions"""
         return list(self.state.positions.values())
 
-    async def _load_published_strategies(self):
-        """Load all published strategies from database"""
+    async def _load_published_strategies(self, risk_per_trade: float = None):
+        """Load all published strategies from database, optionally overriding risk_per_trade"""
         try:
             strategies = await self.storage.get_strategies(
                 StrategyStatus.PUBLISHED.value
@@ -235,9 +235,10 @@ class LiveTradingService:
 
             for strategy in strategies:
                 try:
-                    strategy_instance = StrategyFactory.create_from_config(
-                        strategy.config
-                    )
+                    config = dict(strategy.config)
+                    if risk_per_trade is not None:
+                        config["risk_per_trade"] = risk_per_trade
+                    strategy_instance = StrategyFactory.create_from_config(config)
                     self.strategies[strategy.id] = strategy_instance
                     self.state.active_strategies.add(strategy.id)
 

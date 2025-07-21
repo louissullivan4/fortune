@@ -3,7 +3,8 @@ import {
   Edit,
   Save,
   Play,
-  Calendar
+  Calendar,
+  Warning
 } from '@carbon/icons-react';
 import {
   getStrategy,
@@ -18,6 +19,51 @@ import Button from '../components/common/Button';
 import Card from '../components/common/Card';
 import './StrategyEditorPage.css';
 
+const ALGO_FIELDS = {
+  PairTrading: [
+    { key: 'symbol1', label: 'Symbol 1', type: 'text', required: true, placeholder: 'e.g., AAPL' },
+    { key: 'symbol2', label: 'Symbol 2', type: 'text', required: true, placeholder: 'e.g., MSFT' },
+    { key: 'window', label: 'Window', type: 'number', required: true, min: 10 },
+    { key: 'entry_z', label: 'Entry Z-Score', type: 'number', required: true, step: 0.1, min: 0 },
+    { key: 'exit_z', label: 'Exit Z-Score', type: 'number', required: true, step: 0.1, min: 0 },
+    { key: 'risk_per_trade', label: 'Risk per Trade (%)', type: 'number', required: true, min: 1, max: 100 },
+  ],
+  BollingerReversionStrategy: [
+    { key: 'symbol', label: 'Symbol', type: 'text', required: true, placeholder: 'e.g., AAPL' },
+    { key: 'window', label: 'Window', type: 'number', required: true, min: 10 },
+    { key: 'num_std', label: 'Num Std Dev', type: 'number', required: true, step: 0.1, min: 0.1 },
+    { key: 'risk_per_trade', label: 'Risk per Trade ($)', type: 'number', required: true, min: 1 },
+  ],
+};
+
+const ALGO_OPTIONS = [
+  { value: 'PairTrading', label: 'Pair Trading' },
+  { value: 'BollingerReversionStrategy', label: 'Bollinger Reversion' },
+];
+
+function getDefaultConfig(algo) {
+  if (algo === 'PairTrading') {
+    return {
+      algorithm: 'PairTrading',
+      symbol1: '',
+      symbol2: '',
+      window: 60,
+      entry_z: 2.5,
+      exit_z: 0.25,
+      risk_per_trade: 20,
+    };
+  } else if (algo === 'BollingerReversionStrategy') {
+    return {
+      algorithm: 'BollingerReversionStrategy',
+      symbol: '',
+      window: 20,
+      num_std: 2.0,
+      risk_per_trade: 1000,
+    };
+  }
+  return {};
+}
+
 const StrategyEditorTab = ({ strategyId }) => {
   if (!strategyId) return <div style={{color: 'red'}}>No strategyId provided</div>;
   const [strategy, setStrategy] = useState(null);
@@ -26,6 +72,7 @@ const StrategyEditorTab = ({ strategyId }) => {
   const [saving, setSaving]      = useState(false);
   const [error, setError]        = useState(null);
   const [success, setSuccess]    = useState(null);
+  const [validationErrors, setValidationErrors] = useState({});
 
   useEffect(() => {
     fetchStrategy();
@@ -67,6 +114,13 @@ const StrategyEditorTab = ({ strategyId }) => {
       config: { ...fd.config, [key]: val }
     }));
 
+  const handleAlgorithmChange = (algo) => {
+    setFormData(fd => ({
+      ...fd,
+      config: getDefaultConfig(algo)
+    }));
+  };
+
   if (loading || !formData) return <LoadingSpinner message="Loading..." />;
 
   return (
@@ -101,82 +155,38 @@ const StrategyEditorTab = ({ strategyId }) => {
           <select
             id="algorithm"
             value={formData.config.algorithm}
-            onChange={e => handleConfigChange('algorithm', e.target.value)}
+            onChange={e => handleAlgorithmChange(e.target.value)}
             className="form-select"
           >
-            <option value="PairTrading">Pair Trading</option>
-            <option value="HedgedPairTrading">Hedged Pair Trading</option>
+            {ALGO_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
         </div>
-        <div className="form-group">
-          <label htmlFor="symbol1" className="form-label">Symbol 1</label>
-          <input
-            type="text"
-            id="symbol1"
-            value={formData.config.symbol1}
-            onChange={e => handleConfigChange('symbol1', e.target.value)}
-            className="form-input"
-            placeholder="e.g., AAPL"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="symbol2" className="form-label">Symbol 2</label>
-          <input
-            type="text"
-            id="symbol2"
-            value={formData.config.symbol2}
-            onChange={e => handleConfigChange('symbol2', e.target.value)}
-            className="form-input"
-            placeholder="e.g., MSFT"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="window" className="form-label">Window</label>
-          <input
-            type="number"
-            id="window"
-            value={formData.config.window}
-            onChange={e => handleConfigChange('window', parseInt(e.target.value, 10) || 0)}
-            className="form-input"
-            min="10"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="entry_z" className="form-label">Entry Z-Score</label>
-          <input
-            type="number"
-            id="entry_z"
-            value={formData.config.entry_z}
-            onChange={e => handleConfigChange('entry_z', parseFloat(e.target.value) || 0)}
-            className="form-input"
-            step="0.1"
-            min="0"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="exit_z" className="form-label">Exit Z-Score</label>
-          <input
-            type="number"
-            id="exit_z"
-            value={formData.config.exit_z}
-            onChange={e => handleConfigChange('exit_z', parseFloat(e.target.value) || 0)}
-            className="form-input"
-            step="0.1"
-            min="0"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="risk_per_trade" className="form-label">Risk per Trade (%)</label>
-          <input
-            type="number"
-            id="risk_per_trade"
-            value={formData.config.risk_per_trade}
-            onChange={e => handleConfigChange('risk_per_trade', parseInt(e.target.value, 10) || 0)}
-            className="form-input"
-            min="1"
-            max="100"
-          />
-        </div>
+        {ALGO_FIELDS[formData.config.algorithm].map(field => (
+          <div className="form-group" key={field.key}>
+            <label htmlFor={field.key} className="form-label">
+              {field.label}{field.required && <span className="required">*</span>}
+            </label>
+            <input
+              type={field.type}
+              id={field.key}
+              value={formData.config[field.key] ?? ''}
+              onChange={e => handleConfigChange(field.key, field.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value)}
+              className={`form-input ${validationErrors[field.key] ? 'error' : ''}`}
+              placeholder={field.placeholder}
+              min={field.min}
+              max={field.max}
+              step={field.step}
+            />
+            {validationErrors[field.key] && (
+              <div className="error-message">
+                <Warning size={12} className="mr-1" />
+                {validationErrors[field.key]}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
       <div className="form-actions">
         <Button onClick={handleSave} disabled={saving}>

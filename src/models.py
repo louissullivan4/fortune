@@ -37,7 +37,7 @@ class Order(BaseModel):
 class Trade(BaseModel):
     signal: Signal
     entry_order: Order
-    exit_order: Order
+    exit_order: Optional[Order] = None
 
 
 class StrategyStatus(str, Enum):
