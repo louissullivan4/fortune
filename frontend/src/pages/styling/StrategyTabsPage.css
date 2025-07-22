@@ -19,7 +19,9 @@
   font-weight: 600;
   font-size: 16px;
   cursor: pointer;
-  transition: border-bottom 0.2s, color 0.2s;
+  transition:
+    border-bottom 0.2s,
+    color 0.2s;
 }
 
 .tab-btn.active {
@@ -29,4 +31,4 @@
 
 .tab-content {
   /* Add any content-level styling if needed */
-} 
+}

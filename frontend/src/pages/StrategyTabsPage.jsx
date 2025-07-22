@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ChevronRight } from '@carbon/icons-react';
-import StrategyEditorTab from './StrategyEditorPage';
-import StrategyTestTab from './StrategyTestPage';
-import './StrategyEditorPage.css';
-import './StrategyTestPage.css';
-import './StrategyTabsPage.css';
+import React, { useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { ChevronRight } from "@carbon/icons-react";
+import StrategyEditorTab from "./StrategyEditorPage";
+import StrategyTestTab from "./StrategyTestPage";
+import "./styling/StrategyEditorPage.css";
+import "./styling/StrategyTestPage.css";
+import "./styling/StrategyTabsPage.css";
 
 const StrategyTabsPage = () => {
   const { strategyId } = useParams();
-  const [activeTab, setActiveTab] = useState('editor');
+  const [activeTab, setActiveTab] = useState("editor");
 
   return (
     <div className="strategy-tabs-page">
@@ -28,20 +28,20 @@ const StrategyTabsPage = () => {
       </nav>
       <div className="tabs-header">
         <button
-          className={`tab-btn${activeTab === 'editor' ? ' active' : ''}`}
-          onClick={() => setActiveTab('editor')}
+          className={`tab-btn${activeTab === "editor" ? " active" : ""}`}
+          onClick={() => setActiveTab("editor")}
         >
           Editor
         </button>
         <button
-          className={`tab-btn${activeTab === 'test' ? ' active' : ''}`}
-          onClick={() => setActiveTab('test')}
+          className={`tab-btn${activeTab === "test" ? " active" : ""}`}
+          onClick={() => setActiveTab("test")}
         >
           Test
         </button>
       </div>
       <div className="tab-content">
-        {activeTab === 'editor' ? (
+        {activeTab === "editor" ? (
           <StrategyEditorTab key="editor" strategyId={strategyId} />
         ) : (
           <StrategyTestTab key="test" strategyId={strategyId} />
@@ -51,4 +51,4 @@ const StrategyTabsPage = () => {
   );
 };
 
-export default StrategyTabsPage; 
+export default StrategyTabsPage;

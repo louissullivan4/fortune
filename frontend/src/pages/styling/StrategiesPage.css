@@ -448,7 +448,7 @@
   .strategies-table-container {
     overflow-x: auto;
   }
-  
+
   .strategies-table {
     min-width: 800px;
   }
@@ -505,20 +505,20 @@
     margin: 0 calc(-1 * var(--spacing-m));
     border-radius: 0;
   }
-  
+
   .strategies-table {
     min-width: 600px;
   }
-  
+
   .strategies-table th,
   .strategies-table td {
     padding: var(--spacing-s);
   }
-  
+
   .strategy-name {
     font-size: var(--body-small);
   }
-  
+
   .strategy-description {
     font-size: var(--caption);
   }
@@ -544,17 +544,17 @@
   .filter-tab {
     justify-content: center;
   }
-  
+
   .strategies-table-container {
     margin: 0 calc(-1 * var(--spacing-s));
   }
-  
+
   .strategies-table {
     min-width: 500px;
   }
-  
+
   .strategies-table th,
   .strategies-table td {
     padding: var(--spacing-xs);
   }
-} 
+}

@@ -35,12 +35,12 @@
   .positions-table {
     font-size: 0.875rem;
   }
-  
+
   .positions-table td,
   .positions-table th {
     padding: 0.5rem 0.75rem;
   }
-  
+
   /* Hide less important columns on mobile */
   .positions-table th:nth-child(5),
   .positions-table td:nth-child(5),
@@ -54,8 +54,12 @@
 
 /* Loading animation */
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .animate-spin {
@@ -134,4 +138,4 @@
 
 .btn svg {
   margin-right: 0.5rem;
-} 
+}

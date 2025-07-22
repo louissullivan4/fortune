@@ -130,7 +130,7 @@
 }
 
 .form-textarea.yaml-textarea {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
   font-size: var(--caption);
   line-height: 1.5;
   min-height: 300px;
@@ -307,8 +307,12 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .inline-spinner {
@@ -386,7 +390,7 @@
   .results-grid {
     grid-template-columns: 1fr;
   }
-} 
+}
 
 .toast-notification {
   position: fixed;
@@ -397,29 +401,41 @@
   z-index: 9999;
   padding: 16px 24px;
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   font-size: 1rem;
   font-weight: 500;
   color: var(--success-green, #198754);
   background: var(--profit-bg, #e6fff2);
   border: 1px solid var(--success-green, #198754);
   opacity: 1;
-  animation: toast-fade-in 0.3s, toast-fade-out 0.3s 1.7s forwards;
+  animation:
+    toast-fade-in 0.3s,
+    toast-fade-out 0.3s 1.7s forwards;
   display: flex;
   align-items: center;
 }
 
 @keyframes toast-fade-in {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 @keyframes toast-fade-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
 .toast-success {
   color: var(--success-green, #198754);
   background: var(--profit-bg, #e6fff2);
   border: 1px solid var(--success-green, #198754);
-} 
+}

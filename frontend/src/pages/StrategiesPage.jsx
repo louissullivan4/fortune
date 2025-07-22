@@ -1,26 +1,31 @@
-import React, { useState, useEffect, useRef } from 'react';
-import ReactDOM from 'react-dom';
-import { Link, useNavigate } from 'react-router-dom';
-import { 
+import React, { useState, useEffect, useRef } from "react";
+import ReactDOM from "react-dom";
+import { Link, useNavigate } from "react-router-dom";
+import {
   Add,
   Edit,
   Play,
   Upload,
   Download,
   TrashCan,
-  Filter,
-  Search,
-  Document,
-  Calendar,
-  ChartLine,
   OverflowMenuVertical,
   ChevronRight,
-  Home
-} from '@carbon/icons-react';
-import { getStrategies, deleteStrategy, publishStrategy, unpublishStrategy } from '../services/api';
-import { LoadingSpinner, ErrorMessage, SuccessMessage } from '../components/common/CommonComponents';
-import Button from '../components/common/Button';
-import './StrategiesPage.css';
+} from "@carbon/icons-react";
+import {
+  getStrategies,
+  deleteStrategy,
+  publishStrategy,
+  unpublishStrategy,
+} from "../services/api";
+import {
+  LoadingSpinner,
+  ErrorMessage,
+  SuccessMessage,
+} from "../components/common/CommonComponents";
+import Button from "../components/common/Button";
+import "./styling/StrategiesPage.css";
+import { ToastContainer, toast } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 function ActionMenu({ strategy, isOpen, onToggle, onAction }) {
   const buttonRef = useRef();
@@ -31,7 +36,9 @@ function ActionMenu({ strategy, isOpen, onToggle, onAction }) {
   useEffect(() => {
     if (isOpen && buttonRef.current) {
       const buttonRect = buttonRef.current.getBoundingClientRect();
-      const dropdownWidth = dropdownRef.current ? dropdownRef.current.offsetWidth : 160;
+      const dropdownWidth = dropdownRef.current
+        ? dropdownRef.current.offsetWidth
+        : 160;
       let left = buttonRect.left;
       let top = buttonRect.bottom + window.scrollY;
       let alignLeftNow = false;
@@ -44,10 +51,17 @@ function ActionMenu({ strategy, isOpen, onToggle, onAction }) {
     }
   }, [isOpen]);
 
-  if (strategy.status === 'deleted') return null;
+  if (strategy.status === "deleted") return null;
 
   return (
-    <div className="action-menu" style={{ position: 'relative', display: 'flex', justifyContent: 'center' }}>
+    <div
+      className="action-menu"
+      style={{
+        position: "relative",
+        display: "flex",
+        justifyContent: "center",
+      }}
+    >
       <Button
         ref={buttonRef}
         variant="ghost"
@@ -58,60 +72,61 @@ function ActionMenu({ strategy, isOpen, onToggle, onAction }) {
       >
         <OverflowMenuVertical size={16} />
       </Button>
-      {isOpen && ReactDOM.createPortal(
-        <div
-          ref={dropdownRef}
-          className={`action-dropdown${alignLeft ? ' action-dropdown--left' : ''}`}
-          style={{
-            position: 'absolute',
-            top: dropdownPosition.top,
-            left: dropdownPosition.left,
-            zIndex: 9999,
-            maxWidth: '100px'
-          }}
-        >
-          <button
-            onClick={() => onAction(strategy, 'edit')}
-            className="dropdown-item"
+      {isOpen &&
+        ReactDOM.createPortal(
+          <div
+            ref={dropdownRef}
+            className={`action-dropdown${alignLeft ? " action-dropdown--left" : ""}`}
+            style={{
+              position: "absolute",
+              top: dropdownPosition.top,
+              left: dropdownPosition.left,
+              zIndex: 9999,
+              maxWidth: "100px",
+            }}
           >
-            <Edit size={16} className="mr-2" />
-            Edit
-          </button>
-          <button
-            onClick={() => onAction(strategy, 'test')}
-            className="dropdown-item"
-          >
-            <Play size={16} className="mr-2" />
-            Test
-          </button>
-          {strategy.status === 'draft' && (
             <button
-              onClick={() => onAction(strategy, 'publish')}
+              onClick={() => onAction(strategy, "edit")}
               className="dropdown-item"
             >
-              <Upload size={16} className="mr-2" />
-              Publish
+              <Edit size={16} className="mr-2" />
+              Edit
             </button>
-          )}
-          {strategy.status === 'published' && (
             <button
-              onClick={() => onAction(strategy, 'unpublish')}
+              onClick={() => onAction(strategy, "test")}
               className="dropdown-item"
             >
-              <Download size={16} className="mr-2" />
-              Unpublish
+              <Play size={16} className="mr-2" />
+              Test
             </button>
-          )}
-          <button
-            onClick={() => onAction(strategy, 'delete')}
-            className="dropdown-item dropdown-item-danger"
-          >
-            <TrashCan size={16} className="mr-2" />
-            Delete
-          </button>
-        </div>,
-        document.body
-      )}
+            {strategy.status === "draft" && (
+              <button
+                onClick={() => onAction(strategy, "publish")}
+                className="dropdown-item"
+              >
+                <Upload size={16} className="mr-2" />
+                Publish
+              </button>
+            )}
+            {strategy.status === "published" && (
+              <button
+                onClick={() => onAction(strategy, "unpublish")}
+                className="dropdown-item"
+              >
+                <Download size={16} className="mr-2" />
+                Unpublish
+              </button>
+            )}
+            <button
+              onClick={() => onAction(strategy, "delete")}
+              className="dropdown-item dropdown-item-danger"
+            >
+              <TrashCan size={16} className="mr-2" />
+              Delete
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -121,21 +136,29 @@ const StrategiesPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState("all");
   const [openDropdown, setOpenDropdown] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchStrategies();
   }, []);
 
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error]);
+
+  useEffect(() => {
+    if (success) toast.success(success);
+  }, [success]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       // Check if click is inside the action menu or the dropdown (even if in portal)
-      const actionMenu = document.querySelector('.action-menu');
-      const dropdown = document.querySelector('.action-dropdown');
+      const actionMenu = document.querySelector(".action-menu");
+      const dropdown = document.querySelector(".action-dropdown");
       if (
         openDropdown &&
         !(
@@ -147,9 +170,9 @@ const StrategiesPage = () => {
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [openDropdown]);
 
@@ -160,8 +183,8 @@ const StrategiesPage = () => {
       setStrategies(data);
       setError(null);
     } catch (err) {
-      setError('Failed to fetch strategies');
-      console.error('Error fetching strategies:', err);
+      setError("Failed to fetch strategies");
+      console.error("Error fetching strategies:", err);
     } finally {
       setLoading(false);
     }
@@ -169,12 +192,12 @@ const StrategiesPage = () => {
 
   const handleStatusChange = async (strategyId, newStatus) => {
     try {
-      if (newStatus === 'published') {
+      if (newStatus === "published") {
         await publishStrategy(strategyId);
-        setSuccess('Strategy published successfully');
-      } else if (newStatus === 'draft') {
+        setSuccess("Strategy published successfully");
+      } else if (newStatus === "draft") {
         await unpublishStrategy(strategyId);
-        setSuccess('Strategy unpublished successfully');
+        setSuccess("Strategy unpublished successfully");
       }
       fetchStrategies(); // Refresh the list
     } catch (err) {
@@ -183,10 +206,14 @@ const StrategiesPage = () => {
   };
 
   const handleDelete = async (strategyId, strategyName) => {
-    if (window.confirm(`Are you sure you want to delete strategy "${strategyName}"?`)) {
+    if (
+      window.confirm(
+        `Are you sure you want to delete strategy "${strategyName}"?`,
+      )
+    ) {
       try {
         await deleteStrategy(strategyId);
-        setSuccess('Strategy deleted successfully');
+        setSuccess("Strategy deleted successfully");
         fetchStrategies(); // Refresh the list
       } catch (err) {
         setError(`Failed to delete strategy: ${err.message}`);
@@ -196,11 +223,19 @@ const StrategiesPage = () => {
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      draft: { class: 'status-draft', label: 'Draft', color: 'text-warning' },
-      published: { class: 'status-published', label: 'Published', color: 'text-success' },
-      deleted: { class: 'status-deleted', label: 'Deleted', color: 'text-danger' }
+      draft: { class: "status-draft", label: "Draft", color: "text-warning" },
+      published: {
+        class: "status-published",
+        label: "Published",
+        color: "text-success",
+      },
+      deleted: {
+        class: "status-deleted",
+        label: "Deleted",
+        color: "text-danger",
+      },
     };
-    
+
     const config = statusConfig[status] || statusConfig.draft;
     return (
       <span className={`status-badge ${config.class} ${config.color}`}>
@@ -215,22 +250,22 @@ const StrategiesPage = () => {
 
   const handleDropdownAction = async (strategy, action) => {
     setOpenDropdown(null);
-    
+
     try {
       switch (action) {
-        case 'edit':
+        case "edit":
           navigate(`/strategies/${strategy.id}/edit`);
           break;
-        case 'test':
+        case "test":
           navigate(`/strategies/${strategy.id}/test`);
           break;
-        case 'publish':
-          await handleStatusChange(strategy.id, 'published');
+        case "publish":
+          await handleStatusChange(strategy.id, "published");
           break;
-        case 'unpublish':
-          await handleStatusChange(strategy.id, 'draft');
+        case "unpublish":
+          await handleStatusChange(strategy.id, "draft");
           break;
-        case 'delete':
+        case "delete":
           await handleDelete(strategy.id, strategy.name);
           break;
       }
@@ -239,10 +274,15 @@ const StrategiesPage = () => {
     }
   };
 
-  const filteredStrategies = strategies.filter(strategy => {
-    const matchesFilter = filter === 'all' ? strategy.status !== 'deleted' : strategy.status === filter;
-    const matchesSearch = strategy.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (strategy.description && strategy.description.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredStrategies = strategies.filter((strategy) => {
+    const matchesFilter =
+      filter === "all"
+        ? strategy.status !== "deleted"
+        : strategy.status === filter;
+    const matchesSearch =
+      strategy.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (strategy.description &&
+        strategy.description.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesFilter && matchesSearch;
   });
 
@@ -256,6 +296,16 @@ const StrategiesPage = () => {
 
   return (
     <div className="strategies-page">
+      <ToastContainer
+        position="top-right"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+      />
       <nav className="breadcrumb" aria-label="Breadcrumb">
         <ol className="breadcrumb-list">
           <li className="breadcrumb-item">
@@ -278,11 +328,11 @@ const StrategiesPage = () => {
             </div>
           </div>
         </div>
-        
+
         <div className="page-actions">
           <Button
             variant="primary"
-            onClick={() => navigate('/strategies/create')}
+            onClick={() => navigate("/strategies/create")}
             className="create-button"
           >
             <Add size={16} className="mr-2" />
@@ -291,45 +341,47 @@ const StrategiesPage = () => {
         </div>
       </div>
 
-      {error && <ErrorMessage message={error} />}
-      {success && <SuccessMessage message={success} />}
-
       <div className="filters-section">
-        
         <div className="filter-tabs">
           <Button
-            variant={filter === 'all' ? 'primary' : 'ghost'}
+            variant={filter === "all" ? "primary" : "ghost"}
             size="sm"
-            onClick={() => setFilter('all')}
+            onClick={() => setFilter("all")}
             className="filter-tab"
           >
             All Strategies
-            <span className="filter-count">({strategies.filter(s => s.status !== 'deleted').length})</span>
+            <span className="filter-count">
+              ({strategies.filter((s) => s.status !== "deleted").length})
+            </span>
           </Button>
           <Button
-            variant={filter === 'draft' ? 'primary' : 'ghost'}
+            variant={filter === "draft" ? "primary" : "ghost"}
             size="sm"
-            onClick={() => setFilter('draft')}
+            onClick={() => setFilter("draft")}
             className="filter-tab"
           >
             Draft
-            <span className="filter-count">({strategies.filter(s => s.status === 'draft').length})</span>
+            <span className="filter-count">
+              ({strategies.filter((s) => s.status === "draft").length})
+            </span>
           </Button>
           <Button
-            variant={filter === 'published' ? 'primary' : 'ghost'}
+            variant={filter === "published" ? "primary" : "ghost"}
             size="sm"
-            onClick={() => setFilter('published')}
+            onClick={() => setFilter("published")}
             className="filter-tab"
           >
             Published
-            <span className="filter-count">({strategies.filter(s => s.status === 'published').length})</span>
+            <span className="filter-count">
+              ({strategies.filter((s) => s.status === "published").length})
+            </span>
           </Button>
         </div>
       </div>
 
       <div className="strategies-container">
         {filteredStrategies.length === 0 ? (
-        <div></div>
+          <div></div>
         ) : (
           <div className="strategies-table-container">
             <table className="strategies-table">
@@ -345,18 +397,18 @@ const StrategiesPage = () => {
               </thead>
               <tbody>
                 {filteredStrategies.map((strategy) => (
-                  <tr 
-                    key={strategy.id} 
+                  <tr
+                    key={strategy.id}
                     className="strategy-row"
                     onClick={() => navigate(`/strategies/${strategy.id}/edit`)}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: "pointer" }}
                   >
                     <td className="strategy-name-cell">
                       <h3 className="strategy-name">{strategy.name}</h3>
                     </td>
                     <td className="strategy-description-cell">
                       <p className="strategy-description">
-                        {strategy.description || 'No description provided'}
+                        {strategy.description || "No description provided"}
                       </p>
                     </td>
                     <td className="strategy-status-cell">
@@ -364,15 +416,22 @@ const StrategiesPage = () => {
                     </td>
                     <td className="strategy-date-cell">
                       <div className="date-item">
-                        <p>{new Date(strategy.created_at).toLocaleDateString()}</p>
+                        <p>
+                          {new Date(strategy.created_at).toLocaleDateString()}
+                        </p>
                       </div>
                     </td>
                     <td className="strategy-date-cell">
                       <div className="date-item">
-                        <p>{new Date(strategy.updated_at).toLocaleDateString()}</p>
+                        <p>
+                          {new Date(strategy.updated_at).toLocaleDateString()}
+                        </p>
                       </div>
                     </td>
-                    <td className="strategy-actions-cell" onClick={(e) => e.stopPropagation()}>
+                    <td
+                      className="strategy-actions-cell"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <ActionMenu
                         strategy={strategy}
                         isOpen={openDropdown === strategy.id}
@@ -391,4 +450,4 @@ const StrategiesPage = () => {
   );
 };
 
-export default StrategiesPage; 
+export default StrategiesPage;

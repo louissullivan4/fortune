@@ -1,45 +1,31 @@
-import { ConnectionSignal, ChartScatter, Settings } from '@carbon/icons-react';
+import { ConnectionSignal, ChartScatter, Settings } from "@carbon/icons-react";
 
 export const API_ENDPOINTS = {
-  ANALYSIS: '/analysis',
-  SIGNALS: '/signals',
-  TRADES: '/trades',
-  EMERGENCY: {
-    PAUSE: '/emergency/pause',
-    RESUME: '/emergency/resume',
-    DUMP_POSITIONS: '/emergency/dump_positions'
-  },
-  BUILDER: {
-    ALGORITHMS: '/algorithms',
-    SYMBOLS: '/symbols'
-  },
   STRATEGIES: {
-    BASE: '/strategies/',
+    BASE: "/strategies/",
     PUBLISH: (id) => `/strategies/${id}/publish`,
     UNPUBLISH: (id) => `/strategies/${id}/unpublish`,
     BACKTEST: (id) => `/strategies/${id}/backtest`,
     BACKTESTS: (id) => `/strategies/${id}/backtests`,
-    YAML: (id) => `/strategies/${id}/config/yaml`
-  }
-}
+  },
+};
 
 export const ROUTES = {
-  HOME: '/',
-  LIVE: '/live',
-  STRATEGIES: '/strategies',
-  CREATE_STRATEGY: '/strategies/create',
+  HOME: "/",
+  LIVE: "/live",
+  STRATEGIES: "/strategies",
+  CREATE_STRATEGY: "/strategies/create",
   EDIT_STRATEGY: (id) => `/strategies/${id}/edit`,
   TEST_STRATEGY: (id) => `/strategies/${id}/test`,
-  SETTINGS: '/settings'
-}
+  SETTINGS: "/settings",
+};
 
 export const NAV_ITEMS = [
-  { path: ROUTES.LIVE, icon: ConnectionSignal, text: 'Live Trading' },
-  { path: ROUTES.STRATEGIES, icon: ChartScatter, text: 'Strategies' },
-  { path: ROUTES.SETTINGS, icon: Settings, text: 'Settings' },
-]
+  { path: ROUTES.LIVE, icon: ConnectionSignal, text: "Live Trading" },
+  { path: ROUTES.STRATEGIES, icon: ChartScatter, text: "Strategies" },
+  { path: ROUTES.SETTINGS, icon: Settings, text: "Settings" },
+];
 
-// Field tips for CreateStrategyPage
 export const FIELD_TIPS = {
   algorithm: `Select the statistical pairing method to run.  
 Choose based on your preference for model complexity vs. responsiveness.`,
@@ -68,8 +54,9 @@ Keep between 1–5% or a modest dollar value for balanced drawdown control.`,
 Typical values are 2.0 (default). Higher values mean fewer trades, lower values mean more trades.`,
 };
 
-// Algorithm descriptions for CreateStrategyPage
 export const ALGORITHM_DESCRIPTIONS = {
-  PairTrading: 'exploits the mean-reverting relationship between two correlated assets. It enters trades when their price spread diverges and exits when it converges.',
-  BollingerReversionStrategy: 'trades a single asset using Bollinger Bands. It enters long when price touches the lower band, short at the upper band, and exits when price reverts to the moving average.'
-}; 
+  PairTrading:
+    "exploits the mean-reverting relationship between two correlated assets. It enters trades when their price spread diverges and exits when it converges.",
+  BollingerReversionStrategy:
+    "trades a single asset using Bollinger Bands. It enters long when price touches the lower band, short at the upper band, and exits when price reverts to the moving average.",
+};

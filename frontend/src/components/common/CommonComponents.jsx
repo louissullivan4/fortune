@@ -1,5 +1,5 @@
-import React from 'react'
-import { 
+import React from "react";
+import {
   ChartLine,
   ArrowUp,
   ArrowDown,
@@ -8,20 +8,20 @@ import {
   Information,
   Warning,
   Error,
-  Checkmark
-} from '@carbon/icons-react'
+  Checkmark,
+} from "@carbon/icons-react";
 
 /**
  * Common UI Components - IBM Carbon Design System
  * Optimized components using the new design system
  */
 
-export const LoadingSpinner = ({ message = 'Loading...' }) => (
+export const LoadingSpinner = ({ message = "Loading..." }) => (
   <div className="loading">
     <div className="spinner"></div>
     <p className="body-large text-neutral">{message}</p>
   </div>
-)
+);
 
 export const ErrorMessage = ({ message }) => (
   <div className="error">
@@ -30,7 +30,7 @@ export const ErrorMessage = ({ message }) => (
       <p className="body-large text-danger">{message}</p>
     </div>
   </div>
-)
+);
 
 export const SuccessMessage = ({ message }) => (
   <div className="success">
@@ -39,7 +39,7 @@ export const SuccessMessage = ({ message }) => (
       <p className="body-large text-success">{message}</p>
     </div>
   </div>
-)
+);
 
 export const WarningMessage = ({ message }) => (
   <div className="warning">
@@ -48,7 +48,7 @@ export const WarningMessage = ({ message }) => (
       <p className="body-large text-warning">{message}</p>
     </div>
   </div>
-)
+);
 
 export const InfoMessage = ({ message }) => (
   <div className="info">
@@ -57,19 +57,27 @@ export const InfoMessage = ({ message }) => (
       <p className="body-large text-primary">{message}</p>
     </div>
   </div>
-)
+);
 
-export const MetricCard = ({ icon, title, value, isPositive, trend, trendValue }) => {
+export const MetricCard = ({
+  icon,
+  title,
+  value,
+  isPositive,
+  trend,
+  trendValue,
+}) => {
   const getTrendIcon = () => {
-    if (trend === 'up') return <ArrowUp size={16} className="text-success" />
-    if (trend === 'down') return <ArrowDown size={16} className="text-danger" />
-    return null
-  }
+    if (trend === "up") return <ArrowUp size={16} className="text-success" />;
+    if (trend === "down")
+      return <ArrowDown size={16} className="text-danger" />;
+    return null;
+  };
 
   const getValueColor = () => {
-    if (isPositive === null) return 'text-gray-900'
-    return isPositive ? 'text-success' : 'text-danger'
-  }
+    if (isPositive === null) return "text-gray-900";
+    return isPositive ? "text-success" : "text-danger";
+  };
 
   return (
     <div className="metric-card">
@@ -94,7 +102,7 @@ export const MetricCard = ({ icon, title, value, isPositive, trend, trendValue }
             {trend && trendValue && (
               <span className="ml-2 body-small font-medium flex items-center">
                 {getTrendIcon()}
-                <span className={isPositive ? 'text-success' : 'text-danger'}>
+                <span className={isPositive ? "text-success" : "text-danger"}>
                   {trendValue}
                 </span>
               </span>
@@ -103,22 +111,20 @@ export const MetricCard = ({ icon, title, value, isPositive, trend, trendValue }
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 export const FeatureCard = ({ icon, title, description }) => (
   <div className="feature-card">
     {icon && (
       <div className="mx-auto mb-4 p-3 bg-primary-accent-bg rounded-lg w-12 h-12 flex items-center justify-center">
-        <div className="text-primary">
-          {icon}
-        </div>
+        <div className="text-primary">{icon}</div>
       </div>
     )}
     <h3 className="heading text-gray-900 mb-2">{title}</h3>
     <p className="body-small text-neutral">{description}</p>
   </div>
-)
+);
 
 // Financial metric cards with specific icons
 export const ProfitMetricCard = ({ title, value, trend, trendValue }) => (
@@ -130,7 +136,7 @@ export const ProfitMetricCard = ({ title, value, trend, trendValue }) => (
     trend={trend}
     trendValue={trendValue}
   />
-)
+);
 
 export const LossMetricCard = ({ title, value, trend, trendValue }) => (
   <MetricCard
@@ -141,7 +147,7 @@ export const LossMetricCard = ({ title, value, trend, trendValue }) => (
     trend={trend}
     trendValue={trendValue}
   />
-)
+);
 
 export const TradeMetricCard = ({ title, value, trend, trendValue }) => (
   <MetricCard
@@ -152,15 +158,15 @@ export const TradeMetricCard = ({ title, value, trend, trendValue }) => (
     trend={trend}
     trendValue={trendValue}
   />
-)
+);
 
 export const PerformanceMetricCard = ({ title, value, trend, trendValue }) => (
   <MetricCard
     icon={<ChartLine size={20} className="text-primary" />}
     title={title}
     value={value}
-    isPositive={trend === 'up'}
+    isPositive={trend === "up"}
     trend={trend}
     trendValue={trendValue}
   />
-) 
+);

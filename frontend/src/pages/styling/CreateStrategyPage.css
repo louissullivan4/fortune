@@ -179,7 +179,7 @@
 }
 
 .form-textarea.yaml-textarea {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
   font-size: var(--caption);
   line-height: 1.5;
   min-height: 300px;
@@ -256,7 +256,6 @@
   max-height: 250px;
   padding-bottom: var(--spacing-l);
   overflow-y: auto;
-  
 }
 
 .tips-list::-webkit-scrollbar {
@@ -365,4 +364,4 @@
 
 .create-strategy-btn {
   margin-top: var(--spacing-xl);
-} 
+}

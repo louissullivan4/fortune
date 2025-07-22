@@ -439,8 +439,12 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .error-container h2 {
@@ -477,7 +481,8 @@
   width: 100%;
   border-collapse: collapse;
 }
-.data-table th, .data-table td {
+.data-table th,
+.data-table td {
   position: sticky;
   left: 0;
   background: var(--gray-10);
@@ -529,4 +534,4 @@
     flex-direction: column;
     gap: var(--spacing-xs);
   }
-} 
+}

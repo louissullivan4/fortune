@@ -1,6 +1,6 @@
-import React from 'react';
-import { formatCurrency, formatPercentage } from '../../utils/formatters';
-import './PositionManagement.css';
+import React from "react";
+import { formatCurrency, formatPercentage } from "../../utils/formatters";
+import "./PositionManagement.css";
 
 const PositionManagement = ({ positions = [], loading = false }) => {
   if (loading) {
@@ -34,9 +34,12 @@ const PositionManagement = ({ positions = [], loading = false }) => {
         <div className="metric-card">
           <div className="flex items-center justify-center py-8">
             <div className="text-center">
-              <div className="text-neutral text-lg mb-2">No active positions</div>
+              <div className="text-neutral text-lg mb-2">
+                No active positions
+              </div>
               <div className="text-sm text-neutral-light">
-                Positions will appear here when strategies generate entry signals
+                Positions will appear here when strategies generate entry
+                signals
               </div>
             </div>
           </div>
@@ -46,10 +49,19 @@ const PositionManagement = ({ positions = [], loading = false }) => {
   }
 
   // Calculate summary metrics
-  const totalUnrealizedPnl = positions.reduce((sum, pos) => sum + pos.unrealized_pnl, 0);
-  const totalMarketValue = positions.reduce((sum, pos) => sum + pos.market_value, 0);
-  const profitablePositions = positions.filter(pos => pos.unrealized_pnl > 0).length;
-  const winRate = positions.length > 0 ? (profitablePositions / positions.length) * 100 : 0;
+  const totalUnrealizedPnl = positions.reduce(
+    (sum, pos) => sum + pos.unrealized_pnl,
+    0,
+  );
+  const totalMarketValue = positions.reduce(
+    (sum, pos) => sum + pos.market_value,
+    0,
+  );
+  const profitablePositions = positions.filter(
+    (pos) => pos.unrealized_pnl > 0,
+  ).length;
+  const winRate =
+    positions.length > 0 ? (profitablePositions / positions.length) * 100 : 0;
 
   return (
     <div className="position-management">
@@ -98,11 +110,16 @@ const PositionManagement = ({ positions = [], loading = false }) => {
             </h3>
           </div>
           <div className="flex items-baseline">
-            <span className={`display-small font-semibold ${totalUnrealizedPnl >= 0 ? 'text-success' : 'text-error'}`}>
+            <span
+              className={`display-small font-semibold ${totalUnrealizedPnl >= 0 ? "text-success" : "text-error"}`}
+            >
               {formatCurrency(totalUnrealizedPnl)}
             </span>
-            <span className={`ml-2 body-small font-medium ${totalUnrealizedPnl >= 0 ? 'text-success' : 'text-error'}`}>
-              {totalUnrealizedPnl >= 0 ? '+' : ''}{formatPercentage(totalUnrealizedPnl / totalMarketValue * 100)}
+            <span
+              className={`ml-2 body-small font-medium ${totalUnrealizedPnl >= 0 ? "text-success" : "text-error"}`}
+            >
+              {totalUnrealizedPnl >= 0 ? "+" : ""}
+              {formatPercentage((totalUnrealizedPnl / totalMarketValue) * 100)}
             </span>
           </div>
         </div>
@@ -130,34 +147,71 @@ const PositionManagement = ({ positions = [], loading = false }) => {
           <table className="w-full positions-table">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-4 font-medium text-neutral">Symbol</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Quantity</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Entry Price</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Current Price</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Market Value</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Unrealized P&L</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">P&L %</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Strategy</th>
-                <th className="text-left py-3 px-4 font-medium text-neutral">Entry Time</th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Symbol
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Quantity
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Entry Price
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Current Price
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Market Value
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Unrealized P&L
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  P&L %
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Strategy
+                </th>
+                <th className="text-left py-3 px-4 font-medium text-neutral">
+                  Entry Time
+                </th>
               </tr>
             </thead>
             <tbody>
               {positions.map((position, index) => (
-                <tr key={index} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                <tr
+                  key={index}
+                  className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                >
                   <td className="py-3 px-4 font-medium">{position.symbol}</td>
                   <td className="py-3 px-4">
-                    <span className={position.quantity > 0 ? 'text-success' : 'text-error'}>
-                      {position.quantity > 0 ? '+' : ''}{position.quantity}
+                    <span
+                      className={
+                        position.quantity > 0 ? "text-success" : "text-error"
+                      }
+                    >
+                      {position.quantity > 0 ? "+" : ""}
+                      {position.quantity}
                     </span>
                   </td>
-                  <td className="py-3 px-4">{formatCurrency(position.entry_price)}</td>
-                  <td className="py-3 px-4">{formatCurrency(position.current_price)}</td>
-                  <td className="py-3 px-4">{formatCurrency(position.market_value)}</td>
-                  <td className={`py-3 px-4 font-medium ${position.unrealized_pnl >= 0 ? 'text-success' : 'text-error'}`}>
+                  <td className="py-3 px-4">
+                    {formatCurrency(position.entry_price)}
+                  </td>
+                  <td className="py-3 px-4">
+                    {formatCurrency(position.current_price)}
+                  </td>
+                  <td className="py-3 px-4">
+                    {formatCurrency(position.market_value)}
+                  </td>
+                  <td
+                    className={`py-3 px-4 font-medium ${position.unrealized_pnl >= 0 ? "text-success" : "text-error"}`}
+                  >
                     {formatCurrency(position.unrealized_pnl)}
                   </td>
-                  <td className={`py-3 px-4 font-medium ${position.pnl_percentage >= 0 ? 'text-success' : 'text-error'}`}>
-                    {position.pnl_percentage >= 0 ? '+' : ''}{formatPercentage(position.pnl_percentage)}
+                  <td
+                    className={`py-3 px-4 font-medium ${position.pnl_percentage >= 0 ? "text-success" : "text-error"}`}
+                  >
+                    {position.pnl_percentage >= 0 ? "+" : ""}
+                    {formatPercentage(position.pnl_percentage)}
                   </td>
                   <td className="py-3 px-4 text-sm">
                     <span className="inline-block px-2 py-1 bg-primary-bg text-primary rounded text-xs">
@@ -177,4 +231,4 @@ const PositionManagement = ({ positions = [], loading = false }) => {
   );
 };
 
-export default PositionManagement; 
+export default PositionManagement;
