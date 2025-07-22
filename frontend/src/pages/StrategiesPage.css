@@ -50,13 +50,16 @@
 }
 
 /* Page Header */
-.page-header {
+.strat-page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: var(--spacing-xxl);
   padding-bottom: var(--spacing-l);
   border-bottom: 1px solid var(--gray-20);
+  background-color: var(--gray-100);
+  border-radius: var(--radius-medium);
+  padding: var(--spacing-l);
 }
 
 .header-content {

@@ -4,12 +4,25 @@
   min-height: 100vh;
 }
 
+.page-header-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 2rem;
+  width: 100%;
+}
+
 .page-header {
+  flex: 1 1 0%;
+  min-width: 0;
   background-color: white;
   border-radius: 1rem;
   padding: 1.5rem 1.25rem;
-  margin-bottom: 1.5rem;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.header-right {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
 }
@@ -17,9 +30,6 @@
 /* Header Layout */
 .header-content {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
   width: 100%;
 }
 
@@ -38,24 +48,27 @@
 
 .header-right {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
-.control-buttons {
+.start-trading-box {
+  background: white;
+  border: 1.5px solid #e0e7ef;
+  border-radius: 1rem;
+  box-shadow: 0 2px 8px 0 rgba(16, 30, 54, 0.06);
+  padding: 1.25rem 1.5rem;
   display: flex;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
 }
 
 /* Status Row */
 .status-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 0;
-  border-top: 1px solid #e0e0e0;
   gap: 2rem;
   flex-wrap: wrap;
+  margin-top: 1.75rem;
 }
 
 .status-row > .risk-per-trade-group.status-item--right {
@@ -100,38 +113,83 @@
   background: #ffd7d9;
   border: 1px solid #da1e28;
 }
-
 .status-item--system .status-dot {
   background: #da1e28;
 }
-
-.status-item--system .status-value {
+.status-item--system .status-value,
+.status-item--system .status-label {
   color: #da1e28;
+}
+
+.status-item--system.status-item--success {
+  background: #d9fbe7;
+  border: 1px solid #24a148;
+}
+.status-item--system.status-item--success .status-dot {
+  background: #24a148;
+}
+.status-item--system.status-item--success .status-value,
+.status-item--system.status-item--success .status-label {
+  color: #24a148;
+}
+
+.status-item--system.status-item--warning {
+  background: #fff4e1;
+  border: 1px solid #ff832b;
+}
+.status-item--system.status-item--warning .status-dot {
+  background: #ff832b;
+}
+.status-item--system.status-item--warning .status-value,
+.status-item--system.status-item--warning .status-label {
+  color: #ff832b;
 }
 
 .status-item--markets {
   background: #ffd7d9;
   border: 1px solid #da1e28;
 }
-
 .status-item--markets .status-dot {
   background: #da1e28;
 }
-
-.status-item--markets .status-value {
+.status-item--markets .status-value,
+.status-item--markets .status-label {
   color: #da1e28;
+}
+
+.status-item--markets.status-item--success {
+  background: #d9fbe7;
+  border: 1px solid #24a148;
+}
+.status-item--markets.status-item--success .status-dot {
+  background: #24a148;
+}
+.status-item--markets.status-item--success .status-value,
+.status-item--markets.status-item--success .status-label {
+  color: #24a148;
+}
+
+.status-item--markets.status-item--warning {
+  background: #fff4e1;
+  border: 1px solid #ff832b;
+}
+.status-item--markets.status-item--warning .status-dot {
+  background: #ff832b;
+}
+.status-item--markets.status-item--warning .status-value,
+.status-item--markets.status-item--warning .status-label {
+  color: #ff832b;
 }
 
 .status-item--update {
   background: #e5f6ff;
   border: 1px solid #0072c3;
 }
-
 .status-item--update .status-dot {
   background: #0072c3;
 }
-
-.status-item--update .status-value {
+.status-item--update .status-value,
+.status-item--update .status-label {
   color: #0072c3;
 }
 
@@ -139,13 +197,26 @@
   background: #f3e8ff;
   border: 1px solid #8b5cf6;
 }
-
 .status-item--time .status-dot {
   background: #8b5cf6;
 }
-
-.status-item--time .status-value {
+.status-item--time .status-value,
+.status-item--time .status-label {
   color: #8b5cf6;
+}
+
+.status-item--neutral {
+  background: #f4f4f4;
+  border: 1px solid #e0e0e0;
+}
+.status-item--neutral .status-dot {
+  background: #e0e0e0;
+}
+.status-item--neutral .status-value {
+  color: #161616;
+}
+.status-item--neutral .status-label {
+  color: #525252;
 }
 
 /* Button Styles */
@@ -708,4 +779,201 @@
   .status-item {
     font-size: 0.8rem;
   }
+  .header-right {
+    width: 100%;
+    justify-content: flex-start;
+    margin-top: 1rem;
+  }
+  .start-trading-box {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 1rem;
+  }
 } 
+
+.start-trading-float {
+  all: unset;
+}
+
+@media (max-width: 1024px) {
+  .page-header-row {
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .header-right {
+    align-items: stretch;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-header-row {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .header-right {
+    width: 100%;
+    align-items: stretch;
+    margin-top: 0;
+  }
+}
+
+.settings-page.modern-settings {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 16px 48px 16px;
+  min-height: 100vh;
+}
+
+.settings-title {
+  font-size: 2.2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  margin-bottom: 32px;
+  letter-spacing: -1px;
+}
+
+.settings-page-rows .settings-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  margin-top: 12px;
+}
+
+.settings-card.settings-card-row {
+  width: 100%;
+  margin: 0 auto;
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.07);
+  border-radius: 16px;
+  background: #fff;
+  padding: 32px 28px 24px 28px;
+  min-height: 160px;
+  transition: box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+}
+.settings-card.settings-card-row:hover {
+  box-shadow: 0 4px 24px 0 rgba(0,0,0,0.12);
+}
+
+.settings-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
+}
+.settings-card-header h2 {
+  font-size: 1.18rem;
+  font-weight: 600;
+  margin: 0;
+  color: #22223b;
+  letter-spacing: -0.5px;
+}
+
+.settings-card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.settings-controls-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.settings-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-status-badge {
+  display: inline-block;
+  color: #fff;
+  font-size: 0.95em;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 2px 12px;
+  margin-left: 6px;
+  vertical-align: middle;
+  letter-spacing: 0.5px;
+}
+
+/* Remove old grid for settings page */
+.settings-page-rows .settings-grid {
+  display: block !important;
+  grid-template-columns: none !important;
+  gap: 0 !important;
+}
+
+.settings-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px 0 rgba(0,0,0,0.07);
+  padding: 28px 24px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  transition: box-shadow 0.2s;
+}
+.settings-card:hover {
+  box-shadow: 0 4px 24px 0 rgba(0,0,0,0.12);
+}
+
+.settings-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.settings-card-header h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.settings-card-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-controls-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.settings-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-status-badge {
+  display: inline-block;
+  color: #fff;
+  font-size: 0.95em;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 2px 12px;
+  margin-left: 6px;
+  vertical-align: middle;
+  letter-spacing: 0.5px;
+} 
+
+.settings-last-row-list {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+}

@@ -270,7 +270,7 @@ const StrategiesPage = () => {
         </ol>
       </nav>
 
-      <div className="page-header">
+      <div className="strat-page-header">
         <div className="header-content">
           <div className="header-title-section">
             <div className="header-text">

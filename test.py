@@ -19,16 +19,21 @@ from alpaca.data.requests import StockLatestQuoteRequest
 #     stream.subscribe_quotes(on_quote, "AAPL")
 #     await stream._run_forever()
 
+
 def get_latest_price(symbol: str, api_key: str, secret_key: str) -> float:
     client = StockHistoricalDataClient(api_key, secret_key)
     request = StockLatestQuoteRequest(symbol_or_symbols=symbol)
     quote = client.get_stock_latest_quote(request)
     return quote[symbol].ask_price
 
-def calculate_quantity_for_budget(symbol: str, budget: float, api_key: str, secret_key: str) -> int:
+
+def calculate_quantity_for_budget(
+    symbol: str, budget: float, api_key: str, secret_key: str
+) -> int:
     price = get_latest_price(symbol, api_key, secret_key)
     qty = int(budget // price)
     return max(qty, 1)  # Ensure at least 1 share if possible
+
 
 def test_execute_trade_paper():
     # Ensure environment variables are set for Alpaca API
@@ -58,6 +63,7 @@ def test_execute_trade_paper():
     trade = executor.execute(signal)
     print(trade)
 
+
 def test_execute_trade_sell_paper():
     # Ensure environment variables are set for Alpaca API
     api_key = os.getenv("ALPACA_API_KEY")
@@ -85,6 +91,7 @@ def test_execute_trade_sell_paper():
     )
     trade = executor.execute(signal)
     print(trade)
+
 
 if __name__ == "__main__":
     test_execute_trade_paper()

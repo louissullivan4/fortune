@@ -28,9 +28,7 @@ class MarketDataFeed:
                 "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set in environment variables"
             )
 
-        use_test = True
-        # use_test = os.getenv("ALPACA_USE_TEST", "true").lower() == "true"
-        self.logger.info(f"use_test: {use_test}")
+        use_test = bool(str(os.getenv("ALPACA_USE_TEST")).lower())
 
         if use_test:
             url_override = "wss://stream.data.alpaca.markets/v2/test"
@@ -66,7 +64,6 @@ class MarketDataFeed:
             self.logger.error(f"Error in _handle_quote: {e}")
 
     async def _broadcast_to_websocket_clients(self, quote):
-        """Broadcast quote data to connected WebSocket clients"""
         try:
             from src.routes.live_trading import live_feed_clients
 
@@ -97,11 +94,9 @@ class MarketDataFeed:
             self.logger.debug(f"Error broadcasting to WebSocket clients: {e}")
 
     async def stop(self):
-        """Stop the market data feed with improved timeout handling and retry logic"""
         try:
             self.logger.info("Stopping MarketDataFeed...")
 
-            # Cancel the main task first
             if hasattr(self, "_task") and not self._task.done():
                 self._task.cancel()
                 try:
@@ -111,14 +106,12 @@ class MarketDataFeed:
                 except asyncio.CancelledError:
                     self.logger.info("Task cancelled successfully")
 
-            # Stop the Alpaca stream with extended timeout and retry logic
             if (
                 self._stream
                 and hasattr(self._stream, "_loop")
                 and self._stream._loop is not None
             ):
                 try:
-                    # First attempt with extended timeout
                     self.logger.info("Attempting to stop Alpaca stream...")
                     await asyncio.wait_for(self._stream.stop(), timeout=15.0)
                     self.logger.info("Alpaca stream stopped successfully")
@@ -127,7 +120,6 @@ class MarketDataFeed:
                         "First stop attempt timed out, trying alternative method..."
                     )
                     try:
-                        # Alternative: try to close the WebSocket directly
                         if hasattr(self._stream, "_ws") and self._stream._ws:
                             await asyncio.wait_for(
                                 self._stream._ws.close(), timeout=5.0
@@ -139,7 +131,6 @@ class MarketDataFeed:
                         self.logger.warning(f"Alternative stop method failed: {e}")
                 except Exception as e:
                     self.logger.warning(f"Error stopping Alpaca stream: {e}")
-                    # Don't let stream stop errors prevent the overall stop
             else:
                 self.logger.info("No active stream to stop")
 
@@ -147,9 +138,7 @@ class MarketDataFeed:
 
         except Exception as e:
             self.logger.error(f"Error in MarketDataFeed stop: {e}")
-            # Don't raise the exception - we want to stop gracefully even if there are errors
         finally:
-            # Clean up any remaining references
             if hasattr(self, "_task"):
                 delattr(self, "_task")
             self.logger.info("MarketDataFeed cleanup completed")
@@ -159,7 +148,6 @@ class HistoricalDataFeed:
     def __init__(self, on_tick: Callable[[Tick], None], lookback: timedelta):
         self.logger = get_logger("data_feed.historical")
 
-        # Get API credentials from environment variables
         api_key = os.getenv("ALPACA_API_KEY")
         secret_key = os.getenv("ALPACA_SECRET_KEY")
 

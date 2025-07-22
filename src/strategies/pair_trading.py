@@ -1,12 +1,10 @@
 from collections import deque
 from datetime import datetime
-
 import numpy as np
 
 from src.models import Signal, Tick
 from src.strategies.base import StrategyBase
 from src.utils.logger import get_logger
-from src.utils.market_data import get_latest_price
 
 
 class PairTrading(StrategyBase):
@@ -29,6 +27,8 @@ class PairTrading(StrategyBase):
         )
         self.buf1 = deque(maxlen=window)
         self.buf2 = deque(maxlen=window)
+        self.last_price1 = None
+        self.last_price2 = None
         self.in_position = False
         self.logger.info(
             f"Pair trading strategy initialized: {symbol1}/{symbol2}, window={window}, entry_z={entry_z}, exit_z={exit_z}, risk_per_trade={risk_per_trade}"
@@ -37,8 +37,10 @@ class PairTrading(StrategyBase):
     def on_tick(self, tick: Tick):
         if tick.symbol == self.s1:
             self.buf1.append(tick.price)
+            self.last_price1 = tick.price
         elif tick.symbol == self.s2:
             self.buf2.append(tick.price)
+            self.last_price2 = tick.price
 
         if len(self.buf1) < self.window or len(self.buf2) < self.window:
             return None
@@ -48,11 +50,8 @@ class PairTrading(StrategyBase):
         z = (spread[-1] - m) / s if s else 0
         now = datetime.utcnow()
 
-        # Calculate quantities based on USD budget and latest prices
-        price1 = get_latest_price(self.s1)
-        price2 = get_latest_price(self.s2)
-        qty1 = max(int(self.risk_per_trade // price1), 1)
-        qty2 = max(int(self.risk_per_trade // price2), 1)
+        qty1 = max(int(self.risk_per_trade // self.last_price1), 1)
+        qty2 = max(int(self.risk_per_trade // self.last_price2), 1)
 
         if not self.in_position and z > self.entry_z:
             self.in_position = True

@@ -3,7 +3,8 @@ from typing import Optional
 from src.strategies.base import StrategyBase
 from src.models import Signal, Tick
 from src.indicators.bollinger import BollingerBands
-from src.utils.market_data import get_latest_price
+from src.utils.market_data_utils import get_latest_price
+
 
 class BollingerReversionStrategy(StrategyBase):
     def __init__(
@@ -101,4 +102,4 @@ class BollingerReversionStrategy(StrategyBase):
                     leg2_qty=0,
                     leg2_price=0.0,
                 )
-        return None 
+        return None

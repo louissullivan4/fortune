@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
 
+
 class BollingerBands:
     def __init__(self, window: int, num_std: float):
         self.window = window
@@ -16,4 +17,4 @@ class BollingerBands:
         std = arr.std(ddof=0)
         upper = mean + self.num_std * std
         lower = mean - self.num_std * std
-        return mean, upper, lower 
+        return mean, upper, lower

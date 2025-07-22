@@ -247,6 +247,8 @@ class LiveTradingService:
                         self.symbols.add(strategy_instance.s1)
                     if hasattr(strategy_instance, "s2"):
                         self.symbols.add(strategy_instance.s2)
+                    if hasattr(strategy_instance, "symbol"):
+                        self.symbols.add(strategy_instance.symbol)
 
                     self.logger.info(f"Loaded strategy: {strategy.name}")
 

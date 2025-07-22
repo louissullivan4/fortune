@@ -382,20 +382,71 @@ const LiveTradingPage = () => {
 
   return (
     <DebugErrorBoundary>
-      {/* Page Header */}
-      <div className="page-header">
-        <div className="header-content">
-          <div className="header-left">
-            <h1 className="page-title">Live Trading Dashboard</h1>
+      {/* Page Header Row: header and Start Trading box side by side */}
+      <div className="page-header-row">
+        <div className="page-header">
+          <div className="header-content">
+            <div className="header-left">
+              <h1 className="page-title">Live Trading Dashboard</h1>
+              {/* Status Information Row now directly under the title */}
+              <div className="status-row">
+                <div className={`status-item status-item--system${currentStatus === 'running' ? ' status-item--success' : ''} ${statusClass}`}>
+                  <span className="status-dot"></span>
+                  <span className="status-label">System:</span>
+                  <span className="status-value">
+                    {currentStatus === 'running' ? 'Online' : currentStatus === 'paused' ? 'Paused' : 'Offline'}
+                  </span>
+                </div>
+
+                {liveStatus?.last_update && (
+                  <div className="status-item status-item--update">
+                    <span className="status-dot"></span>
+                    <span className="status-label">Last Update:</span>
+                    <span className="status-value">
+                      {new Date(new Date(liveStatus.last_update).getTime() + 60 * 60 * 1000).toLocaleTimeString('en-GB', { timeZone: 'Europe/Dublin' })}
+                    </span>
+                  </div>
+                )}
+
+                {marketStatus && (
+                  <div className={`status-item status-item--markets${marketStatus.is_open ? ' status-item--success' : ''}`}> 
+                    <span className="status-dot"></span>
+                    <span className="status-label">US Markets:</span>
+                    <span className="status-value">
+                      {marketStatus.is_open ? 'OPEN' : 'CLOSED'}
+                    </span>
+                  </div>
+                )}
+
+                {marketStatus && (
+                  <div className="status-item status-item--time">
+                    <span className="status-dot"></span>
+                    <span className="status-label">
+                      {marketStatus.is_open ? 'Closes in:' : 'Opens in:'}
+                    </span>
+                    <span className="status-value">
+                      {marketStatus.is_open && marketStatus.time_until_close && (
+                        `${marketStatus.time_until_close.hours}h ${marketStatus.time_until_close.minutes}m`
+                      )}
+                      {!marketStatus.is_open && marketStatus.time_until_open && (
+                        `${marketStatus.time_until_open.days > 0 ? `${marketStatus.time_until_open.days}d ` : ''}${marketStatus.time_until_open.hours}h ${marketStatus.time_until_open.minutes}m`
+                      )}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-          
-          <div className="header-right">
+        </div>
+        {/* Start Trading Box - in line with header */}
+        <div className="header-right">
+          <div className="start-trading-box">
             <div className="control-buttons">
               {currentStatus === 'stopped' && (
                 <div className="control-buttons-container">
-                <button onClick={handleStart} disabled={loading} className="btn btn-primary">
-                  Connect to market...
-                </button>
+                  <button onClick={handleStart} disabled={loading} className="btn btn-primary">
+                    Connect to market...
+                  </button>
                   <div className="risk-per-trade-group status-item status-item--right">
                     <label htmlFor="risk-per-trade-input" className="risk-per-trade-label">
                       Invest per trade:
@@ -443,54 +494,6 @@ const LiveTradingPage = () => {
               )}
             </div>
           </div>
-        </div>
-
-        {/* Status Information Row */}
-        <div className="status-row">
-          <div className={`status-item status-item--system ${statusClass}`}>
-            <span className="status-dot"></span>
-            <span className="status-label">System:</span>
-            <span className="status-value">
-              {currentStatus === 'running' ? 'Online' : currentStatus === 'paused' ? 'Paused' : 'Offline'}
-            </span>
-          </div>
-
-          {liveStatus?.last_update && (
-            <div className="status-item status-item--update">
-              <span className="status-dot"></span>
-              <span className="status-label">Last Update:</span>
-              <span className="status-value">
-                {new Date(new Date(liveStatus.last_update).getTime() + 60 * 60 * 1000).toLocaleTimeString('en-GB', { timeZone: 'Europe/Dublin' })}
-              </span>
-            </div>
-          )}
-
-          {marketStatus && (
-            <div className={`status-item status-item--markets ${marketStatus.is_open ? 'status-item--success' : 'status-item--error'}`}> 
-              <span className="status-dot"></span>
-              <span className="status-label">US Markets:</span>
-              <span className="status-value">
-                {marketStatus.is_open ? 'OPEN' : 'CLOSED'}
-              </span>
-            </div>
-          )}
-
-          {marketStatus && (
-            <div className="status-item status-item--time">
-              <span className="status-dot"></span>
-              <span className="status-label">
-                {marketStatus.is_open ? 'Closes in:' : 'Opens in:'}
-              </span>
-              <span className="status-value">
-                {marketStatus.is_open && marketStatus.time_until_close && (
-                  `${marketStatus.time_until_close.hours}h ${marketStatus.time_until_close.minutes}m`
-                )}
-                {!marketStatus.is_open && marketStatus.time_until_open && (
-                  `${marketStatus.time_until_open.days > 0 ? `${marketStatus.time_until_open.days}d ` : ''}${marketStatus.time_until_open.hours}h ${marketStatus.time_until_open.minutes}m`
-                )}
-              </span>
-            </div>
-          )}
         </div>
       </div>
 

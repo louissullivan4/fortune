@@ -11,13 +11,14 @@ from fastapi import (
     Body,
 )
 
-from src.live_trading import LiveTradingService
+from src.live_trading_engine import LiveTradingService
 from src.models import StrategyStatus
 from src.storage import MongoStorage
 from src.utils.logger import get_logger
 
 router = APIRouter(tags=["live_trading"])
 logger = get_logger("live_trading_routes")
+paper_mode = bool(str(os.getenv("ALPACA_USE_PAPER_MODE")).lower())
 
 
 async def get_storage(request: Request) -> MongoStorage:
@@ -28,7 +29,6 @@ async def get_live_trading_service(request: Request) -> LiveTradingService:
     if not hasattr(request.app.state, "live_trading_service"):
         # Initialize live trading service if not exists
         storage = request.app.state.storage
-        paper_mode = True
         request.app.state.live_trading_service = LiveTradingService(
             storage=storage, paper_mode=paper_mode
         )
@@ -39,7 +39,9 @@ async def get_live_trading_service(request: Request) -> LiveTradingService:
 async def start_live_trading(
     storage: MongoStorage = Depends(get_storage),
     live_service: LiveTradingService = Depends(get_live_trading_service),
-    risk_per_trade: float = Body(None, embed=True, description="USD budget per trade for this session"),
+    risk_per_trade: float = Body(
+        None, embed=True, description="USD budget per trade for this session"
+    ),
 ):
     """Start the live trading service with all published strategies, allowing session risk_per_trade override"""
     try:
@@ -64,7 +66,6 @@ async def stop_live_trading(
     try:
         logger.info("Received stop request for live trading service")
 
-        # Check current status
         current_state = await live_service.get_state()
         if current_state.status.value == "stopped":
             return {
@@ -72,14 +73,12 @@ async def stop_live_trading(
                 "status": "stopped",
             }
 
-        # Attempt to stop with timeout
         try:
             success = await asyncio.wait_for(live_service.stop(), timeout=45.0)
         except asyncio.TimeoutError:
             logger.warning(
                 "Stop operation timed out, but service should be marked as stopped"
             )
-            # Even if timeout, the service should be marked as stopped
             success = True
 
         if success:
@@ -97,7 +96,6 @@ async def stop_live_trading(
 
     except Exception as e:
         logger.exception(f"Error stopping live trading: {e}")
-        # Don't throw 500 error, instead return a warning response
         return {
             "message": f"Live trading service stop completed with errors: {str(e)}",
             "status": "stopped",
