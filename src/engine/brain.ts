@@ -60,12 +60,15 @@ function formatPortfolio(snapshot: PortfolioSnapshot): string {
     '',
     'Positions:',
   ]
+  const maxPositionValue = config.maxBudgetEur * config.maxPositionPct
   if (snapshot.positions.length === 0) {
     lines.push('  (none)')
   } else {
     for (const p of snapshot.positions) {
+      const costBasis = p.averagePrice * p.quantity
+      const remaining = Math.max(0, maxPositionValue - costBasis)
       lines.push(
-        `  ${p.ticker}: ${p.quantity} shares @ current €${p.currentPrice.toFixed(2)} | P&L: €${p.ppl.toFixed(2)}`
+        `  ${p.ticker}: ${p.quantity} shares @ current €${p.currentPrice.toFixed(2)} | cost basis €${costBasis.toFixed(2)} | P&L: €${p.ppl.toFixed(2)} | remaining room: €${remaining.toFixed(2)} of €${maxPositionValue.toFixed(0)} cap`
       )
     }
   }
@@ -86,9 +89,9 @@ const SYSTEM_PROMPT = `You are an autonomous stock trading agent managing a smal
 
 HARD RULES — you must never violate these:
 - Never spend more than €${config.maxBudgetEur} total cash on a single buy order
-- Never invest more than €${(config.maxBudgetEur * config.maxPositionPct).toFixed(0)} (${(config.maxPositionPct * 100).toFixed(0)}%) of the budget in a single stock
+- Never invest more than €${(config.maxBudgetEur * config.maxPositionPct).toFixed(0)} TOTAL in a single stock — this is the combined cost basis of existing shares + new order cost. Check "remaining room" shown per position before sizing a buy
 - Always keep at least €5 in cash as a buffer
-- Hard exits (stop-loss ≥5% down, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself
+- Hard exits (stop-loss ≥${(config.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(config.takeProfitPct * 100).toFixed(1)}% up, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself
 - You may SELL a held position if technical signals have turned bearish, even if the automatic stop hasn't triggered yet
 - Only BUY stocks in the signal universe
 - You are running in ${config.trading212Mode.toUpperCase()} mode
@@ -185,15 +188,29 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
       reasoning: string
     }
 
-    // If Claude decided to buy but didn't specify quantity, compute a sensible default
-    if (parsed.action === 'buy' && parsed.ticker && (!parsed.quantity || parsed.quantity <= 0)) {
+    // For buys, always clamp quantity to what the risk manager will allow.
+    // Claude's arithmetic is unreliable — computeBuyQuantity is authoritative.
+    if (parsed.action === 'buy' && parsed.ticker) {
       const signal = signals.find((s) => s.ticker === parsed.ticker)
       const price = parsed.estimatedPrice ?? signal?.indicators.currentPrice ?? null
       if (price) {
         const instruments = await getInstruments()
         const minQty = instruments.get(parsed.ticker)?.minTradeQuantity ?? 0.01
-        parsed.quantity = computeBuyQuantity(price, snapshot, minQty)
-        parsed.estimatedPrice = price
+        const maxQty = computeBuyQuantity(parsed.ticker, price, snapshot, minQty)
+        if (maxQty <= 0) {
+          // No room left — override to hold
+          parsed.action = 'hold'
+          parsed.ticker = null
+          parsed.quantity = null
+          parsed.estimatedPrice = null
+          parsed.reasoning += ' [overridden to hold: position cap reached or insufficient cash]'
+        } else {
+          // Cap Claude's quantity to the safe maximum
+          parsed.quantity = parsed.quantity && parsed.quantity > 0
+            ? Math.min(parsed.quantity, maxQty)
+            : maxQty
+          parsed.estimatedPrice = price
+        }
       }
     }
 

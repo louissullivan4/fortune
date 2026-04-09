@@ -14,6 +14,7 @@ import {
   getRecentDecisions,
   openAiPosition,
   closeAiPosition,
+  closeAllAiPositions,
   getOpenAiPositions,
   reconcileAiPositions,
   updateHighWaterMark,
@@ -97,7 +98,6 @@ function adjustedSnapshot(snapshot: PortfolioSnapshot): PortfolioSnapshot {
 
 // ── Trailing stop / hard stop-loss check ──────────────────────────────────
 
-const STOP_LOSS_PCT         = 5.0
 const TRAIL_ACTIVATION_PCT  = 1.5
 const TRAIL_STOP_PCT        = 3.0
 
@@ -108,7 +108,11 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
   let exitsPlaced = 0
   const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10))
 
+  // Deduplicate: one check per ticker (multiple buys create multiple ai_positions records)
+  const seenTickers = new Set<string>()
   for (const pos of openPositions) {
+    if (seenTickers.has(pos.ticker)) continue
+    seenTickers.add(pos.ticker)
     if (!pos.entryPrice) continue
     const live = snapshot.positions.find((p) => p.ticker === pos.ticker)
     if (!live) continue
@@ -119,15 +123,20 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
     const pctFromEntry = ((live.currentPrice - pos.entryPrice) / pos.entryPrice) * 100
     const pctFromPeak  = ((live.currentPrice - hwm) / hwm) * 100
 
-    const isStopLoss      = pctFromEntry <= -STOP_LOSS_PCT
-    const trailActivated  = pctFromEntry >= TRAIL_ACTIVATION_PCT || (pos.highWaterMark ?? 0) >= pos.entryPrice * (1 + TRAIL_ACTIVATION_PCT / 100)
-    const isTrailingStop  = trailActivated && pctFromPeak <= -TRAIL_STOP_PCT
+    const stopLossPct      = config.stopLossPct * 100
+    const takeProfitPct    = config.takeProfitPct * 100
+    const isStopLoss       = pctFromEntry <= -stopLossPct
+    const isTakeProfit     = pctFromEntry >= takeProfitPct
+    const trailActivated   = pctFromEntry >= TRAIL_ACTIVATION_PCT || (pos.highWaterMark ?? 0) >= pos.entryPrice * (1 + TRAIL_ACTIVATION_PCT / 100)
+    const isTrailingStop   = trailActivated && pctFromPeak <= -TRAIL_STOP_PCT
 
-    if (!isStopLoss && !isTrailingStop) continue
+    if (!isStopLoss && !isTakeProfit && !isTrailingStop) continue
 
     const reason = isStopLoss
-      ? `Stop-loss: down ${pctFromEntry.toFixed(2)}% from entry €${pos.entryPrice.toFixed(2)}`
-      : `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak €${hwm.toFixed(2)} (entry €${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
+      ? `Stop-loss: down ${Math.abs(pctFromEntry).toFixed(2)}% from entry €${pos.entryPrice.toFixed(2)}`
+      : isTakeProfit
+        ? `Take-profit: up ${pctFromEntry.toFixed(2)}% from entry €${pos.entryPrice.toFixed(2)} (target: ${takeProfitPct.toFixed(1)}%)`
+        : `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak €${hwm.toFixed(2)} (entry €${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
 
     console.log(`[scheduler] Hard exit triggered — ${pos.ticker}: ${reason}`)
 
@@ -153,7 +162,7 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
 
     try {
       const order = await placeMarketOrder(pos.ticker, sellQty, 'sell')
-      await closeAiPosition(pos.ticker, live.currentPrice, timestamp)
+      await closeAllAiPositions(pos.ticker, live.currentPrice, timestamp)
       invalidatePortfolioCache()
       console.log(`[scheduler] Hard exit order placed: ${order.id} (${order.status})`)
       await logOrder({ decisionId, t212OrderId: order.id, status: order.status, fillPrice: live.currentPrice, fillQuantity: sellQty, timestamp })
@@ -272,7 +281,7 @@ export async function runCycle(): Promise<void> {
         sessionCashCommitted += decision.quantity * estimatedPrice
         await openAiPosition(decision.ticker, decision.quantity, estimatedPrice, timestamp)
       } else if (decision.action === 'sell') {
-        await closeAiPosition(decision.ticker, estimatedPrice, timestamp)
+        await closeAllAiPositions(decision.ticker, estimatedPrice, timestamp)
       }
       invalidatePortfolioCache()
       console.log(`[scheduler] Order placed: ${orderResult.id} (${orderResult.status})`)
@@ -289,7 +298,7 @@ export async function runCycle(): Promise<void> {
       console.error(`[scheduler] Order failed: ${msg}`)
       if (decision.action === 'sell' && msg.includes('selling-equity-not-owned')) {
         console.log(`[scheduler] Position ${decision.ticker} already cleared in T212 — reconciling journal`)
-        await closeAiPosition(decision.ticker, estimatedPrice, timestamp)
+        await closeAllAiPositions(decision.ticker, estimatedPrice, timestamp)
       }
       await logOrder({
         decisionId,

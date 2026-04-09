@@ -40,6 +40,8 @@ export interface Config {
   maxBudgetEur:       number
   maxPositionPct:     number
   dailyLossLimitPct:  number
+  stopLossPct:        number
+  takeProfitPct:      number
 }
 
 // Start with env-var defaults; initConfig() will overwrite with DB values.
@@ -55,6 +57,8 @@ export const config: Config = {
   maxBudgetEur:      Number(process.env.MAX_BUDGET_EUR       ?? 100),
   maxPositionPct:    Number(process.env.MAX_POSITION_PCT     ?? 0.25),
   dailyLossLimitPct: Number(process.env.DAILY_LOSS_LIMIT_PCT ?? 0.10),
+  stopLossPct:       Number(process.env.STOP_LOSS_PCT        ?? 0.05),
+  takeProfitPct:     Number(process.env.TAKE_PROFIT_PCT      ?? 0.015),
 }
 
 // ── initConfig — call once at startup after runMigrations() ────────────────
@@ -69,19 +73,23 @@ export async function initConfig(): Promise<void> {
     max_budget_eur: number
     max_position_pct: number
     daily_loss_limit_pct: number
+    stop_loss_pct: number
+    take_profit_pct: number
   }>('SELECT * FROM app_config WHERE id = 1')).rows[0]
 
   if (!row) {
     await pool.query(
       `INSERT INTO app_config
-         (id, trade_universe, trade_interval_ms, max_budget_eur, max_position_pct, daily_loss_limit_pct, updated_at)
-       VALUES (1, $1, $2, $3, $4, $5, $6)`,
+         (id, trade_universe, trade_interval_ms, max_budget_eur, max_position_pct, daily_loss_limit_pct, stop_loss_pct, take_profit_pct, updated_at)
+       VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         config.tradeUniverse.join(','),
         config.tradeIntervalMs,
         config.maxBudgetEur,
         config.maxPositionPct,
         config.dailyLossLimitPct,
+        config.stopLossPct,
+        config.takeProfitPct,
         new Date().toISOString(),
       ]
     )
@@ -94,12 +102,14 @@ export async function initConfig(): Promise<void> {
   config.maxBudgetEur      = Number(row.max_budget_eur)
   config.maxPositionPct    = Number(row.max_position_pct)
   config.dailyLossLimitPct = Number(row.daily_loss_limit_pct)
+  config.stopLossPct       = Number(row.stop_loss_pct)
+  config.takeProfitPct     = Number(row.take_profit_pct)
 }
 
 // ── updateConfig — mutates in-memory config AND persists to DB ──────────────
 
 export type ConfigUpdate = Partial<Pick<Config,
-  'tradeUniverse' | 'tradeIntervalMs' | 'maxBudgetEur' | 'maxPositionPct' | 'dailyLossLimitPct'
+  'tradeUniverse' | 'tradeIntervalMs' | 'maxBudgetEur' | 'maxPositionPct' | 'dailyLossLimitPct' | 'stopLossPct' | 'takeProfitPct'
 >>
 
 export async function updateConfig(updates: ConfigUpdate): Promise<void> {
@@ -112,7 +122,9 @@ export async function updateConfig(updates: ConfigUpdate): Promise<void> {
        max_budget_eur       = COALESCE($3, max_budget_eur),
        max_position_pct     = COALESCE($4, max_position_pct),
        daily_loss_limit_pct = COALESCE($5, daily_loss_limit_pct),
-       updated_at           = $6
+       stop_loss_pct        = COALESCE($6, stop_loss_pct),
+       take_profit_pct      = COALESCE($7, take_profit_pct),
+       updated_at           = $8
      WHERE id = 1`,
     [
       updates.tradeUniverse  ? updates.tradeUniverse.join(',') : null,
@@ -120,6 +132,8 @@ export async function updateConfig(updates: ConfigUpdate): Promise<void> {
       updates.maxBudgetEur       ?? null,
       updates.maxPositionPct     ?? null,
       updates.dailyLossLimitPct  ?? null,
+      updates.stopLossPct        ?? null,
+      updates.takeProfitPct      ?? null,
       new Date().toISOString(),
     ]
   )

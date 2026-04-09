@@ -92,15 +92,23 @@ export async function validateOrder(
 }
 
 export function computeBuyQuantity(
+  ticker: string,
   estimatedPrice: number,
   snapshot: PortfolioSnapshot,
   minTradeQuantity = 0.01,
   targetFraction = 0.5
 ): number {
+  const maxPositionValue = config.maxBudgetEur * config.maxPositionPct
+  const existingPosition = snapshot.positions.find((p) => p.ticker === ticker)
+  const currentPositionValue = existingPosition
+    ? existingPosition.averagePrice * existingPosition.quantity
+    : 0
+  const remainingPositionRoom = maxPositionValue - currentPositionValue
+
   const targetSpend = Math.min(
     config.maxBudgetEur * targetFraction,
     snapshot.cash.free - 5,
-    config.maxBudgetEur * config.maxPositionPct,
+    remainingPositionRoom,
   )
   if (targetSpend <= 0 || estimatedPrice <= 0) return 0
   // Round down to 2dp but ensure we meet minTradeQuantity

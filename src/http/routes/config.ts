@@ -11,6 +11,8 @@ function configResponse() {
     maxBudgetEur:     config.maxBudgetEur,
     maxPositionPct:   config.maxPositionPct,
     dailyLossLimitPct: config.dailyLossLimitPct,
+    stopLossPct:      config.stopLossPct,
+    takeProfitPct:    config.takeProfitPct,
     trading212Mode:   config.trading212Mode,
   }
 }
@@ -33,6 +35,8 @@ router.put('/', async (req, res, next) => {
     if (typeof body.maxBudgetEur === 'number' && body.maxBudgetEur > 0) updates.maxBudgetEur = body.maxBudgetEur
     if (typeof body.maxPositionPct === 'number' && body.maxPositionPct > 0 && body.maxPositionPct <= 1) updates.maxPositionPct = body.maxPositionPct
     if (typeof body.dailyLossLimitPct === 'number' && body.dailyLossLimitPct > 0 && body.dailyLossLimitPct <= 1) updates.dailyLossLimitPct = body.dailyLossLimitPct
+    if (typeof body.stopLossPct === 'number' && body.stopLossPct > 0 && body.stopLossPct <= 1) updates.stopLossPct = body.stopLossPct
+    if (typeof body.takeProfitPct === 'number' && body.takeProfitPct > 0 && body.takeProfitPct <= 1) updates.takeProfitPct = body.takeProfitPct
 
     await updateConfig(updates as Parameters<typeof updateConfig>[0])
     res.json(configResponse())

@@ -79,6 +79,59 @@ body {
   left: 0;
   bottom: 0;
   overflow-y: auto;
+  transition: width 200ms ease;
+}
+
+.sidebar-logo {
+  padding: 20px 16px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.sidebar-collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: background 150ms ease, color 150ms ease;
+}
+.sidebar-collapse-btn:hover {
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+}
+
+.sidebar-logo-icon {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-accent);
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 4px;
+}
+
+.sidebar-logo-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 200ms ease, width 200ms ease;
 }
 
 .main-content {
@@ -86,6 +139,71 @@ body {
   flex: 1;
   min-width: 0;
   padding: 32px 40px;
+  transition: margin-left 200ms ease;
+}
+
+.sidebar-collapsed .sidebar {
+  width: 52px;
+}
+
+.sidebar-collapsed .sidebar-logo-text {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sidebar-collapsed .sidebar-logo {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar-collapsed .nav-label {
+  display: none;
+}
+
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.sidebar-collapsed .main-content {
+  margin-left: 52px;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    width: 52px;
+  }
+
+  .sidebar-logo-text {
+    opacity: 0;
+    width: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .sidebar-logo {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .nav-label {
+    display: none;
+  }
+
+  .nav-item,
+  .sidebar-collapse-btn {
+    justify-content: center;
+    padding: 10px 0;
+  }
+
+  .main-content {
+    margin-left: 52px;
+    padding: 24px 20px;
+  }
 }
 
 /* ── Components ─────────────────────────────────────────────────────────── */
@@ -202,6 +320,7 @@ body {
 .nav-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
   padding: 7px 16px;
   font-size: 13px;
@@ -214,6 +333,11 @@ body {
   background: none;
   width: 100%;
   text-align: left;
+}
+
+.nav-label {
+  white-space: nowrap;
+  overflow: hidden;
 }
 .nav-item:hover {
   background: var(--color-bg-raised);

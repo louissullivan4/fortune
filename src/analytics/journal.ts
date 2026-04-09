@@ -327,6 +327,26 @@ export async function closeAiPosition(ticker: string, exitPrice: number | null, 
   )
 }
 
+export async function closeAllAiPositions(ticker: string, exitPrice: number | null, closedAt: string): Promise<void> {
+  const pool = getPool()
+  const res = await pool.query<{ id: number; quantity: number; entry_price: number | null }>(
+    `SELECT id, quantity, entry_price FROM ai_positions
+     WHERE ticker = $1 AND status = 'open'`,
+    [ticker]
+  )
+  for (const open of res.rows) {
+    const realizedPnl =
+      exitPrice != null && open.entry_price != null
+        ? (exitPrice - Number(open.entry_price)) * Number(open.quantity)
+        : null
+    await pool.query(
+      `UPDATE ai_positions SET status = 'closed', closed_at = $1, exit_price = $2, realized_pnl = $3
+       WHERE id = $4`,
+      [closedAt, exitPrice, realizedPnl, open.id]
+    )
+  }
+}
+
 export async function getOpenAiPositions(): Promise<AiPosition[]> {
   const pool = getPool()
   const res = await pool.query(

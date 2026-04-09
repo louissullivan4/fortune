@@ -260,5 +260,9 @@ export const api = {
 
   instruments: {
     search: (q: string) => req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(q)}`),
+    lookup: async (ticker: string): Promise<Instrument | null> => {
+      const res = await req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(ticker)}`)
+      return res.data.find((i) => i.ticker === ticker) ?? null
+    },
   },
 }

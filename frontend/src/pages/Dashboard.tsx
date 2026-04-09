@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Play, Square, RefreshCw } from 'lucide-react'
 import { api, type EngineStatus, type Portfolio, type DailySnapshot, type Decision } from '../api/client'
 import StatCard from '../components/StatCard'
@@ -92,25 +92,71 @@ export default function Dashboard() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [snapshots, setSnapshots] = useState<DailySnapshot[]>([])
   const [decisions, setDecisions] = useState<Decision[]>([])
+  const [maxBudget, setMaxBudget] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [positionsRefreshing, setPositionsRefreshing] = useState(false)
+  const [instrumentNames, setInstrumentNames] = useState<Record<string, string>>({})
+  const instrumentNamesRef = useRef(instrumentNames)
+  useEffect(() => { instrumentNamesRef.current = instrumentNames }, [instrumentNames])
+
+  const fetchMissingNames = useCallback(async (tickers: string[]) => {
+    const unknown = tickers.filter((t) => !(t in instrumentNamesRef.current))
+    if (unknown.length === 0) return
+    const results = await Promise.all(
+      unknown.map(async (t) => {
+        // Try exact ticker first, then fall back to base symbol (strip suffix)
+        let inst = await api.instruments.lookup(t)
+        if (!inst) {
+          const base = t.replace(/_US_EQ$|_GB_EQ$|_EQ$/, '')
+          const res = await api.instruments.search(base)
+          inst = res.data.find((i) => i.ticker === t) ?? res.data[0] ?? null
+        }
+        return inst
+      })
+    )
+    setInstrumentNames((prev) => {
+      const next = { ...prev }
+      unknown.forEach((t, i) => {
+        next[t] = results[i]?.shortName ?? results[i]?.name ?? t.replace(/_US_EQ$|_GB_EQ$|_EQ$/, '')
+      })
+      return next
+    })
+  }, [])
+
+  const loadPositions = useCallback(async () => {
+    setPositionsRefreshing(true)
+    try {
+      const port = await api.portfolio.get()
+      setPortfolio(port)
+      await fetchMissingNames(port.aiPositions.map((p) => p.ticker))
+    } catch {
+      // don't clobber the main error
+    } finally {
+      setPositionsRefreshing(false)
+    }
+  }, [fetchMissingNames])
 
   const loadData = useCallback(async () => {
     try {
-      const [status, port, snaps, decs] = await Promise.all([
+      const [status, port, snaps, decs, cfg] = await Promise.all([
         api.engine.status(),
         api.portfolio.get(),
         api.analytics.snapshots(30),
         api.decisions.list(1, 10),
+        api.config.get(),
       ])
       setEngineStatus(status)
       setPortfolio(port)
       setSnapshots(snaps.data)
       setDecisions(decs.data)
+      setMaxBudget(cfg.maxBudgetEur)
+      // Fetch names immediately on initial load
+      fetchMissingNames(port.aiPositions.map((p) => p.ticker))
     } catch (e) {
       setError((e as Error).message)
     }
-  }, [])
+  }, [fetchMissingNames])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -118,7 +164,23 @@ export default function Dashboard() {
   const handleStop = async () => { setLoading(true); try { setEngineStatus(await api.engine.stop()) } finally { setLoading(false) } }
   const handleCycle = async () => { setLoading(true); try { setEngineStatus(await api.engine.cycle()); await loadData() } finally { setLoading(false) } }
 
-  const pnl = portfolio?.totalPpl ?? null
+  // AI-only portfolio stats derived from open AI positions + live prices
+  const aiStats = (() => {
+    if (!portfolio) return null
+    const positions = portfolio.aiPositions
+    let invested = 0
+    let currentValue = 0
+    for (const ai of positions) {
+      const costBasis = (ai.entryPrice ?? 0) * ai.quantity
+      const live = portfolio.positions.find((p) => p.ticker === ai.ticker)
+      const liveValue = live ? live.currentPrice * ai.quantity : costBasis
+      invested += costBasis
+      currentValue += liveValue
+    }
+    const pnl = currentValue - invested
+    const budgetRemaining = maxBudget != null ? maxBudget - invested : null
+    return { invested, currentValue, pnl, budgetRemaining }
+  })()
   const snapshotData = snapshots.map((s) => ({
     date: s.date.slice(5), // MM-DD
     value: Number(s.value.toFixed(2)),
@@ -127,7 +189,7 @@ export default function Dashboard() {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Dashboard</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Hi Louis</h1>
         {error && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 4 }}>{error}</div>}
       </div>
 
@@ -139,16 +201,16 @@ export default function Dashboard() {
         loading={loading}
       />
 
-      {/* Stats row */}
+      {/* Stats row — AI portfolio only */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
-        <StatCard label="Total value" value={fmtEur(portfolio?.totalValue)} />
-        <StatCard label="Free cash" value={fmtEur(portfolio?.cash.free)} />
-        <StatCard label="Invested" value={fmtEur(portfolio?.cash.invested)} />
+        <StatCard label="AI value" value={fmtEur(aiStats?.currentValue)} />
+        <StatCard label="AI invested" value={fmtEur(aiStats?.invested)} />
+        <StatCard label="Budget remaining" value={fmtEur(aiStats?.budgetRemaining)} />
         <StatCard
-          label="P&L"
-          value={fmtEur(pnl)}
-          positive={pnl !== null && pnl > 0}
-          negative={pnl !== null && pnl < 0}
+          label="Unrealised P&L"
+          value={fmtEur(aiStats?.pnl)}
+          positive={aiStats != null && aiStats.pnl > 0}
+          negative={aiStats != null && aiStats.pnl < 0}
         />
       </div>
 
@@ -183,50 +245,81 @@ export default function Dashboard() {
 
         {/* AI-tracked positions only */}
         <div className="card">
-          <div className="section-label" style={{ marginBottom: 12 }}>ai positions</div>
-          {portfolio?.aiPositions.length ? (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th style={{ textAlign: 'right' }}>Entry</th>
-                  <th style={{ textAlign: 'right' }}>Current</th>
-                  <th style={{ textAlign: 'right' }}>P&L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {portfolio.aiPositions.map((ai) => {
-                  const live = portfolio.positions.find((p) => p.ticker === ai.ticker)
-                  const currentPrice = live?.currentPrice ?? null
-                  const pnl = currentPrice != null && ai.entryPrice != null
-                    ? (currentPrice - ai.entryPrice) * ai.quantity
-                    : null
-                  const pct = currentPrice != null && ai.entryPrice != null && ai.entryPrice > 0
-                    ? ((currentPrice - ai.entryPrice) / ai.entryPrice) * 100
-                    : null
-                  return (
-                    <tr key={ai.id}>
-                      <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>{ai.ticker}</td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                        {ai.entryPrice != null ? `€${ai.entryPrice.toFixed(2)}` : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                        {currentPrice != null ? `€${currentPrice.toFixed(2)}` : '—'}
-                      </td>
-                      <td style={{ textAlign: 'right', color: pnl == null ? 'var(--color-text-muted)' : pnl >= 0 ? '#16a34a' : '#dc2626' }}>
-                        {pnl != null ? `${pnl >= 0 ? '+' : ''}€${pnl.toFixed(2)}` : '—'}
-                        {pct != null && (
-                          <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>
-                            ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span className="section-label">ai positions</span>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: '0 6px', height: 24 }}
+              onClick={() => loadPositions(false)}
+              disabled={positionsRefreshing}
+              title="Refresh positions"
+            >
+              <RefreshCw size={12} style={{ transition: 'transform 0.4s', transform: positionsRefreshing ? 'rotate(360deg)' : 'none' }} />
+            </button>
+          </div>
+          {portfolio?.aiPositions.length ? (() => {
+            // Aggregate multiple lots of the same ticker into one row
+            const grouped = portfolio.aiPositions.reduce<Record<string, {
+              ticker: string; totalQty: number; weightedEntrySum: number
+            }>>((acc, ai) => {
+              if (!acc[ai.ticker]) acc[ai.ticker] = { ticker: ai.ticker, totalQty: 0, weightedEntrySum: 0 }
+              acc[ai.ticker].totalQty += ai.quantity
+              acc[ai.ticker].weightedEntrySum += (ai.entryPrice ?? 0) * ai.quantity
+              return acc
+            }, {})
+
+            return (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th style={{ textAlign: 'right' }}>Avg Entry</th>
+                    <th style={{ textAlign: 'right' }}>Current</th>
+                    <th style={{ textAlign: 'right' }}>P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.values(grouped).map(({ ticker, totalQty, weightedEntrySum }) => {
+                    const avgEntry = totalQty > 0 ? weightedEntrySum / totalQty : null
+                    const live = portfolio.positions.find((p) => p.ticker === ticker)
+                    const currentPrice = live?.currentPrice ?? null
+                    const pnl = currentPrice != null && avgEntry != null
+                      ? (currentPrice - avgEntry) * totalQty
+                      : null
+                    const pct = currentPrice != null && avgEntry != null && avgEntry > 0
+                      ? ((currentPrice - avgEntry) / avgEntry) * 100
+                      : null
+                    const displayTicker = ticker.replace(/_US_EQ$|_GB_EQ$|_EQ$/, '')
+                    const name = instrumentNames[ticker]
+                    return (
+                      <tr key={ticker}>
+                        <td>
+                          <span style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>{displayTicker}</span>
+                          {name && name !== displayTicker && (
+                            <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-muted)', marginTop: 1 }}>{name}</span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                          {avgEntry != null ? `€${avgEntry.toFixed(2)}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                          {currentPrice != null ? `€${currentPrice.toFixed(2)}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right', color: pnl == null ? 'var(--color-text-muted)' : pnl >= 0 ? '#16a34a' : '#dc2626' }}>
+                          {pnl != null ? `${pnl >= 0 ? '+' : ''}€${pnl.toFixed(2)}` : '—'}
+                          {pct != null && (
+                            <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>
+                              ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )
+          })() : (
             <div style={{ fontSize: 13, color: 'var(--color-text-muted)', paddingTop: 8 }}>No AI positions open</div>
           )}
         </div>
@@ -264,7 +357,7 @@ export default function Dashboard() {
                       {d.action.toUpperCase()}
                     </span>
                   </td>
-                  <td style={{ fontFamily: 'var(--font-code)' }}>{d.ticker ?? '—'}</td>
+                  <td style={{ fontFamily: 'var(--font-code)' }}>{d.ticker ? d.ticker.replace(/_US_EQ$|_EQ$/, '') : '—'}</td>
                   <td style={{ color: 'var(--color-text-secondary)' }}>{d.quantity ?? '—'}</td>
                   <td style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                     {d.orderStatus ? (d.orderStatus.startsWith('blocked') ? '⚠ blocked' : d.orderStatus.startsWith('error') ? '✗ error' : '✓ ' + d.orderStatus) : '—'}
