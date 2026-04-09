@@ -1,6 +1,4 @@
 import { getPool } from '../db.js'
-import type { TickerSignal } from '../strategy/signals.js'
-import type { PortfolioSnapshot } from '../api/trading212.js'
 
 export interface DecisionRecord {
   id?: number
@@ -32,8 +30,16 @@ export async function logDecision(record: Omit<DecisionRecord, 'id'>): Promise<n
     `INSERT INTO decisions (timestamp, action, ticker, quantity, estimated_price, reasoning, signals_json, portfolio_json)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id`,
-    [record.timestamp, record.action, record.ticker, record.quantity, record.estimatedPrice,
-     record.reasoning, record.signalsJson, record.portfolioJson]
+    [
+      record.timestamp,
+      record.action,
+      record.ticker,
+      record.quantity,
+      record.estimatedPrice,
+      record.reasoning,
+      record.signalsJson,
+      record.portfolioJson,
+    ]
   )
   return result.rows[0].id
 }
@@ -46,14 +52,25 @@ export async function logOrder(record: Omit<OrderRecord, 'id'>): Promise<number>
     `INSERT INTO orders (decision_id, t212_order_id, status, fill_price, fill_quantity, timestamp)
      VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [record.decisionId, record.t212OrderId, record.status, record.fillPrice, record.fillQuantity, record.timestamp]
+    [
+      record.decisionId,
+      record.t212OrderId,
+      record.status,
+      record.fillPrice,
+      record.fillQuantity,
+      record.timestamp,
+    ]
   )
   return result.rows[0].id
 }
 
 // ── Daily snapshots ────────────────────────────────────────────────────────
 
-export async function upsertDailySnapshot(date: string, openValue: number, aiOpenValue: number): Promise<void> {
+export async function upsertDailySnapshot(
+  date: string,
+  openValue: number,
+  aiOpenValue: number
+): Promise<void> {
   const pool = getPool()
   await pool.query(
     `INSERT INTO daily_snapshots (date, open_value, ai_open_value)
@@ -63,7 +80,12 @@ export async function upsertDailySnapshot(date: string, openValue: number, aiOpe
   )
 }
 
-export async function updateDailyClose(date: string, closeValue: number, pnl: number, aiCloseValue?: number): Promise<void> {
+export async function updateDailyClose(
+  date: string,
+  closeValue: number,
+  pnl: number,
+  aiCloseValue?: number
+): Promise<void> {
   const pool = getPool()
   const res = await pool.query<{ c: string }>(
     `SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND timestamp::date = $1::date`,
@@ -120,7 +142,11 @@ export interface DailyStats {
 export async function getDailyStats(date: string): Promise<DailyStats | null> {
   const pool = getPool()
   const res = await pool.query<{
-    date: string; open_value: number; close_value: number | null; trades_count: number; pnl: number | null
+    date: string
+    open_value: number
+    close_value: number | null
+    trades_count: number
+    pnl: number | null
   }>('SELECT * FROM daily_snapshots WHERE date = $1', [date])
   const row = res.rows[0]
   if (!row) return null
@@ -146,7 +172,11 @@ export async function getDailyValues(limit = 30): Promise<Array<{ date: string; 
   return res.rows.reverse()
 }
 
-export async function getAllTimeStats(): Promise<{ totalDecisions: number; totalTrades: number; daysTraded: number }> {
+export async function getAllTimeStats(): Promise<{
+  totalDecisions: number
+  totalTrades: number
+  daysTraded: number
+}> {
   const pool = getPool()
   const [d, t, s] = await Promise.all([
     pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM decisions'),
@@ -155,8 +185,8 @@ export async function getAllTimeStats(): Promise<{ totalDecisions: number; total
   ])
   return {
     totalDecisions: Number(d.rows[0].c),
-    totalTrades:    Number(t.rows[0].c),
-    daysTraded:     Number(s.rows[0].c),
+    totalTrades: Number(t.rows[0].c),
+    daysTraded: Number(s.rows[0].c),
   }
 }
 
@@ -200,8 +230,12 @@ export interface AiTrade {
 export async function getAiTrades(): Promise<AiTrade[]> {
   const pool = getPool()
   const res = await pool.query<{
-    timestamp: string; action: 'buy' | 'sell'; ticker: string
-    quantity: number; estimatedprice: number | null; orderstatus: string | null
+    timestamp: string
+    action: 'buy' | 'sell'
+    ticker: string
+    quantity: number
+    estimatedprice: number | null
+    orderstatus: string | null
   }>(
     `SELECT d.timestamp, d.action, d.ticker, d.quantity, d.estimated_price AS estimatedprice,
             o.status AS orderstatus
@@ -211,13 +245,13 @@ export async function getAiTrades(): Promise<AiTrade[]> {
      ORDER BY d.id ASC`
   )
   return res.rows.map((r) => ({
-    timestamp:      r.timestamp,
-    action:         r.action,
-    ticker:         r.ticker,
-    quantity:       Number(r.quantity),
+    timestamp: r.timestamp,
+    action: r.action,
+    ticker: r.ticker,
+    quantity: Number(r.quantity),
     estimatedPrice: r.estimatedprice != null ? Number(r.estimatedprice) : null,
     estimatedValue: r.estimatedprice != null ? Number(r.estimatedprice) * Number(r.quantity) : null,
-    orderStatus:    r.orderstatus,
+    orderStatus: r.orderstatus,
   }))
 }
 
@@ -258,21 +292,37 @@ export interface AiPosition {
 }
 
 function mapAiPosition(r: {
-  id: number; ticker: string; opened_at: string; quantity: number; entry_price: number | null
-  high_water_mark: number | null; closed_at: string | null; exit_price: number | null
-  realized_pnl: number | null; status: string
+  id: number
+  ticker: string
+  opened_at: string
+  quantity: number
+  entry_price: number | null
+  high_water_mark: number | null
+  closed_at: string | null
+  exit_price: number | null
+  realized_pnl: number | null
+  status: string
 }): AiPosition {
   return {
-    id: r.id, ticker: r.ticker, openedAt: r.opened_at, quantity: Number(r.quantity),
+    id: r.id,
+    ticker: r.ticker,
+    openedAt: r.opened_at,
+    quantity: Number(r.quantity),
     entryPrice: r.entry_price != null ? Number(r.entry_price) : null,
     highWaterMark: r.high_water_mark != null ? Number(r.high_water_mark) : null,
-    closedAt: r.closed_at, exitPrice: r.exit_price != null ? Number(r.exit_price) : null,
+    closedAt: r.closed_at,
+    exitPrice: r.exit_price != null ? Number(r.exit_price) : null,
     realizedPnl: r.realized_pnl != null ? Number(r.realized_pnl) : null,
     status: r.status as 'open' | 'closed',
   }
 }
 
-export async function openAiPosition(ticker: string, quantity: number, entryPrice: number | null, openedAt: string): Promise<number> {
+export async function openAiPosition(
+  ticker: string,
+  quantity: number,
+  entryPrice: number | null,
+  openedAt: string
+): Promise<number> {
   const pool = getPool()
   const result = await pool.query<{ id: number }>(
     `INSERT INTO ai_positions (ticker, opened_at, quantity, entry_price, high_water_mark, status)
@@ -304,7 +354,11 @@ export async function getHighWaterMark(ticker: string): Promise<number | null> {
   return res.rows[0]?.high_water_mark ?? null
 }
 
-export async function closeAiPosition(ticker: string, exitPrice: number | null, closedAt: string): Promise<void> {
+export async function closeAiPosition(
+  ticker: string,
+  exitPrice: number | null,
+  closedAt: string
+): Promise<void> {
   const pool = getPool()
   const res = await pool.query<{ id: number; quantity: number; entry_price: number | null }>(
     `SELECT id, quantity, entry_price FROM ai_positions
@@ -327,7 +381,11 @@ export async function closeAiPosition(ticker: string, exitPrice: number | null, 
   )
 }
 
-export async function closeAllAiPositions(ticker: string, exitPrice: number | null, closedAt: string): Promise<void> {
+export async function closeAllAiPositions(
+  ticker: string,
+  exitPrice: number | null,
+  closedAt: string
+): Promise<void> {
   const pool = getPool()
   const res = await pool.query<{ id: number; quantity: number; entry_price: number | null }>(
     `SELECT id, quantity, entry_price FROM ai_positions
@@ -366,22 +424,30 @@ export async function getClosedAiPositions(): Promise<AiPosition[]> {
 export async function reconcileAiPositions(): Promise<{ inserted: number }> {
   const pool = getPool()
 
-  const trades = (await pool.query<{
-    timestamp: string; action: 'buy' | 'sell'; ticker: string; quantity: number; estimated_price: number | null
-  }>(
-    `SELECT d.timestamp, d.action, d.ticker, d.quantity, d.estimated_price
+  const trades = (
+    await pool.query<{
+      timestamp: string
+      action: 'buy' | 'sell'
+      ticker: string
+      quantity: number
+      estimated_price: number | null
+    }>(
+      `SELECT d.timestamp, d.action, d.ticker, d.quantity, d.estimated_price
      FROM decisions d
      LEFT JOIN orders o ON o.decision_id = d.id
      WHERE d.action IN ('buy', 'sell')
        AND d.ticker IS NOT NULL
        AND (o.status IS NULL OR (o.status NOT LIKE 'blocked%' AND o.status NOT LIKE 'error%'))
      ORDER BY d.id ASC`
-  )).rows
+    )
+  ).rows
 
   const existing = new Set(
-    (await pool.query<{ key: string }>(
-      `SELECT ticker || '|' || opened_at AS key FROM ai_positions`
-    )).rows.map((r) => r.key)
+    (
+      await pool.query<{ key: string }>(
+        `SELECT ticker || '|' || opened_at AS key FROM ai_positions`
+      )
+    ).rows.map((r) => r.key)
   )
 
   let inserted = 0
@@ -416,15 +482,47 @@ export interface DecisionRow {
   orderId: string | null
 }
 
-export async function getDecisionsPaginated(page: number, limit: number): Promise<{ data: DecisionRow[]; total: number }> {
+export async function getDecisionsPaginated(
+  page: number,
+  limit: number,
+  filters: { action?: string; ticker?: string; period?: string } = {}
+): Promise<{ data: DecisionRow[]; total: number }> {
   const pool = getPool()
   const offset = (page - 1) * limit
+
+  const conditions: string[] = []
+  const params: unknown[] = []
+  if (filters.action) {
+    params.push(filters.action)
+    conditions.push(`d.action = $${params.length}`)
+  }
+  if (filters.ticker) {
+    params.push(`%${filters.ticker.toUpperCase()}%`)
+    conditions.push(`UPPER(d.ticker) LIKE $${params.length}`)
+  }
+  if (filters.period === 'today') {
+    conditions.push(`d.timestamp::date = CURRENT_DATE`)
+  } else if (filters.period === 'week') {
+    conditions.push(`d.timestamp >= NOW() - INTERVAL '7 days'`)
+  } else if (filters.period === 'month') {
+    conditions.push(`d.timestamp >= NOW() - INTERVAL '30 days'`)
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
   const [countRes, dataRes] = await Promise.all([
-    pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM decisions'),
+    pool.query<{ c: string }>(`SELECT COUNT(*) AS c FROM decisions d ${where}`, params),
     pool.query<{
-      id: number; timestamp: string; action: string; ticker: string | null; quantity: number | null
-      estimatedprice: number | null; reasoning: string; signalsjson: string; portfoliojson: string
-      orderstatus: string | null; orderid: string | null
+      id: number
+      timestamp: string
+      action: string
+      ticker: string | null
+      quantity: number | null
+      estimatedprice: number | null
+      reasoning: string
+      signalsjson: string
+      portfoliojson: string
+      orderstatus: string | null
+      orderid: string | null
     }>(
       `SELECT d.id, d.timestamp, d.action, d.ticker, d.quantity,
               d.estimated_price AS estimatedprice, d.reasoning,
@@ -432,18 +530,25 @@ export async function getDecisionsPaginated(page: number, limit: number): Promis
               o.status AS orderstatus, o.t212_order_id AS orderid
        FROM decisions d
        LEFT JOIN orders o ON o.decision_id = d.id
+       ${where}
        ORDER BY d.id DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
     ),
   ])
   const total = Number(countRes.rows[0].c)
   const data: DecisionRow[] = dataRes.rows.map((r) => ({
-    id: r.id, timestamp: r.timestamp, action: r.action, ticker: r.ticker,
+    id: r.id,
+    timestamp: r.timestamp,
+    action: r.action,
+    ticker: r.ticker,
     quantity: r.quantity != null ? Number(r.quantity) : null,
     estimatedPrice: r.estimatedprice != null ? Number(r.estimatedprice) : null,
-    reasoning: r.reasoning, signalsJson: r.signalsjson, portfolioJson: r.portfoliojson,
-    orderStatus: r.orderstatus, orderId: r.orderid,
+    reasoning: r.reasoning,
+    signalsJson: r.signalsjson,
+    portfolioJson: r.portfoliojson,
+    orderStatus: r.orderstatus,
+    orderId: r.orderid,
   }))
   return { data, total }
 }
@@ -451,9 +556,17 @@ export async function getDecisionsPaginated(page: number, limit: number): Promis
 export async function getDecisionById(id: number): Promise<DecisionRow | null> {
   const pool = getPool()
   const res = await pool.query<{
-    id: number; timestamp: string; action: string; ticker: string | null; quantity: number | null
-    estimatedprice: number | null; reasoning: string; signalsjson: string; portfoliojson: string
-    orderstatus: string | null; orderid: string | null
+    id: number
+    timestamp: string
+    action: string
+    ticker: string | null
+    quantity: number | null
+    estimatedprice: number | null
+    reasoning: string
+    signalsjson: string
+    portfoliojson: string
+    orderstatus: string | null
+    orderid: string | null
   }>(
     `SELECT d.id, d.timestamp, d.action, d.ticker, d.quantity,
             d.estimated_price AS estimatedprice, d.reasoning,
@@ -467,11 +580,17 @@ export async function getDecisionById(id: number): Promise<DecisionRow | null> {
   const r = res.rows[0]
   if (!r) return null
   return {
-    id: r.id, timestamp: r.timestamp, action: r.action, ticker: r.ticker,
+    id: r.id,
+    timestamp: r.timestamp,
+    action: r.action,
+    ticker: r.ticker,
     quantity: r.quantity != null ? Number(r.quantity) : null,
     estimatedPrice: r.estimatedprice != null ? Number(r.estimatedprice) : null,
-    reasoning: r.reasoning, signalsJson: r.signalsjson, portfolioJson: r.portfoliojson,
-    orderStatus: r.orderstatus, orderId: r.orderid,
+    reasoning: r.reasoning,
+    signalsJson: r.signalsjson,
+    portfolioJson: r.portfoliojson,
+    orderStatus: r.orderstatus,
+    orderId: r.orderid,
   }
 }
 
@@ -487,15 +606,24 @@ export interface OrderRow {
   action: string
 }
 
-export async function getOrdersPaginated(page: number, limit: number): Promise<{ data: OrderRow[]; total: number }> {
+export async function getOrdersPaginated(
+  page: number,
+  limit: number
+): Promise<{ data: OrderRow[]; total: number }> {
   const pool = getPool()
   const offset = (page - 1) * limit
   const [countRes, dataRes] = await Promise.all([
     pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM orders'),
     pool.query<{
-      id: number; decisionid: number; t212orderid: string | null; status: string
-      fillprice: number | null; fillquantity: number | null; timestamp: string
-      ticker: string | null; action: string
+      id: number
+      decisionid: number
+      t212orderid: string | null
+      status: string
+      fillprice: number | null
+      fillquantity: number | null
+      timestamp: string
+      ticker: string | null
+      action: string
     }>(
       `SELECT o.id, o.decision_id AS decisionid, o.t212_order_id AS t212orderid,
               o.status, o.fill_price AS fillprice, o.fill_quantity AS fillquantity,
@@ -509,10 +637,15 @@ export async function getOrdersPaginated(page: number, limit: number): Promise<{
   ])
   const total = Number(countRes.rows[0].c)
   const data: OrderRow[] = dataRes.rows.map((r) => ({
-    id: r.id, decisionId: r.decisionid, t212OrderId: r.t212orderid, status: r.status,
+    id: r.id,
+    decisionId: r.decisionid,
+    t212OrderId: r.t212orderid,
+    status: r.status,
     fillPrice: r.fillprice != null ? Number(r.fillprice) : null,
     fillQuantity: r.fillquantity != null ? Number(r.fillquantity) : null,
-    timestamp: r.timestamp, ticker: r.ticker, action: r.action,
+    timestamp: r.timestamp,
+    ticker: r.ticker,
+    action: r.action,
   }))
   return { data, total }
 }
@@ -536,8 +669,16 @@ export async function logAiUsage(record: AiUsageRecord): Promise<void> {
     `INSERT INTO ai_usage
        (decision_id, timestamp, model, input_tokens, output_tokens, input_cost_usd, output_cost_usd, total_cost_usd)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [record.decisionId, record.timestamp, record.model, record.inputTokens, record.outputTokens,
-     record.inputCostUsd, record.outputCostUsd, record.totalCostUsd]
+    [
+      record.decisionId,
+      record.timestamp,
+      record.model,
+      record.inputTokens,
+      record.outputTokens,
+      record.inputCostUsd,
+      record.outputCostUsd,
+      record.totalCostUsd,
+    ]
   )
 }
 
@@ -552,7 +693,10 @@ export interface AiUsageSummary {
 export async function getAiUsageSummary(): Promise<AiUsageSummary> {
   const pool = getPool()
   const res = await pool.query<{
-    totalinputtokens: string; totaloutputtokens: string; totalcostusd: string; callcount: string
+    totalinputtokens: string
+    totaloutputtokens: string
+    totalcostusd: string
+    callcount: string
   }>(
     `SELECT
        COALESCE(SUM(input_tokens),    0) AS totalinputtokens,
@@ -565,7 +709,7 @@ export async function getAiUsageSummary(): Promise<AiUsageSummary> {
   const callCount = Number(r.callcount)
   const totalCostUsd = Number(r.totalcostusd)
   return {
-    totalInputTokens:  Number(r.totalinputtokens),
+    totalInputTokens: Number(r.totalinputtokens),
     totalOutputTokens: Number(r.totaloutputtokens),
     totalCostUsd,
     callCount,
@@ -573,7 +717,9 @@ export async function getAiUsageSummary(): Promise<AiUsageSummary> {
   }
 }
 
-export async function getAiUsageByDay(limit = 30): Promise<Array<{ date: string; costUsd: number; calls: number }>> {
+export async function getAiUsageByDay(
+  limit = 30
+): Promise<Array<{ date: string; costUsd: number; calls: number }>> {
   const pool = getPool()
   const res = await pool.query<{ date: string; costusd: string; calls: string }>(
     `SELECT timestamp::date AS date,
@@ -588,7 +734,29 @@ export async function getAiUsageByDay(limit = 30): Promise<Array<{ date: string;
   return res.rows.map((r) => ({ date: r.date, costUsd: Number(r.costusd), calls: Number(r.calls) }))
 }
 
-export async function getIntradayValues(hours: number): Promise<Array<{ timestamp: string; value: number }>> {
+export async function getRealizedPnlHourly(): Promise<
+  Array<{ hour: string; cumulativePnl: number }>
+> {
+  const pool = getPool()
+  const res = await pool.query<{ hour: string; pnl: string }>(
+    `SELECT
+       date_trunc('hour', closed_at::timestamptz) AS hour,
+       SUM(realized_pnl) AS pnl
+     FROM ai_positions
+     WHERE status = 'closed' AND closed_at IS NOT NULL AND realized_pnl IS NOT NULL
+     GROUP BY hour
+     ORDER BY hour ASC`
+  )
+  let cumulative = 0
+  return res.rows.map((r) => {
+    cumulative += Number(r.pnl)
+    return { hour: r.hour, cumulativePnl: Number(cumulative.toFixed(4)) }
+  })
+}
+
+export async function getIntradayValues(
+  hours: number
+): Promise<Array<{ timestamp: string; value: number }>> {
   const pool = getPool()
   const res = await pool.query<{ timestamp: string; portfolio_json: string }>(
     `SELECT timestamp, portfolio_json
@@ -609,18 +777,24 @@ export async function getIntradayValues(hours: number): Promise<Array<{ timestam
   })
 }
 
-export async function getOrdersForDay(date: string): Promise<Array<{
-  action: string
-  ticker: string | null
-  quantity: number | null
-  reasoning: string
-  status: string | null
-  fillPrice: number | null
-}>> {
+export async function getOrdersForDay(date: string): Promise<
+  Array<{
+    action: string
+    ticker: string | null
+    quantity: number | null
+    reasoning: string
+    status: string | null
+    fillPrice: number | null
+  }>
+> {
   const pool = getPool()
   const res = await pool.query<{
-    action: string; ticker: string | null; quantity: number | null
-    reasoning: string; status: string | null; fillprice: number | null
+    action: string
+    ticker: string | null
+    quantity: number | null
+    reasoning: string
+    status: string | null
+    fillprice: number | null
   }>(
     `SELECT d.action, d.ticker, d.quantity, d.reasoning, o.status, o.fill_price AS fillprice
      FROM decisions d
@@ -629,5 +803,8 @@ export async function getOrdersForDay(date: string): Promise<Array<{
      ORDER BY d.id`,
     [date]
   )
-  return res.rows.map((r) => ({ ...r, fillPrice: r.fillprice != null ? Number(r.fillprice) : null }))
+  return res.rows.map((r) => ({
+    ...r,
+    fillPrice: r.fillprice != null ? Number(r.fillprice) : null,
+  }))
 }
