@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import {
   initAiPortfolio,
   getAiPortfolioConfig,
@@ -7,24 +8,27 @@ import {
   getAllTimeStats,
 } from './journal.js'
 import { getPortfolioSnapshot } from '../api/trading212.js'
-import { config } from '../config/index.js'
+import { config, initConfig } from '../config/index.js'
+import { runMigrations } from '../db.js'
 
 function line(char = '─', len = 60): string {
   return char.repeat(len)
 }
 
 async function showPerformance(): Promise<void> {
-  const cfg = getAiPortfolioConfig()
+  const cfg = await getAiPortfolioConfig()
   if (!cfg) {
     console.log('\nAI portfolio not initialised. Run: npm run performance init\n')
     return
   }
 
-  const trades = getAiTrades()
-  const openPositions = getOpenAiPositions()
-  const closedPositions = getClosedAiPositions()
-  const snapshot = await getPortfolioSnapshot()
-  const allTime = getAllTimeStats()
+  const [trades, openPositions, closedPositions, snapshot, allTime] = await Promise.all([
+    getAiTrades(),
+    getOpenAiPositions(),
+    getClosedAiPositions(),
+    getPortfolioSnapshot(),
+    getAllTimeStats(),
+  ])
 
   const executedTrades = trades.filter(
     (t) => t.orderStatus == null || (!t.orderStatus.startsWith('blocked') && !t.orderStatus.startsWith('error'))
@@ -107,15 +111,22 @@ async function showPerformance(): Promise<void> {
 async function init(): Promise<void> {
   const budgetArg = process.argv.find((a) => /^\d+(\.\d+)?$/.test(a))
   const budget = budgetArg ? parseFloat(budgetArg) : config.maxBudgetEur
-  initAiPortfolio(budget)
+  await initAiPortfolio(budget)
   console.log(`\nAI portfolio initialised with €${budget.toFixed(2)} budget starting now.\n`)
 }
 
 if (process.argv[1]?.endsWith('performance.ts') || process.argv[1]?.endsWith('performance.js')) {
   const isInit = process.argv.includes('init')
-  if (isInit) {
-    init().catch(console.error)
-  } else {
-    showPerformance().catch(console.error)
+
+  async function run() {
+    await runMigrations()
+    await initConfig()
+    if (isInit) {
+      await init()
+    } else {
+      await showPerformance()
+    }
+    process.exit(0)
   }
+  run().catch((err) => { console.error(err); process.exit(1) })
 }

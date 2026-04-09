@@ -80,15 +80,11 @@ export function nextOpenMs(): number {
 }
 
 // ── Session cash tracking ──────────────────────────────────────────────────
-// T212 processes market orders async, so cash.free doesn't drop immediately.
-// We track committed spend in memory so the risk manager sees accurate available cash.
 
 let sessionCashCommitted = 0
 let lastKnownFreeCash: number | null = null
 
 function adjustedSnapshot(snapshot: PortfolioSnapshot): PortfolioSnapshot {
-  // If T212's actual free cash has dropped since we last saw it, orders have settled —
-  // reduce our committed tracker by however much T212 deducted
   if (lastKnownFreeCash !== null && snapshot.cash.free < lastKnownFreeCash) {
     const settled = lastKnownFreeCash - snapshot.cash.free
     sessionCashCommitted = Math.max(0, sessionCashCommitted - settled)
@@ -100,33 +96,24 @@ function adjustedSnapshot(snapshot: PortfolioSnapshot): PortfolioSnapshot {
 }
 
 // ── Trailing stop / hard stop-loss check ──────────────────────────────────
-// Runs before Claude — uses the bot's own entry prices, not T212's blended average.
-//
-// Strategy:
-//   • Hard stop-loss: exit if position is down ≥ STOP_LOSS_PCT from entry (capital protection)
-//   • Trailing stop: once a position reaches TRAIL_ACTIVATION_PCT profit, track the highest
-//     price seen (high-water mark). Exit if price falls ≥ TRAIL_STOP_PCT from the peak.
-//     This lets winners run much further than a fixed 2% take-profit.
-//
-// All open positions are checked and exited in the same cycle — no "one exit per cycle" limit.
 
-const STOP_LOSS_PCT         = 5.0   // hard stop: entry down 5% → exit
-const TRAIL_ACTIVATION_PCT  = 1.5   // trailing stop activates once position is +1.5% from entry
-const TRAIL_STOP_PCT        = 3.0   // trail 3% below the high-water mark
+const STOP_LOSS_PCT         = 5.0
+const TRAIL_ACTIVATION_PCT  = 1.5
+const TRAIL_STOP_PCT        = 3.0
 
 async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): Promise<number> {
-  const openPositions = getOpenAiPositions()
+  const openPositions = await getOpenAiPositions()
   if (openPositions.length === 0) return 0
 
   let exitsPlaced = 0
+  const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10))
 
   for (const pos of openPositions) {
     if (!pos.entryPrice) continue
     const live = snapshot.positions.find((p) => p.ticker === pos.ticker)
     if (!live) continue
 
-    // Update high-water mark with current price
-    updateHighWaterMark(pos.ticker, live.currentPrice)
+    await updateHighWaterMark(pos.ticker, live.currentPrice)
     const hwm = Math.max(pos.highWaterMark ?? pos.entryPrice, live.currentPrice)
 
     const pctFromEntry = ((live.currentPrice - pos.entryPrice) / pos.entryPrice) * 100
@@ -149,7 +136,7 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
     const risk = await validateOrder(
       { action: 'sell', ticker: pos.ticker, quantity: sellQty, estimatedPrice: live.currentPrice },
       snapshot,
-      getDailyOpenValue(timestamp.slice(0, 10)) ?? snapshot.totalValue
+      dailyOpen ?? snapshot.totalValue
     )
 
     if (!risk.allowed) {
@@ -157,7 +144,7 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
       continue
     }
 
-    const decisionId = logDecision({
+    const decisionId = await logDecision({
       timestamp, action: 'sell', ticker: pos.ticker, quantity: sellQty,
       estimatedPrice: live.currentPrice, reasoning: reason,
       signalsJson: '[]',
@@ -166,14 +153,14 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
 
     try {
       const order = await placeMarketOrder(pos.ticker, sellQty, 'sell')
-      closeAiPosition(pos.ticker, live.currentPrice, timestamp)
+      await closeAiPosition(pos.ticker, live.currentPrice, timestamp)
       invalidatePortfolioCache()
       console.log(`[scheduler] Hard exit order placed: ${order.id} (${order.status})`)
-      logOrder({ decisionId, t212OrderId: order.id, status: order.status, fillPrice: live.currentPrice, fillQuantity: sellQty, timestamp })
+      await logOrder({ decisionId, t212OrderId: order.id, status: order.status, fillPrice: live.currentPrice, fillQuantity: sellQty, timestamp })
       exitsPlaced++
     } catch (err) {
       console.error(`[scheduler] Hard exit order failed: ${(err as Error).message}`)
-      logOrder({ decisionId, t212OrderId: null, status: `error: ${(err as Error).message}`, fillPrice: null, fillQuantity: null, timestamp })
+      await logOrder({ decisionId, t212OrderId: null, status: `error: ${(err as Error).message}`, fillPrice: null, fillQuantity: null, timestamp })
     }
   }
   return exitsPlaced
@@ -182,6 +169,11 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
 // ── Single trading cycle ───────────────────────────────────────────────────
 
 export async function runCycle(): Promise<void> {
+  if (!isMarketOpen()) {
+    console.log('[scheduler] Markets are closed — skipping cycle (no AI calls outside trading hours)')
+    return
+  }
+
   const now = new Date()
   const dateStr = now.toISOString().slice(0, 10)
   const timestamp = now.toISOString()
@@ -193,19 +185,16 @@ export async function runCycle(): Promise<void> {
   const pendingNote = sessionCashCommitted > 0 ? ` (€${sessionCashCommitted.toFixed(2)} pending settlement)` : ''
   console.log(`[scheduler] Portfolio: €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} free cash${pendingNote}`)
 
-  // 2. Hard exit check — trailing stop / stop-loss using bot's own entry prices.
-  // All qualifying positions are exited in one pass. After exits, we still proceed to
-  // the AI decision so freed-up cash can be redeployed in the same cycle.
+  // 2. Hard exit check
   const exitsPlaced = await checkHardExits(snapshot, timestamp)
   if (exitsPlaced > 0) {
-    // Re-fetch snapshot so the AI sees the updated cash balance after exits
     const freshSnapshot = adjustedSnapshot(await getPortfolioSnapshot())
     Object.assign(snapshot, freshSnapshot)
   }
 
-  const dailyOpenValue = getDailyOpenValue(dateStr) ?? snapshot.totalValue
+  const dailyOpenValue = (await getDailyOpenValue(dateStr)) ?? snapshot.totalValue
 
-  // 4. Daily loss check — if we're already down >10%, halt
+  // 4. Daily loss check
   const drawdown = (dailyOpenValue - snapshot.totalValue) / dailyOpenValue
   if (drawdown > config.dailyLossLimitPct) {
     console.log(`[scheduler] Daily loss limit hit (${(drawdown * 100).toFixed(1)}%) — halting for today`)
@@ -216,25 +205,21 @@ export async function runCycle(): Promise<void> {
   console.log(`[scheduler] Fetching price history for ${config.tradeUniverse.length} tickers...`)
   const histories = await getAllHistories(config.tradeUniverse, 90)
 
-  // 5. Generate signals — only pass positions the bot itself opened so it never
-  //    tries to sell manually-held positions that aren't part of its tracked portfolio.
-  const botTickers = new Set(getOpenAiPositions().map((p) => p.ticker))
+  // 5. Generate signals
+  const botTickers = new Set((await getOpenAiPositions()).map((p) => p.ticker))
   const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
   const signals = generateSignals(config.tradeUniverse, histories, botPositions)
   const actionable = signals.filter((s) => s.signal !== 'hold').length
   console.log(`[scheduler] Signals: ${signals.length} tickers, ${actionable} actionable`)
 
-  // Compute AI portfolio value: free cash + current market value of bot-managed positions.
-  // This is the metric tracked by the charts — it reflects the bot's €${config.maxBudgetEur}
-  // budget performance, not the user's entire T212 account.
   const aiPositionsValue = botPositions.reduce((sum, p) => sum + p.currentPrice * p.quantity, 0)
   const aiValue = snapshot.cash.free + aiPositionsValue
 
-  // 3. Record daily open snapshot (now that aiValue is available)
-  upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue)
+  // 3. Record daily open snapshot
+  await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue)
 
   // 6. Ask Claude for a decision
-  const recentDecisions = getRecentDecisions(5)
+  const recentDecisions = await getRecentDecisions(5)
   console.log('[scheduler] Asking Claude for decision...')
   const botSnapshot = { ...snapshot, positions: botPositions }
   const { decision, usage } = await decide(signals, botSnapshot, recentDecisions)
@@ -243,7 +228,7 @@ export async function runCycle(): Promise<void> {
   console.log(`[scheduler] Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out — $${usage.totalCostUsd.toFixed(6)}`)
 
   // 7. Log the decision and AI usage
-  const decisionId = logDecision({
+  const decisionId = await logDecision({
     timestamp,
     action: decision.action,
     ticker: decision.ticker,
@@ -254,7 +239,7 @@ export async function runCycle(): Promise<void> {
     portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, aiValue, cash: snapshot.cash.free, positions: snapshot.positions.map((p) => ({ ticker: p.ticker, quantity: p.quantity, ppl: p.ppl })) }),
   })
 
-  logAiUsage({ decisionId, timestamp, ...usage })
+  await logAiUsage({ decisionId, timestamp, ...usage })
 
   // 8. Execute if buy or sell
   if (decision.action !== 'hold' && decision.ticker && decision.quantity) {
@@ -269,7 +254,7 @@ export async function runCycle(): Promise<void> {
 
     if (!risk.allowed) {
       console.log(`[scheduler] Risk manager blocked order: ${risk.reason}`)
-      logOrder({
+      await logOrder({
         decisionId,
         t212OrderId: null,
         status: `blocked: ${risk.reason}`,
@@ -285,30 +270,28 @@ export async function runCycle(): Promise<void> {
       const orderResult = await placeMarketOrder(decision.ticker, decision.quantity, decision.action)
       if (decision.action === 'buy') {
         sessionCashCommitted += decision.quantity * estimatedPrice
-        openAiPosition(decision.ticker, decision.quantity, estimatedPrice, timestamp)
+        await openAiPosition(decision.ticker, decision.quantity, estimatedPrice, timestamp)
       } else if (decision.action === 'sell') {
-        closeAiPosition(decision.ticker, estimatedPrice, timestamp)
+        await closeAiPosition(decision.ticker, estimatedPrice, timestamp)
       }
       invalidatePortfolioCache()
       console.log(`[scheduler] Order placed: ${orderResult.id} (${orderResult.status})`)
-      logOrder({
+      await logOrder({
         decisionId,
         t212OrderId: orderResult.id,
         status: orderResult.status,
-        fillPrice: null,       // T212 market orders fill asynchronously — update via polling if needed
+        fillPrice: null,
         fillQuantity: decision.quantity,
         timestamp,
       })
     } catch (err) {
       const msg = (err as Error).message
       console.error(`[scheduler] Order failed: ${msg}`)
-      // If T212 says the position is already gone (stale snapshot from a previous cycle's
-      // order still settling), reconcile the journal so we don't retry next cycle.
       if (decision.action === 'sell' && msg.includes('selling-equity-not-owned')) {
         console.log(`[scheduler] Position ${decision.ticker} already cleared in T212 — reconciling journal`)
-        closeAiPosition(decision.ticker, estimatedPrice, timestamp)
+        await closeAiPosition(decision.ticker, estimatedPrice, timestamp)
       }
-      logOrder({
+      await logOrder({
         decisionId,
         t212OrderId: null,
         status: `error: ${msg}`,
@@ -326,12 +309,9 @@ export async function startLoop(): Promise<void> {
   console.log('[scheduler] Trader started')
   console.log(`[scheduler] Mode: ${config.trading212Mode.toUpperCase()} | Budget: €${config.maxBudgetEur} | Interval: ${Math.round(config.tradeIntervalMs / 60000)}min`)
 
-  // Reconcile ai_positions from trade history — self-heals after crashes or any
-  // gap between order placement and position recording.
-  const { inserted } = reconcileAiPositions()
+  const { inserted } = await reconcileAiPositions()
   if (inserted > 0) console.log(`[scheduler] Reconciled ${inserted} missing position record(s) from trade history`)
 
-  // Validate universe tickers against T212 instrument list
   console.log('[scheduler] Validating universe tickers against T212...')
   const instruments = await getInstruments()
   const validUniverse = config.tradeUniverse.filter((t) => {
@@ -340,21 +320,18 @@ export async function startLoop(): Promise<void> {
     return false
   })
   if (validUniverse.length !== config.tradeUniverse.length) {
-    // Patch the live config so the rest of the run uses the validated list
     ;(config as { tradeUniverse: string[] }).tradeUniverse = validUniverse
   }
   console.log(`[scheduler] Universe (${validUniverse.length}): ${validUniverse.join(', ')}`)
 
-  // Reconcile open AI positions against live T212 portfolio
-  const openPositions = getOpenAiPositions()
+  const openPositions = await getOpenAiPositions()
   if (openPositions.length > 0) {
     const liveSnapshot = await getPortfolioSnapshot()
     const liveTickers = new Set(liveSnapshot.positions.map((p) => p.ticker))
     let reconciled = 0
     for (const pos of openPositions) {
       if (!liveTickers.has(pos.ticker)) {
-        // Position no longer in T212 — mark closed (likely manually sold)
-        closeAiPosition(pos.ticker, null, new Date().toISOString())
+        await closeAiPosition(pos.ticker, null, new Date().toISOString())
         console.log(`[scheduler] Reconcile: ${pos.ticker} no longer in T212 — marked closed`)
         reconciled++
       }

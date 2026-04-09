@@ -74,7 +74,7 @@ class EngineService {
 
   private async _initialize(): Promise<void> {
     console.log('[engine] Initializing...')
-    const { inserted } = reconcileAiPositions()
+    const { inserted } = await reconcileAiPositions()
     if (inserted > 0) console.log(`[engine] Reconciled ${inserted} missing position record(s)`)
 
     const instruments = await getInstruments()
@@ -87,13 +87,13 @@ class EngineService {
       ;(config as { tradeUniverse: string[] }).tradeUniverse = validUniverse
     }
 
-    const openPositions = getOpenAiPositions()
+    const openPositions = await getOpenAiPositions()
     if (openPositions.length > 0) {
       const liveSnapshot = await getPortfolioSnapshot()
       const liveTickers = new Set(liveSnapshot.positions.map((p) => p.ticker))
       for (const pos of openPositions) {
         if (!liveTickers.has(pos.ticker)) {
-          closeAiPosition(pos.ticker, null, new Date().toISOString())
+          await closeAiPosition(pos.ticker, null, new Date().toISOString())
           console.log(`[engine] ${pos.ticker} no longer in T212 — marked closed`)
         }
       }

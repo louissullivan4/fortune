@@ -202,7 +202,6 @@ export interface Config {
   maxPositionPct: number
   dailyLossLimitPct: number
   trading212Mode: string
-  dbPath: string
 }
 
 export interface Instrument {

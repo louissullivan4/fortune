@@ -8,8 +8,10 @@ const router = Router()
 // GET /api/portfolio
 router.get('/', async (_req, res, next) => {
   try {
-    const snapshot = await getPortfolioSnapshot()
-    const aiPositions = getOpenAiPositions()
+    const [snapshot, aiPositions] = await Promise.all([
+      getPortfolioSnapshot(),
+      getOpenAiPositions(),
+    ])
     hub.broadcast('portfolio_update', { totalValue: snapshot.totalValue })
     res.json({ ...snapshot, aiPositions })
   } catch (err) {

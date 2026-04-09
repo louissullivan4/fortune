@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import {
   getAiPortfolioConfig,
   getAiTrades,
@@ -7,7 +8,8 @@ import {
   getAllTimeStats,
 } from './journal.js'
 import { getPortfolioSnapshot } from '../api/trading212.js'
-import { config } from '../config/index.js'
+import { config, initConfig } from '../config/index.js'
+import { runMigrations } from '../db.js'
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -38,21 +40,19 @@ function eur(n: number, showSign = false): string {
 }
 
 function pad(s: string, n: number): string {
-  // strip ANSI for length calc
   const plain = s.replace(/\x1b\[[0-9;]*m/g, '')
   return s + ' '.repeat(Math.max(0, n - plain.length))
 }
 
 // ── ASCII line chart ──────────────────────────────────────────────────────────
 
-function lineChart(values: number[], height = 7, width = 52): string {
+function lineChart(values: number[], firstDate: string | undefined, height = 7, width = 52): string {
   if (values.length === 0) return `  ${A.dim}(no data yet — run a cycle first)${A.reset}\n`
 
   const min = Math.min(...values)
   const max = Math.max(...values)
   const range = max - min || 1
 
-  // Resample to fit width
   const cols = Math.min(values.length, width)
   const data: number[] =
     cols === values.length
@@ -61,17 +61,10 @@ function lineChart(values: number[], height = 7, width = 52): string {
           values[Math.round((i * (values.length - 1)) / (cols - 1))]
         )
 
-  // Build character grid
   const grid: string[][] = Array.from({ length: height }, () => Array(cols).fill(' '))
-
   const yPos = (v: number) => Math.round(((v - min) / range) * (height - 1))
 
-  data.forEach((v, x) => {
-    const y = yPos(v)
-    grid[height - 1 - y][x] = '•'
-  })
-
-  // Fill vertical gaps between adjacent points
+  data.forEach((v, x) => { grid[height - 1 - yPos(v)][x] = '•' })
   data.forEach((v, x) => {
     if (x === 0) return
     const y1 = yPos(data[x - 1])
@@ -92,11 +85,9 @@ function lineChart(values: number[], height = 7, width = 52): string {
   })
 
   const xAxis = ' '.repeat(labelW + 1) + `${A.dim}└${'─'.repeat(cols)}${A.reset}`
-  const dates =
-    data.length >= 2
-      ? ' '.repeat(labelW + 2) +
-        `${A.dim}${values.length > 1 ? `${A.dim}${getDailyValues(30)[0]?.date ?? ''}` : ''}${A.reset}`
-      : ''
+  const dates = data.length >= 2 && firstDate
+    ? ' '.repeat(labelW + 2) + `${A.dim}${firstDate}${A.reset}`
+    : ''
 
   return lines.join('\n') + '\n' + xAxis + (dates ? '\n' + dates : '') + '\n'
 }
@@ -124,16 +115,15 @@ function sectionTitle(title: string): string {
 async function render(): Promise<void> {
   const W = Math.min(process.stdout.columns ?? 80, 90)
 
-  // Fetch all data concurrently
   const [snapshot, dailyVals, aiCfg, netPositions, recentDecisions, allTime, aiTrades] =
     await Promise.all([
       getPortfolioSnapshot(),
-      Promise.resolve(getDailyValues(30)),
-      Promise.resolve(getAiPortfolioConfig()),
-      Promise.resolve(getAiNetPositions()),
-      Promise.resolve(getRecentDecisions(1)),
-      Promise.resolve(getAllTimeStats()),
-      Promise.resolve(getAiTrades()),
+      getDailyValues(30),
+      getAiPortfolioConfig(),
+      getAiNetPositions(),
+      getRecentDecisions(1),
+      getAllTimeStats(),
+      getAiTrades(),
     ])
 
   const now = new Date().toLocaleTimeString()
@@ -148,11 +138,8 @@ async function render(): Promise<void> {
   out.push(header(`TRADER AI DASHBOARD  [${config.trading212Mode.toUpperCase()}]`, W))
   out.push('')
 
-  // ── Top row: 3 columns ───────────────────────────────────────────────────
-
   const colW = Math.floor((W - 6) / 3)
 
-  // Build column content as string arrays
   const portfolioLines = [
     sectionTitle('PORTFOLIO'),
     divider(colW + 4),
@@ -190,7 +177,6 @@ async function render(): Promise<void> {
       : `  ${A.dim}No decisions yet${A.reset}`,
   ]
 
-  // Render columns side-by-side
   const allCols = [portfolioLines, aiLines, decisionLines]
   const flatCols = allCols.map((col) => col.join('\n').split('\n'))
   const maxRows = Math.max(...flatCols.map((c) => c.length))
@@ -200,15 +186,11 @@ async function render(): Promise<void> {
     out.push(parts.join(`${A.dim}│${A.reset}`))
   }
 
-  // ── Chart ─────────────────────────────────────────────────────────────────
-
   out.push('')
   out.push(sectionTitle('PORTFOLIO VALUE (last 30 days)'))
   out.push(divider(W))
   const chartVals = dailyVals.map((d) => d.value)
-  out.push(lineChart(chartVals, 7, W - 16))
-
-  // ── Positions ─────────────────────────────────────────────────────────────
+  out.push(lineChart(chartVals, dailyVals[0]?.date, 7, W - 16))
 
   out.push(sectionTitle('AI POSITIONS'))
   out.push(divider(W))
@@ -223,18 +205,12 @@ async function render(): Promise<void> {
       const live = snapshot.positions.find((p) => p.ticker === np.ticker)
       const price = live ? `${live.currentPrice.toFixed(2)}` : '—'
       const pnl = live ? colored(live.ppl, eur(live.ppl, true)) : A.dim + 'n/a' + A.reset
-      const status = live
-        ? live.ppl >= 0
-          ? `${A.green}▲${A.reset}`
-          : `${A.red}▼${A.reset}`
-        : ''
+      const status = live ? (live.ppl >= 0 ? `${A.green}▲${A.reset}` : `${A.red}▼${A.reset}`) : ''
       out.push(
         `  ${np.ticker.padEnd(14)}${String(np.netQuantity).padEnd(8)}${price.padEnd(12)}${pad(pnl, 12)}${status}`
       )
     }
   }
-
-  // ── Footer ────────────────────────────────────────────────────────────────
 
   out.push('')
   out.push(divider(W, '═'))
@@ -249,6 +225,9 @@ async function render(): Promise<void> {
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  await runMigrations()
+  await initConfig()
+
   process.stdout.write(A.hideCursor)
 
   const cleanup = () => {
@@ -260,7 +239,6 @@ async function main(): Promise<void> {
   process.on('SIGINT', cleanup)
   process.on('SIGTERM', cleanup)
 
-  // Keyboard input
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true)
     process.stdin.resume()
@@ -274,10 +252,8 @@ async function main(): Promise<void> {
     })
   }
 
-  // Initial render
   await render().catch(console.error)
 
-  // Auto-refresh every 30s
   setInterval(async () => {
     await render().catch(console.error)
   }, 30_000)

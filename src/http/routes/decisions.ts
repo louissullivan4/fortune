@@ -4,26 +4,32 @@ import { getDecisionsPaginated, getDecisionById } from '../../analytics/journal.
 const router = Router()
 
 // GET /api/decisions?page=1&limit=20
-router.get('/', (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page as string) || 1)
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20))
-  const { data, total } = getDecisionsPaginated(page, limit)
-  res.json({ data, total, page, limit, totalPages: Math.ceil(total / limit) })
+router.get('/', async (req, res, next) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page as string) || 1)
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20))
+    const { data, total } = await getDecisionsPaginated(page, limit)
+    res.json({ data, total, page, limit, totalPages: Math.ceil(total / limit) })
+  } catch (err) {
+    next(err)
+  }
 })
 
 // GET /api/decisions/:id
-router.get('/:id', (req, res) => {
-  const id = parseInt(req.params.id)
-  if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' })
-  const decision = getDecisionById(id)
-  if (!decision) return res.status(404).json({ error: 'Decision not found' })
-
-  // Parse embedded JSON blobs for the client
-  res.json({
-    ...decision,
-    signals: (() => { try { return JSON.parse(decision.signalsJson) } catch { return [] } })(),
-    portfolio: (() => { try { return JSON.parse(decision.portfolioJson) } catch { return null } })(),
-  })
+router.get('/:id', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id)
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' })
+    const decision = await getDecisionById(id)
+    if (!decision) return res.status(404).json({ error: 'Decision not found' })
+    res.json({
+      ...decision,
+      signals: (() => { try { return JSON.parse(decision.signalsJson) } catch { return [] } })(),
+      portfolio: (() => { try { return JSON.parse(decision.portfolioJson) } catch { return null } })(),
+    })
+  } catch (err) {
+    next(err)
+  }
 })
 
 export default router

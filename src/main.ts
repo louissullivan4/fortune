@@ -1,3 +1,6 @@
+import 'dotenv/config'
+import { runMigrations } from './db.js'
+import { initConfig } from './config/index.js'
 import { startLoop } from './engine/scheduler.js'
 
 process.on('SIGTERM', () => {
@@ -10,7 +13,13 @@ process.on('SIGINT', () => {
   process.exit(0)
 })
 
-startLoop().catch((err) => {
+async function main() {
+  await runMigrations()
+  await initConfig()
+  await startLoop()
+}
+
+main().catch((err) => {
   console.error('[main] Fatal error:', err)
   process.exit(1)
 })

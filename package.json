@@ -14,7 +14,8 @@
     "dashboard": "tsx src/analytics/dashboard.ts",
     "reset-day": "tsx src/analytics/reset-day.ts",
     "instruments": "tsx src/tools/list-instruments.ts",
-    "backfill-positions": "tsx src/tools/backfill-positions.ts"
+    "backfill-positions": "tsx src/tools/backfill-positions.ts",
+    "close-positions": "tsx src/tools/close-all-positions.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -22,6 +23,7 @@
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
+    "pg": "^8.20.0",
     "ws": "^8.20.0",
     "zod": "^3.23.8"
   },
@@ -31,6 +33,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
     "tsx": "^4.19.0",

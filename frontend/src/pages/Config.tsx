@@ -220,7 +220,7 @@ export default function ConfigPage() {
             </div>
             <div>
               <div className="section-label" style={{ marginBottom: 4 }}>database</div>
-              <div style={{ fontSize: 12, fontFamily: 'var(--font-code)', color: 'var(--color-text-muted)' }}>{draft.dbPath}</div>
+              <div style={{ fontSize: 12, fontFamily: 'var(--font-code)', color: 'var(--color-text-muted)' }}>postgresql (postgres:18)</div>
             </div>
           </div>
         </div>

@@ -12,7 +12,7 @@ const router = Router()
 async function computeSignals() {
   const snapshot = await getPortfolioSnapshot()
   const histories = await getAllHistories(config.tradeUniverse, 90)
-  const botTickers = new Set(getOpenAiPositions().map((p) => p.ticker))
+  const botTickers = new Set((await getOpenAiPositions()).map((p) => p.ticker))
   const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
   const signals = generateSignals(config.tradeUniverse, histories, botPositions)
   setCachedSignals(signals)

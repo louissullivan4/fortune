@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Play, Square, RefreshCw, Zap } from 'lucide-react'
+import { Play, Square, RefreshCw } from 'lucide-react'
 import { api, type EngineStatus, type Portfolio, type DailySnapshot, type Decision } from '../api/client'
 import StatCard from '../components/StatCard'
+import MarketClock from '../components/MarketClock'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
@@ -22,7 +23,8 @@ function EngineCard({ status, onStart, onStop, onCycle, loading }: {
 }) {
   return (
     <div className="card" style={{ marginBottom: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Top row: engine state + controls */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span
             style={{
@@ -37,11 +39,6 @@ function EngineCard({ status, onStart, onStop, onCycle, loading }: {
           <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
             {status?.mode?.toUpperCase() ?? '—'} · {status ? Math.round(status.intervalMs / 60000) : '—'}min interval
           </span>
-          {status?.marketOpen !== undefined && (
-            <span style={{ fontSize: 12, color: status.marketOpen ? '#16a34a' : 'var(--color-text-muted)' }}>
-              {status.marketOpen ? 'market open' : 'market closed'}
-            </span>
-          )}
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
@@ -56,6 +53,10 @@ function EngineCard({ status, onStart, onStop, onCycle, loading }: {
         </div>
       </div>
 
+      {/* Market clock */}
+      <MarketClock />
+
+      {/* Cycle timestamps */}
       {(status?.lastCycleAt || status?.nextCycleAt) && (
         <div style={{ display: 'flex', gap: 24, marginTop: 12 }}>
           {status?.lastCycleAt && (

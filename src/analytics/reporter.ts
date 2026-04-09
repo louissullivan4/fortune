@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import {
   getDailyStats,
   getOrdersForDay,
@@ -5,6 +6,8 @@ import {
   getRecentDecisions,
 } from './journal.js'
 import { getPortfolioSnapshot } from '../api/trading212.js'
+import { runMigrations } from '../db.js'
+import { initConfig } from '../config/index.js'
 
 function today(): string {
   return new Date().toISOString().slice(0, 10)
@@ -15,9 +18,11 @@ function line(char = '─', len = 60): string {
 }
 
 export async function dailyReport(date = today()): Promise<void> {
-  const stats = getDailyStats(date)
-  const trades = getOrdersForDay(date)
-  const snapshot = await getPortfolioSnapshot()
+  const [stats, trades, snapshot] = await Promise.all([
+    getDailyStats(date),
+    getOrdersForDay(date),
+    getPortfolioSnapshot(),
+  ])
 
   console.log('\n' + line('═'))
   console.log(`  TRADER DAILY REPORT — ${date}`)
@@ -66,9 +71,11 @@ export async function dailyReport(date = today()): Promise<void> {
 }
 
 export async function fullReport(): Promise<void> {
-  const stats = getAllTimeStats()
-  const recent = getRecentDecisions(20)
-  const snapshot = await getPortfolioSnapshot()
+  const [stats, recent, snapshot] = await Promise.all([
+    getAllTimeStats(),
+    getRecentDecisions(20),
+    getPortfolioSnapshot(),
+  ])
 
   console.log('\n' + line('═'))
   console.log('  TRADER ALL-TIME REPORT')
@@ -92,10 +99,17 @@ export async function fullReport(): Promise<void> {
 // CLI entry point
 if (process.argv[1]?.endsWith('reporter.ts') || process.argv[1]?.endsWith('reporter.js')) {
   const allFlag = process.argv.includes('--all')
-  if (allFlag) {
-    fullReport().catch(console.error)
-  } else {
-    const dateArg = process.argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a))
-    dailyReport(dateArg).catch(console.error)
+  const dateArg = process.argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a))
+
+  async function run() {
+    await runMigrations()
+    await initConfig()
+    if (allFlag) {
+      await fullReport()
+    } else {
+      await dailyReport(dateArg)
+    }
+    process.exit(0)
   }
+  run().catch((err) => { console.error(err); process.exit(1) })
 }
