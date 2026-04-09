@@ -1,0 +1,39 @@
+{
+  "name": "trader",
+  "version": "1.0.0",
+  "description": "Autonomous stock trader — Claude-driven, T212-executed, €100 hard cap",
+  "type": "module",
+  "scripts": {
+    "start": "concurrently --names api,ui --prefix-colors cyan,yellow \"tsx src/server-entry.ts\" \"cd frontend && npm run dev\"",
+    "server": "tsx src/server-entry.ts",
+    "dev": "tsx src/main.ts",
+    "build": "tsc",
+    "report": "tsx src/analytics/reporter.ts",
+    "cycle": "tsx src/engine/scheduler.ts --once",
+    "performance": "tsx src/analytics/performance.ts",
+    "dashboard": "tsx src/analytics/dashboard.ts",
+    "reset-day": "tsx src/analytics/reset-day.ts",
+    "instruments": "tsx src/tools/list-instruments.ts",
+    "backfill-positions": "tsx src/tools/backfill-positions.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "ws": "^8.20.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@anthropic-ai/claude-code": "^2.1.97",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
