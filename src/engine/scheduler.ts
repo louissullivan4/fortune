@@ -86,6 +86,40 @@ export function nextOpenMs(): number {
   return tomorrow.getTime() - now.getTime()
 }
 
+// ── Signal fingerprinting — skip AI when nothing actionable changed ────────
+
+interface SignalFingerprint {
+  fingerprint: string
+  lastDecisionAction: 'buy' | 'sell' | 'hold'
+}
+
+let _lastSignalState: SignalFingerprint | null = null
+
+/**
+ * Bucket a P&L percentage into a coarse zone so small price drift doesn't
+ * force a new AI call, but meaningful moves (>1%) do.
+ */
+function pplBucket(pctChange: number): string {
+  if (pctChange <= -5) return 'stop'
+  if (pctChange <= -1) return 'down'
+  if (pctChange < 1) return 'flat'
+  if (pctChange < 5) return 'up'
+  return 'profit'
+}
+
+function computeSignalFingerprint(signals: import('../strategy/signals.js').TickerSignal[]): string {
+  return signals
+    .filter((s) => s.signal !== 'hold' || s.heldPosition)
+    .map((s) => {
+      const heldPart = s.heldPosition
+        ? `:${pplBucket(((s.heldPosition.currentPrice - s.heldPosition.averagePrice) / s.heldPosition.averagePrice) * 100)}`
+        : ''
+      return `${s.ticker}:${s.signal}${heldPart}`
+    })
+    .sort()
+    .join('|')
+}
+
 // ── Session cash tracking ──────────────────────────────────────────────────
 
 let sessionCashCommitted = 0
@@ -260,7 +294,19 @@ export async function runCycle(): Promise<void> {
   // 3. Record daily open snapshot
   await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue)
 
-  // 6. Ask Claude for a decision
+  // 6. Ask Claude for a decision — skip if signals unchanged since last hold
+  const currentFingerprint = computeSignalFingerprint(signals)
+  const lastState = _lastSignalState
+  const shouldSkipAi =
+    lastState !== null &&
+    lastState.lastDecisionAction === 'hold' &&
+    lastState.fingerprint === currentFingerprint
+
+  if (shouldSkipAi) {
+    console.log('[scheduler] Signals unchanged since last hold — skipping AI call (cost saving)')
+    return
+  }
+
   const recentDecisions = await getRecentDecisions(5)
   console.log('[scheduler] Asking Claude for decision...')
   const botSnapshot = { ...snapshot, positions: botPositions }
@@ -297,6 +343,8 @@ export async function runCycle(): Promise<void> {
   })
 
   await logAiUsage({ decisionId, timestamp, ...usage })
+
+  _lastSignalState = { fingerprint: currentFingerprint, lastDecisionAction: decision.action }
 
   // 8. Execute if buy or sell
   if (decision.action !== 'hold' && decision.ticker && decision.quantity) {
