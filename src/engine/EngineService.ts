@@ -1,10 +1,6 @@
 import { config } from '../config/index.js'
 import { runCycle, isMarketOpen, nextOpenMs } from './scheduler.js'
-import {
-  reconcileAiPositions,
-  getOpenAiPositions,
-  closeAiPosition,
-} from '../analytics/journal.js'
+import { reconcileAiPositions, getOpenAiPositions, closeAiPosition } from '../analytics/journal.js'
 import { getInstruments, getPortfolioSnapshot } from '../api/trading212.js'
 import { hub } from '../ws/hub.js'
 

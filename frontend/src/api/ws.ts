@@ -11,7 +11,12 @@ export function useWebSocket(onMessage: (msg: WsMessage) => void) {
   const [connected, setConnected] = useState(false)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
   const onMessageRef = useRef(onMessage)
+  // eslint-disable-next-line react-hooks/refs
   onMessageRef.current = onMessage
+
+  // Hold connect in a ref so onclose can schedule a reconnect without
+  // the useCallback needing connect in its dependency array
+  const connectRef = useRef<() => void>()
 
   const connect = useCallback(() => {
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -24,16 +29,21 @@ export function useWebSocket(onMessage: (msg: WsMessage) => void) {
       try {
         const msg = JSON.parse(e.data as string) as WsMessage
         onMessageRef.current(msg)
-      } catch {}
+      } catch {
+        // ignore malformed messages
+      }
     }
 
     socket.onclose = () => {
       setConnected(false)
-      reconnectTimer.current = setTimeout(connect, 3000)
+      reconnectTimer.current = setTimeout(() => connectRef.current?.(), 3000)
     }
 
     socket.onerror = () => socket.close()
   }, [])
+
+  // eslint-disable-next-line react-hooks/refs
+  connectRef.current = connect
 
   useEffect(() => {
     connect()

@@ -17,8 +17,8 @@ export interface TradeDecision {
 }
 
 // claude-sonnet-4-6 pricing (USD per million tokens, April 2026)
-const PRICE_INPUT_PER_MTOK  = 3.00
-const PRICE_OUTPUT_PER_MTOK = 15.00
+const PRICE_INPUT_PER_MTOK = 3.0
+const PRICE_OUTPUT_PER_MTOK = 15.0
 
 export interface UsageSummary {
   model: string
@@ -125,7 +125,12 @@ export async function decide(
 ): Promise<DecideResult> {
   // Pre-compute suggested buy quantities and attach to relevant signals
   const actionableSignals = signals.filter(
-    (s) => s.signal === 'buy' || s.signal === 'strong_buy' || s.signal === 'sell' || s.signal === 'strong_sell' || s.heldPosition
+    (s) =>
+      s.signal === 'buy' ||
+      s.signal === 'strong_buy' ||
+      s.signal === 'sell' ||
+      s.signal === 'strong_sell' ||
+      s.heldPosition
   )
 
   const prompt = `## Current Portfolio
@@ -148,9 +153,9 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
     messages: [{ role: 'user', content: prompt }],
   })
 
-  const inputTokens  = message.usage.input_tokens
+  const inputTokens = message.usage.input_tokens
   const outputTokens = message.usage.output_tokens
-  const inputCostUsd  = (inputTokens  / 1_000_000) * PRICE_INPUT_PER_MTOK
+  const inputCostUsd = (inputTokens / 1_000_000) * PRICE_INPUT_PER_MTOK
   const outputCostUsd = (outputTokens / 1_000_000) * PRICE_OUTPUT_PER_MTOK
   const usage: UsageSummary = {
     model: MODEL,
@@ -173,7 +178,10 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
       let j = i
       while (j < text.length) {
         if (text[j] === '{') depth++
-        else if (text[j] === '}') { depth--; if (depth === 0) break }
+        else if (text[j] === '}') {
+          depth--
+          if (depth === 0) break
+        }
         j++
       }
       if (depth === 0) candidates.push(text.slice(i, j + 1))
@@ -206,9 +214,8 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
           parsed.reasoning += ' [overridden to hold: position cap reached or insufficient cash]'
         } else {
           // Cap Claude's quantity to the safe maximum
-          parsed.quantity = parsed.quantity && parsed.quantity > 0
-            ? Math.min(parsed.quantity, maxQty)
-            : maxQty
+          parsed.quantity =
+            parsed.quantity && parsed.quantity > 0 ? Math.min(parsed.quantity, maxQty) : maxQty
           parsed.estimatedPrice = price
         }
       }

@@ -31,7 +31,9 @@ async function showPerformance(): Promise<void> {
   ])
 
   const executedTrades = trades.filter(
-    (t) => t.orderStatus == null || (!t.orderStatus.startsWith('blocked') && !t.orderStatus.startsWith('error'))
+    (t) =>
+      t.orderStatus == null ||
+      (!t.orderStatus.startsWith('blocked') && !t.orderStatus.startsWith('error'))
   )
   const buys = executedTrades.filter((t) => t.action === 'buy')
   const sells = executedTrades.filter((t) => t.action === 'sell')
@@ -58,24 +60,35 @@ async function showPerformance(): Promise<void> {
   console.log('  ACTIVITY')
   console.log(line())
   console.log(`  Total cycles:    ${allTime.totalDecisions}`)
-  console.log(`  Trades executed: ${executedTrades.length}  (${buys.length} buys, ${sells.length} sells)`)
+  console.log(
+    `  Trades executed: ${executedTrades.length}  (${buys.length} buys, ${sells.length} sells)`
+  )
   console.log(`  Blocked/errored: ${trades.length - executedTrades.length}`)
 
   if (openPositions.length > 0) {
     console.log('\n' + line())
     console.log('  OPEN POSITIONS')
     console.log(line())
-    console.log(`  ${'Ticker'.padEnd(18)} ${'Qty'.padEnd(8)} ${'Entry'.padEnd(10)} ${'Current'.padEnd(10)} P&L`)
+    console.log(
+      `  ${'Ticker'.padEnd(18)} ${'Qty'.padEnd(8)} ${'Entry'.padEnd(10)} ${'Current'.padEnd(10)} P&L`
+    )
     console.log(`  ${'─'.repeat(56)}`)
     for (const p of openPositions) {
       const live = snapshot.positions.find((lp) => lp.ticker === p.ticker)
       const current = live ? `€${live.currentPrice.toFixed(2)}` : '?'
-      const pnl = live ? (live.ppl >= 0 ? `+€${live.ppl.toFixed(2)}` : `-€${Math.abs(live.ppl).toFixed(2)}`) : 'n/a'
+      const pnl = live
+        ? live.ppl >= 0
+          ? `+€${live.ppl.toFixed(2)}`
+          : `-€${Math.abs(live.ppl).toFixed(2)}`
+        : 'n/a'
       const entryStr = p.entryPrice ? `€${p.entryPrice.toFixed(2)}` : 'n/a'
-      const pctChange = live && p.entryPrice
-        ? ((live.currentPrice - p.entryPrice) / p.entryPrice * 100).toFixed(1) + '%'
-        : ''
-      console.log(`  ${p.ticker.padEnd(18)} ${String(p.quantity).padEnd(8)} ${entryStr.padEnd(10)} ${current.padEnd(10)} ${pnl} ${pctChange}`)
+      const pctChange =
+        live && p.entryPrice
+          ? (((live.currentPrice - p.entryPrice) / p.entryPrice) * 100).toFixed(1) + '%'
+          : ''
+      console.log(
+        `  ${p.ticker.padEnd(18)} ${String(p.quantity).padEnd(8)} ${entryStr.padEnd(10)} ${current.padEnd(10)} ${pnl} ${pctChange}`
+      )
       console.log(`  ${''.padEnd(18)} opened ${p.openedAt.slice(0, 16)}`)
     }
   }
@@ -84,16 +97,25 @@ async function showPerformance(): Promise<void> {
     console.log('\n' + line())
     console.log('  CLOSED POSITIONS')
     console.log(line())
-    console.log(`  ${'Ticker'.padEnd(18)} ${'Qty'.padEnd(8)} ${'Entry'.padEnd(10)} ${'Exit'.padEnd(10)} P&L`)
+    console.log(
+      `  ${'Ticker'.padEnd(18)} ${'Qty'.padEnd(8)} ${'Entry'.padEnd(10)} ${'Exit'.padEnd(10)} P&L`
+    )
     console.log(`  ${'─'.repeat(56)}`)
     for (const p of closedPositions) {
-      const pnl = p.realizedPnl != null
-        ? (p.realizedPnl >= 0 ? `+€${p.realizedPnl.toFixed(2)}` : `-€${Math.abs(p.realizedPnl).toFixed(2)}`)
-        : 'n/a'
+      const pnl =
+        p.realizedPnl != null
+          ? p.realizedPnl >= 0
+            ? `+€${p.realizedPnl.toFixed(2)}`
+            : `-€${Math.abs(p.realizedPnl).toFixed(2)}`
+          : 'n/a'
       const entry = p.entryPrice ? `€${p.entryPrice.toFixed(2)}` : 'n/a'
       const exit = p.exitPrice ? `€${p.exitPrice.toFixed(2)}` : 'n/a'
-      console.log(`  ${p.ticker.padEnd(18)} ${String(p.quantity).padEnd(8)} ${entry.padEnd(10)} ${exit.padEnd(10)} ${pnl}`)
-      console.log(`  ${''.padEnd(18)} ${p.openedAt.slice(0, 16)} → ${p.closedAt?.slice(0, 16) ?? '?'}`)
+      console.log(
+        `  ${p.ticker.padEnd(18)} ${String(p.quantity).padEnd(8)} ${entry.padEnd(10)} ${exit.padEnd(10)} ${pnl}`
+      )
+      console.log(
+        `  ${''.padEnd(18)} ${p.openedAt.slice(0, 16)} → ${p.closedAt?.slice(0, 16) ?? '?'}`
+      )
     }
   }
 
@@ -104,7 +126,9 @@ async function showPerformance(): Promise<void> {
   console.log(`  Cash remaining:  ~€${cashRemaining.toFixed(2)}`)
   console.log(`  Unrealized P&L:  ${unrealizedPnl >= 0 ? '+' : ''}€${unrealizedPnl.toFixed(2)}`)
   console.log(`  Realized P&L:    ${realizedPnl >= 0 ? '+' : ''}€${realizedPnl.toFixed(2)}`)
-  console.log(`  Total P&L:       ${(unrealizedPnl + realizedPnl) >= 0 ? '+' : ''}€${(unrealizedPnl + realizedPnl).toFixed(2)}`)
+  console.log(
+    `  Total P&L:       ${unrealizedPnl + realizedPnl >= 0 ? '+' : ''}€${(unrealizedPnl + realizedPnl).toFixed(2)}`
+  )
   console.log(line('═') + '\n')
 }
 
@@ -128,5 +152,8 @@ if (process.argv[1]?.endsWith('performance.ts') || process.argv[1]?.endsWith('pe
     }
     process.exit(0)
   }
-  run().catch((err) => { console.error(err); process.exit(1) })
+  run().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
 }

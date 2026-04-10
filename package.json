@@ -8,6 +8,10 @@
     "server": "tsx src/server-entry.ts",
     "dev": "tsx src/main.ts",
     "build": "tsc",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "migrate": "tsx src/migrate.ts",
     "report": "tsx src/analytics/reporter.ts",
     "cycle": "tsx src/engine/scheduler.ts --once",
     "performance": "tsx src/analytics/performance.ts",
@@ -23,12 +27,15 @@
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "helmet": "^8.1.0",
     "pg": "^8.20.0",
     "ws": "^8.20.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "^2.1.97",
+    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.11",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -36,7 +43,12 @@
     "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
+    "eslint": "^10.2.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "prettier": "^3.8.2",
     "tsx": "^4.19.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.58.1"
   }
 }

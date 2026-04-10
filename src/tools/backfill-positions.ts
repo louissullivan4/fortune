@@ -17,9 +17,14 @@ async function main() {
   console.log(`\nDone: ${inserted} inserted/updated`)
   console.log(`\nOpen AI positions (${open.length}):`)
   for (const p of open) {
-    console.log(`  ${p.ticker.padEnd(18)} ${p.quantity} shares  entry: ${p.entryPrice?.toFixed(2) ?? 'n/a'}  opened: ${p.openedAt.slice(0, 16)}`)
+    console.log(
+      `  ${p.ticker.padEnd(18)} ${p.quantity} shares  entry: ${p.entryPrice?.toFixed(2) ?? 'n/a'}  opened: ${p.openedAt.slice(0, 16)}`
+    )
   }
   process.exit(0)
 }
 
-main().catch((err) => { console.error(err); process.exit(1) })
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})

@@ -1,10 +1,5 @@
 import 'dotenv/config'
-import {
-  getDailyStats,
-  getOrdersForDay,
-  getAllTimeStats,
-  getRecentDecisions,
-} from './journal.js'
+import { getDailyStats, getOrdersForDay, getAllTimeStats, getRecentDecisions } from './journal.js'
 import { getPortfolioSnapshot } from '../api/trading212.js'
 import { runMigrations } from '../db.js'
 import { initConfig } from '../config/index.js'
@@ -49,10 +44,13 @@ export async function dailyReport(date = today()): Promise<void> {
   if (snapshot.positions.length > 0) {
     console.log('\n  Positions:')
     for (const p of snapshot.positions) {
-      const pct = p.averagePrice > 0
-        ? (((p.currentPrice - p.averagePrice) / p.averagePrice) * 100).toFixed(1)
-        : '0.0'
-      console.log(`    ${p.ticker.padEnd(12)} ${p.quantity} shares | current €${p.currentPrice.toFixed(2)} | P&L: €${p.ppl.toFixed(2)} (${pct}%)`)
+      const pct =
+        p.averagePrice > 0
+          ? (((p.currentPrice - p.averagePrice) / p.averagePrice) * 100).toFixed(1)
+          : '0.0'
+      console.log(
+        `    ${p.ticker.padEnd(12)} ${p.quantity} shares | current €${p.currentPrice.toFixed(2)} | P&L: €${p.ppl.toFixed(2)} (${pct}%)`
+      )
     }
   }
 
@@ -62,7 +60,9 @@ export async function dailyReport(date = today()): Promise<void> {
     console.log(line())
     for (const t of trades) {
       const price = t.fillPrice !== null ? `@ €${t.fillPrice.toFixed(2)}` : ''
-      console.log(`  ${(t.action ?? '').toUpperCase().padEnd(5)} ${(t.ticker ?? '').padEnd(12)} ${t.quantity ?? ''}  ${price}  [${t.status ?? 'pending'}]`)
+      console.log(
+        `  ${(t.action ?? '').toUpperCase().padEnd(5)} ${(t.ticker ?? '').padEnd(12)} ${t.quantity ?? ''}  ${price}  [${t.status ?? 'pending'}]`
+      )
       console.log(`    → ${t.reasoning.slice(0, 100)}`)
     }
   }
@@ -90,7 +90,9 @@ export async function fullReport(): Promise<void> {
   console.log('  RECENT DECISIONS (last 20)')
   console.log(line())
   for (const d of recent) {
-    console.log(`  [${d.timestamp.slice(0, 16)}] ${d.action.toUpperCase().padEnd(5)} ${(d.ticker ?? 'HOLD').padEnd(12)} — ${d.reasoning.slice(0, 80)}`)
+    console.log(
+      `  [${d.timestamp.slice(0, 16)}] ${d.action.toUpperCase().padEnd(5)} ${(d.ticker ?? 'HOLD').padEnd(12)} — ${d.reasoning.slice(0, 80)}`
+    )
   }
 
   console.log('\n' + line('═') + '\n')
@@ -111,5 +113,8 @@ if (process.argv[1]?.endsWith('reporter.ts') || process.argv[1]?.endsWith('repor
     }
     process.exit(0)
   }
-  run().catch((err) => { console.error(err); process.exit(1) })
+  run().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
 }

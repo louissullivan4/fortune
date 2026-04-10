@@ -108,7 +108,7 @@ export function computeBuyQuantity(
   const targetSpend = Math.min(
     config.maxBudgetEur * targetFraction,
     snapshot.cash.free - 5,
-    remainingPositionRoom,
+    remainingPositionRoom
   )
   if (targetSpend <= 0 || estimatedPrice <= 0) return 0
   // Round down to 2dp but ensure we meet minTradeQuantity

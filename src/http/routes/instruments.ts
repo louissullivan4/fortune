@@ -9,10 +9,11 @@ router.get('/search', async (req, res, next) => {
     const q = ((req.query.q as string) ?? '').toLowerCase().trim()
     const instruments = await getInstruments()
     const results = [...instruments.values()]
-      .filter((i) =>
-        i.ticker.toLowerCase().includes(q) ||
-        i.name.toLowerCase().includes(q) ||
-        i.shortName?.toLowerCase().includes(q)
+      .filter(
+        (i) =>
+          i.ticker.toLowerCase().includes(q) ||
+          i.name.toLowerCase().includes(q) ||
+          i.shortName?.toLowerCase().includes(q)
       )
       .slice(0, 50)
     res.json({ data: results, total: results.length })

@@ -31,7 +31,7 @@ async function main() {
   }
 
   process.once('SIGTERM', () => shutdown('SIGTERM'))
-  process.once('SIGINT',  () => shutdown('SIGINT'))
+  process.once('SIGINT', () => shutdown('SIGINT'))
 }
 
 main().catch((err) => {

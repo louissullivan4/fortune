@@ -24,8 +24,20 @@ router.get('/:id', async (req, res, next) => {
     if (!decision) return res.status(404).json({ error: 'Decision not found' })
     res.json({
       ...decision,
-      signals: (() => { try { return JSON.parse(decision.signalsJson) } catch { return [] } })(),
-      portfolio: (() => { try { return JSON.parse(decision.portfolioJson) } catch { return null } })(),
+      signals: (() => {
+        try {
+          return JSON.parse(decision.signalsJson)
+        } catch {
+          return []
+        }
+      })(),
+      portfolio: (() => {
+        try {
+          return JSON.parse(decision.portfolioJson)
+        } catch {
+          return null
+        }
+      })(),
     })
   } catch (err) {
     next(err)

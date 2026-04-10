@@ -17,19 +17,17 @@ import { existsSync } from 'fs'
 
 // ── Env validation ────────────────────────────────────────────────────────────
 
-const API_KEY_ID     = process.env.TRADING_212_API_KEY_ID
+const API_KEY_ID = process.env.TRADING_212_API_KEY_ID
 const API_KEY_SECRET = process.env.TRADING_212_API_KEY_SECRET
-const MODE           = process.env.TRADING_212_MODE ?? 'demo'
-const DB_PATH        = process.env.DB_PATH ?? './data/trades.db'
+const MODE = process.env.TRADING_212_MODE ?? 'demo'
+const DB_PATH = process.env.DB_PATH ?? './data/trades.db'
 
 if (!API_KEY_ID || !API_KEY_SECRET) {
   console.error('TRADING_212_API_KEY_ID and TRADING_212_API_KEY_SECRET are required')
   process.exit(1)
 }
 
-const BASE_URL = MODE === 'live'
-  ? 'https://live.trading212.com'
-  : 'https://demo.trading212.com'
+const BASE_URL = MODE === 'live' ? 'https://live.trading212.com' : 'https://demo.trading212.com'
 
 // ── T212 API helpers ──────────────────────────────────────────────────────────
 
@@ -39,7 +37,7 @@ async function t212<T>(path: string, method = 'GET', body?: unknown): Promise<T>
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
-      'Authorization': `Basic ${AUTH}`,
+      Authorization: `Basic ${AUTH}`,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -75,9 +73,17 @@ async function main() {
   const db = new Database(DB_PATH, { readonly: false })
 
   // Get open AI positions from local DB
-  const openPositions = db.prepare(
-    `SELECT id, ticker, quantity, entry_price, opened_at FROM ai_positions WHERE status = 'open' ORDER BY opened_at ASC`
-  ).all() as Array<{ id: number; ticker: string; quantity: number; entry_price: number | null; opened_at: string }>
+  const openPositions = db
+    .prepare(
+      `SELECT id, ticker, quantity, entry_price, opened_at FROM ai_positions WHERE status = 'open' ORDER BY opened_at ASC`
+    )
+    .all() as Array<{
+    id: number
+    ticker: string
+    quantity: number
+    entry_price: number | null
+    opened_at: string
+  }>
 
   if (openPositions.length === 0) {
     console.log('\nNo open AI positions found in local DB. Clean slate already!\n')
@@ -87,7 +93,9 @@ async function main() {
 
   console.log(`\nFound ${openPositions.length} open AI position(s) in local DB:`)
   for (const p of openPositions) {
-    console.log(`  ${p.ticker.padEnd(18)} ${p.quantity} shares  entry: ${p.entry_price?.toFixed(2) ?? 'n/a'}  opened: ${p.opened_at.slice(0, 16)}`)
+    console.log(
+      `  ${p.ticker.padEnd(18)} ${p.quantity} shares  entry: ${p.entry_price?.toFixed(2) ?? 'n/a'}  opened: ${p.opened_at.slice(0, 16)}`
+    )
   }
 
   // Fetch live portfolio from T212
@@ -105,7 +113,9 @@ async function main() {
     const live = liveMap.get(pos.ticker)
 
     if (!live) {
-      console.log(`  SKIP  ${pos.ticker} — not found in live T212 portfolio (may have already been sold)`)
+      console.log(
+        `  SKIP  ${pos.ticker} — not found in live T212 portfolio (may have already been sold)`
+      )
       // Mark closed in local DB anyway
       db.prepare(
         `UPDATE ai_positions SET status = 'closed', closed_at = ?, exit_price = NULL, realized_pnl = NULL WHERE id = ?`
@@ -129,18 +139,21 @@ async function main() {
       })
 
       const exitPrice = live.currentPrice
-      const realizedPnl = pos.entry_price != null
-        ? (exitPrice - pos.entry_price) * sellQty
-        : null
+      const realizedPnl = pos.entry_price != null ? (exitPrice - pos.entry_price) * sellQty : null
 
       db.prepare(
         `UPDATE ai_positions SET status = 'closed', closed_at = ?, exit_price = ?, realized_pnl = ? WHERE id = ?`
       ).run(now, exitPrice, realizedPnl, pos.id)
 
-      const pnlStr = realizedPnl != null
-        ? (realizedPnl >= 0 ? `+€${realizedPnl.toFixed(2)}` : `-€${Math.abs(realizedPnl).toFixed(2)}`)
-        : 'n/a'
-      console.log(`  SOLD  ${pos.ticker.padEnd(18)} ${sellQty} @ €${exitPrice.toFixed(2)}  P&L: ${pnlStr}  order: ${order.id} (${order.status})`)
+      const pnlStr =
+        realizedPnl != null
+          ? realizedPnl >= 0
+            ? `+€${realizedPnl.toFixed(2)}`
+            : `-€${Math.abs(realizedPnl).toFixed(2)}`
+          : 'n/a'
+      console.log(
+        `  SOLD  ${pos.ticker.padEnd(18)} ${sellQty} @ €${exitPrice.toFixed(2)}  P&L: ${pnlStr}  order: ${order.id} (${order.status})`
+      )
       sold++
 
       // Brief pause to respect T212 rate limits

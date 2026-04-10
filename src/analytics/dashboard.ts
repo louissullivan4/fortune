@@ -14,16 +14,16 @@ import { runMigrations } from '../db.js'
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
 const A = {
-  reset:   '\x1b[0m',
-  bold:    '\x1b[1m',
-  dim:     '\x1b[2m',
-  cyan:    '\x1b[36m',
-  green:   '\x1b[32m',
-  red:     '\x1b[31m',
-  yellow:  '\x1b[33m',
-  blue:    '\x1b[34m',
-  white:   '\x1b[97m',
-  clear:   '\x1b[2J\x1b[H',
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  red: '\x1b[31m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  white: '\x1b[97m',
+  clear: '\x1b[2J\x1b[H',
   hideCursor: '\x1b[?25l',
   showCursor: '\x1b[?25h',
 }
@@ -40,13 +40,19 @@ function eur(n: number, showSign = false): string {
 }
 
 function pad(s: string, n: number): string {
+  // eslint-disable-next-line no-control-regex
   const plain = s.replace(/\x1b\[[0-9;]*m/g, '')
   return s + ' '.repeat(Math.max(0, n - plain.length))
 }
 
 // ── ASCII line chart ──────────────────────────────────────────────────────────
 
-function lineChart(values: number[], firstDate: string | undefined, height = 7, width = 52): string {
+function lineChart(
+  values: number[],
+  firstDate: string | undefined,
+  height = 7,
+  width = 52
+): string {
   if (values.length === 0) return `  ${A.dim}(no data yet — run a cycle first)${A.reset}\n`
 
   const min = Math.min(...values)
@@ -57,14 +63,17 @@ function lineChart(values: number[], firstDate: string | undefined, height = 7, 
   const data: number[] =
     cols === values.length
       ? values
-      : Array.from({ length: cols }, (_, i) =>
-          values[Math.round((i * (values.length - 1)) / (cols - 1))]
+      : Array.from(
+          { length: cols },
+          (_, i) => values[Math.round((i * (values.length - 1)) / (cols - 1))]
         )
 
   const grid: string[][] = Array.from({ length: height }, () => Array(cols).fill(' '))
   const yPos = (v: number) => Math.round(((v - min) / range) * (height - 1))
 
-  data.forEach((v, x) => { grid[height - 1 - yPos(v)][x] = '•' })
+  data.forEach((v, x) => {
+    grid[height - 1 - yPos(v)][x] = '•'
+  })
   data.forEach((v, x) => {
     if (x === 0) return
     const y1 = yPos(data[x - 1])
@@ -85,9 +94,8 @@ function lineChart(values: number[], firstDate: string | undefined, height = 7, 
   })
 
   const xAxis = ' '.repeat(labelW + 1) + `${A.dim}└${'─'.repeat(cols)}${A.reset}`
-  const dates = data.length >= 2 && firstDate
-    ? ' '.repeat(labelW + 2) + `${A.dim}${firstDate}${A.reset}`
-    : ''
+  const dates =
+    data.length >= 2 && firstDate ? ' '.repeat(labelW + 2) + `${A.dim}${firstDate}${A.reset}` : ''
 
   return lines.join('\n') + '\n' + xAxis + (dates ? '\n' + dates : '') + '\n'
 }
@@ -173,7 +181,9 @@ async function render(): Promise<void> {
           lastDecision.reasoning.length > colW - 2
             ? `  ${A.dim}${lastDecision.reasoning.slice(colW - 2, (colW - 2) * 2)}${A.reset}`
             : '',
-        ].filter(Boolean).join('\n')
+        ]
+          .filter(Boolean)
+          .join('\n')
       : `  ${A.dim}No decisions yet${A.reset}`,
   ]
 
@@ -214,9 +224,7 @@ async function render(): Promise<void> {
 
   out.push('')
   out.push(divider(W, '═'))
-  out.push(
-    `  ${A.dim}[q] quit   [r] refresh   Updated: ${now}   Next auto-refresh: 30s${A.reset}`
-  )
+  out.push(`  ${A.dim}[q] quit   [r] refresh   Updated: ${now}   Next auto-refresh: 30s${A.reset}`)
   out.push('')
 
   process.stdout.write(out.join('\n'))

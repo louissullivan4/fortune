@@ -86,7 +86,10 @@ export async function getHistory(t212Ticker: string, days = 90): Promise<TickerH
   }
 }
 
-export async function getAllHistories(tickers: string[], days = 90): Promise<Map<string, TickerHistory>> {
+export async function getAllHistories(
+  tickers: string[],
+  days = 90
+): Promise<Map<string, TickerHistory>> {
   const entries = await Promise.all(
     tickers.map(async (ticker) => [ticker, await getHistory(ticker, days)] as const)
   )

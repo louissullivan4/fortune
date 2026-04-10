@@ -129,19 +129,19 @@ export interface TickerIndicators {
   ema12: number | null
   ema21: number | null
   ema26: number | null
-  macd: number | null           // MACD line (ema12 - ema26)
-  macdSignal: number | null     // 9-period EMA of MACD line
-  macdHistogram: number | null  // macd - macdSignal
+  macd: number | null // MACD line (ema12 - ema26)
+  macdSignal: number | null // 9-period EMA of MACD line
+  macdHistogram: number | null // macd - macdSignal
   macdBullCross: boolean | null // true if MACD just crossed above signal this bar
   macdBearCross: boolean | null // true if MACD just crossed below signal this bar
   bollingerUpper: number | null
   bollingerMiddle: number | null
   bollingerLower: number | null
-  bollingerPctB: number | null  // 0=at lower band, 1=at upper band, <0=below
+  bollingerPctB: number | null // 0=at lower band, 1=at upper band, <0=below
   stochK: number | null
   stochD: number | null
   currentPrice: number | null
-  priceChange1d: number | null  // % change last close vs previous close
+  priceChange1d: number | null // % change last close vs previous close
 }
 
 export function computeIndicators(ticker: string, closes: number[]): TickerIndicators {

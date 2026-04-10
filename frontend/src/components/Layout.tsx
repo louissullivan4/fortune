@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { NavLink, Routes, Route } from 'react-router-dom'
-import { LayoutDashboard, Zap, Clock, BarChart2, Settings, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Zap,
+  Clock,
+  BarChart2,
+  Settings,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react'
 import Dashboard from '../pages/Dashboard'
 import Signals from '../pages/Signals'
 import History from '../pages/History'

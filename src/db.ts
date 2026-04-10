@@ -27,9 +27,11 @@ export async function runMigrations(): Promise<void> {
   `)
 
   const applied = new Set(
-    (await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version')).rows.map(
-      (r) => r.version
-    )
+    (
+      await pool.query<{ version: string }>(
+        'SELECT version FROM schema_migrations ORDER BY version'
+      )
+    ).rows.map((r) => r.version)
   )
 
   const files = readdirSync(MIGRATIONS_DIR)

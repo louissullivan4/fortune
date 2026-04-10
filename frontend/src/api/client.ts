@@ -216,7 +216,8 @@ export interface Instrument {
 // ── API functions ─────────────────────────────────────────────────────────
 
 export const api = {
-  health: () => req<{ status: string; uptime: number; wsConnections: number }>('/health'.replace('/api', '')),
+  health: () =>
+    req<{ status: string; uptime: number; wsConnections: number }>('/health'.replace('/api', '')),
 
   engine: {
     status: () => req<EngineStatus>('/engine/status'),
@@ -236,7 +237,8 @@ export const api = {
   },
 
   decisions: {
-    list: (page = 1, limit = 20) => req<Paginated<Decision>>(`/decisions?page=${page}&limit=${limit}`),
+    list: (page = 1, limit = 20) =>
+      req<Paginated<Decision>>(`/decisions?page=${page}&limit=${limit}`),
     get: (id: number) => req<Decision>(`/decisions/${id}`),
   },
 
@@ -246,8 +248,10 @@ export const api = {
 
   analytics: {
     summary: () => req<Summary>('/analytics/summary'),
-    snapshots: (limit = 90) => req<{ data: DailySnapshot[] }>(`/analytics/snapshots?limit=${limit}`),
-    intraday: (hours: number) => req<{ data: IntradayPoint[]; hours: number }>(`/analytics/intraday?hours=${hours}`),
+    snapshots: (limit = 90) =>
+      req<{ data: DailySnapshot[] }>(`/analytics/snapshots?limit=${limit}`),
+    intraday: (hours: number) =>
+      req<{ data: IntradayPoint[]; hours: number }>(`/analytics/intraday?hours=${hours}`),
     aiCost: () => req<AiCostResponse>('/analytics/ai-cost'),
     positions: () => req<{ open: AiPosition[]; closed: AiPosition[] }>('/analytics/positions'),
     performance: () => req<Performance>('/analytics/performance'),
@@ -255,13 +259,17 @@ export const api = {
 
   config: {
     get: () => req<Config>('/config'),
-    update: (body: Partial<Config>) => req<Config>('/config', { method: 'PUT', body: JSON.stringify(body) }),
+    update: (body: Partial<Config>) =>
+      req<Config>('/config', { method: 'PUT', body: JSON.stringify(body) }),
   },
 
   instruments: {
-    search: (q: string) => req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(q)}`),
+    search: (q: string) =>
+      req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(q)}`),
     lookup: async (ticker: string): Promise<Instrument | null> => {
-      const res = await req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(ticker)}`)
+      const res = await req<{ data: Instrument[]; total: number }>(
+        `/instruments/search?q=${encodeURIComponent(ticker)}`
+      )
       return res.data.find((i) => i.ticker === ticker) ?? null
     },
   },

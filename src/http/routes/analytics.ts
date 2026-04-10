@@ -25,7 +25,11 @@ router.get('/summary', async (_req, res, next) => {
     const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0).length
     const winRate = closed.length > 0 ? (wins / closed.length) * 100 : null
     res.json({
-      ...stats, realizedPnl, winRate, closedPositions: closed.length, portfolioConfig,
+      ...stats,
+      realizedPnl,
+      winRate,
+      closedPositions: closed.length,
+      portfolioConfig,
       aiCostUsd: aiUsage.totalCostUsd,
       aiCallCount: aiUsage.callCount,
     })
@@ -88,12 +92,22 @@ router.get('/performance', async (_req, res, next) => {
     const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0)
     const losses = closed.filter((p) => (p.realizedPnl ?? 0) < 0)
     const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : null
-    const avgWin = wins.length > 0 ? wins.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / wins.length : null
-    const avgLoss = losses.length > 0 ? losses.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / losses.length : null
+    const avgWin =
+      wins.length > 0 ? wins.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / wins.length : null
+    const avgLoss =
+      losses.length > 0
+        ? losses.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / losses.length
+        : null
     res.json({
-      ...stats, realizedPnl, winRate, avgWin, avgLoss,
-      wins: wins.length, losses: losses.length,
-      openPositions: open.length, closedPositions: closed.length,
+      ...stats,
+      realizedPnl,
+      winRate,
+      avgWin,
+      avgLoss,
+      wins: wins.length,
+      losses: losses.length,
+      openPositions: open.length,
+      closedPositions: closed.length,
     })
   } catch (err) {
     next(err)

@@ -71,7 +71,11 @@ class RequestQueue {
         const gap = MIN_INTERVAL_MS - (Date.now() - this.lastAt)
         if (gap > 0) await new Promise((r) => setTimeout(r, gap))
         this.lastAt = Date.now()
-        try { resolve(await fn()) } catch (e) { reject(e) }
+        try {
+          resolve(await fn())
+        } catch (e) {
+          reject(e)
+        }
       })
       this.drain()
     })
@@ -105,7 +109,11 @@ function baseUrl(): string {
 // Inner fetch — runs inside a queued job. Retries are done directly here (no
 // re-enqueue) to avoid a deadlock: the queue is `busy` while a job runs, so
 // re-enqueuing from inside a job would push to the back and never drain.
-async function apiFetchInner<T>(path: string, init: RequestInit | undefined, retries: number): Promise<T> {
+async function apiFetchInner<T>(
+  path: string,
+  init: RequestInit | undefined,
+  retries: number
+): Promise<T> {
   const res = await fetch(`${baseUrl()}${path}`, {
     ...init,
     headers: {
