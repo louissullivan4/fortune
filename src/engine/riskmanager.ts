@@ -60,14 +60,18 @@ export async function validateOrder(
       }
     }
 
+    // No adding to existing positions — one buy per ticker
+    const existingPosition = snapshot.positions.find((p) => p.ticker === order.ticker)
+    if (existingPosition) {
+      return {
+        allowed: false,
+        reason: `Already holding a position in ${order.ticker} — will not add to existing position`,
+      }
+    }
+
     // Max position size — use EUR cost basis (invested EUR) not local-currency price
     const maxPositionValue = maxBudgetEur * maxPositionPct
-    const existingPosition = snapshot.positions.find((p) => p.ticker === order.ticker)
-    // averagePrice * quantity approximates EUR cost basis when T212 returns it in account currency
-    const currentPositionValue = existingPosition
-      ? existingPosition.averagePrice * existingPosition.quantity
-      : 0
-    if (currentPositionValue + orderCost > maxPositionValue) {
+    if (orderCost > maxPositionValue) {
       return {
         allowed: false,
         reason: `Position would exceed max size of €${maxPositionValue.toFixed(2)} (${(maxPositionPct * 100).toFixed(0)}% of budget)`,

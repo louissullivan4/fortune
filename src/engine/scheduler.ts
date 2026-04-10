@@ -390,10 +390,15 @@ export async function runCycle(): Promise<void> {
   console.log(`[scheduler] Fetching price history for ${config.tradeUniverse.length} tickers...`)
   const histories = await getAllHistories(config.tradeUniverse, 90)
 
-  // 5. Generate signals
+  // 5. Generate signals — exclude tickers already held (no adding to open positions)
   const botTickers = new Set((await getOpenAiPositions()).map((p) => p.ticker))
   const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
-  const signals = generateSignals(config.tradeUniverse, histories, botPositions)
+  const heldTickers = new Set(botPositions.map((p) => p.ticker))
+  const buyUniverse = config.tradeUniverse.filter((t) => !heldTickers.has(t))
+  if (heldTickers.size > 0) {
+    console.log(`[scheduler] Excluding held tickers from buy universe: ${[...heldTickers].join(', ')}`)
+  }
+  const signals = generateSignals(buyUniverse, histories, botPositions)
   const actionable = signals.filter((s) => s.signal !== 'hold').length
   console.log(`[scheduler] Signals: ${signals.length} tickers, ${actionable} actionable`)
 
