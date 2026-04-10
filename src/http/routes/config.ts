@@ -13,6 +13,9 @@ function configResponse() {
     dailyLossLimitPct: config.dailyLossLimitPct,
     stopLossPct: config.stopLossPct,
     takeProfitPct: config.takeProfitPct,
+    stagnantExitEnabled: config.stagnantExitEnabled,
+    stagnantTimeMinutes: config.stagnantTimeMinutes,
+    stagnantRangePct: config.stagnantRangePct,
     trading212Mode: config.trading212Mode,
   }
 }
@@ -50,6 +53,16 @@ router.put('/', async (req, res, next) => {
       updates.stopLossPct = body.stopLossPct
     if (typeof body.takeProfitPct === 'number' && body.takeProfitPct > 0 && body.takeProfitPct <= 1)
       updates.takeProfitPct = body.takeProfitPct
+    if (typeof body.stagnantExitEnabled === 'boolean')
+      updates.stagnantExitEnabled = body.stagnantExitEnabled
+    if (typeof body.stagnantTimeMinutes === 'number' && body.stagnantTimeMinutes >= 15)
+      updates.stagnantTimeMinutes = body.stagnantTimeMinutes
+    if (
+      typeof body.stagnantRangePct === 'number' &&
+      body.stagnantRangePct > 0 &&
+      body.stagnantRangePct <= 0.1
+    )
+      updates.stagnantRangePct = body.stagnantRangePct
 
     await updateConfig(updates as Parameters<typeof updateConfig>[0])
     res.json(configResponse())

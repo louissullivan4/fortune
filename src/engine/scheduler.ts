@@ -235,6 +235,115 @@ async function checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): P
   return exitsPlaced
 }
 
+// ── Stagnant position rotation ─────────────────────────────────────────────
+
+async function checkStagnantExits(
+  snapshot: PortfolioSnapshot,
+  signals: import('../strategy/signals.js').TickerSignal[],
+  timestamp: string
+): Promise<number> {
+  if (!config.stagnantExitEnabled) return 0
+
+  const openPositions = await getOpenAiPositions()
+  if (openPositions.length === 0) return 0
+
+  // Only rotate if there is a buy/strong_buy signal on a ticker we don't already hold
+  const heldTickers = new Set(openPositions.map((p) => p.ticker))
+  const hasBetterOpportunity = signals.some(
+    (s) => (s.signal === 'buy' || s.signal === 'strong_buy') && !heldTickers.has(s.ticker)
+  )
+  if (!hasBetterOpportunity) return 0
+
+  const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10))
+  let exitsPlaced = 0
+  const seenTickers = new Set<string>()
+
+  for (const pos of openPositions) {
+    if (seenTickers.has(pos.ticker)) continue
+    seenTickers.add(pos.ticker)
+    if (!pos.entryPrice) continue
+
+    const live = snapshot.positions.find((p) => p.ticker === pos.ticker)
+    if (!live) continue
+
+    const currentPrice = live.currentPrice
+    const pctFromEntry = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
+    const minutesHeld = (Date.now() - new Date(pos.openedAt).getTime()) / 60_000
+
+    const isStagnant =
+      minutesHeld >= config.stagnantTimeMinutes &&
+      Math.abs(pctFromEntry) < config.stagnantRangePct * 100
+
+    // Only exit at break-even or better (no loss — T212 is commission-free)
+    const atBreakEven = currentPrice >= pos.entryPrice
+
+    if (!isStagnant || !atBreakEven) continue
+
+    const direction = pctFromEntry >= 0 ? '+' : ''
+    console.log(
+      `[scheduler] Stagnant exit: ${pos.ticker} held ${minutesHeld.toFixed(0)}min, ` +
+        `${direction}${pctFromEntry.toFixed(2)}% from entry — rotating capital`
+    )
+
+    const sellQty = live.quantity
+
+    const risk = await validateOrder(
+      { action: 'sell', ticker: pos.ticker, quantity: sellQty, estimatedPrice: currentPrice },
+      snapshot,
+      dailyOpen ?? snapshot.totalValue
+    )
+
+    if (!risk.allowed) {
+      console.log(`[scheduler] Risk blocked stagnant exit for ${pos.ticker}: ${risk.reason}`)
+      continue
+    }
+
+    const reason =
+      `Stagnant exit: held ${minutesHeld.toFixed(0)} minutes with only ` +
+      `${Math.abs(pctFromEntry).toFixed(2)}% movement from entry €${pos.entryPrice.toFixed(2)}. ` +
+      `Rotating capital to better opportunities.`
+
+    const decisionId = await logDecision({
+      timestamp,
+      action: 'sell',
+      ticker: pos.ticker,
+      quantity: sellQty,
+      estimatedPrice: currentPrice,
+      reasoning: reason,
+      signalsJson: '[]',
+      portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, cash: snapshot.cash.free }),
+    })
+
+    try {
+      const order = await placeMarketOrder(pos.ticker, sellQty, 'sell')
+      await closeAllAiPositions(pos.ticker, currentPrice, timestamp)
+      invalidatePortfolioCache()
+      console.log(`[scheduler] Stagnant exit order placed: ${order.id} (${order.status})`)
+      await logOrder({
+        decisionId,
+        t212OrderId: order.id,
+        status: order.status,
+        fillPrice: currentPrice,
+        fillQuantity: sellQty,
+        timestamp,
+      })
+      exitsPlaced++
+    } catch (err) {
+      console.error(`[scheduler] Stagnant exit order failed: ${(err as Error).message}`)
+      await logOrder({
+        decisionId,
+        t212OrderId: null,
+        status: `error: ${(err as Error).message}`,
+        fillPrice: null,
+        fillQuantity: null,
+        timestamp,
+      })
+    }
+  }
+
+  return exitsPlaced
+}
+
 // ── Single trading cycle ───────────────────────────────────────────────────
 
 export async function runCycle(): Promise<void> {
@@ -293,6 +402,15 @@ export async function runCycle(): Promise<void> {
 
   // 3. Record daily open snapshot
   await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue)
+
+  // 5b. Stagnant position rotation — exit flat positions at break-even if better signals exist
+  const stagnantExits = await checkStagnantExits(snapshot, signals, timestamp)
+  if (stagnantExits > 0) {
+    const freshSnapshot = adjustedSnapshot(await getPortfolioSnapshot())
+    Object.assign(snapshot, freshSnapshot)
+    _lastSignalState = null // force AI re-evaluation with updated portfolio
+    console.log(`[scheduler] ${stagnantExits} stagnant exit(s) placed — portfolio refreshed`)
+  }
 
   // 6. Ask Claude for a decision — skip if signals unchanged since last hold
   const currentFingerprint = computeSignalFingerprint(signals)

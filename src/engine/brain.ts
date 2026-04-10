@@ -92,6 +92,7 @@ HARD RULES — you must never violate these:
 - Never invest more than €${(config.maxBudgetEur * config.maxPositionPct).toFixed(0)} TOTAL in a single stock — this is the combined cost basis of existing shares + new order cost. Check "remaining room" shown per position before sizing a buy
 - Always keep at least €5 in cash as a buffer
 - Hard exits (stop-loss ≥${(config.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(config.takeProfitPct * 100).toFixed(1)}% up, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself
+- Stagnant exits (position held >${config.stagnantTimeMinutes} minutes with <${(config.stagnantRangePct * 100).toFixed(1)}% movement at break-even or better, when a stronger opportunity exists) are also handled automatically — you do NOT need to manage these
 - You may SELL a held position if technical signals have turned bearish, even if the automatic stop hasn't triggered yet
 - Only BUY stocks in the signal universe
 - You are running in ${config.trading212Mode.toUpperCase()} mode

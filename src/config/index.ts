@@ -42,6 +42,9 @@ export interface Config {
   dailyLossLimitPct: number
   stopLossPct: number
   takeProfitPct: number
+  stagnantExitEnabled: boolean
+  stagnantTimeMinutes: number
+  stagnantRangePct: number
 }
 
 // Start with env-var defaults; initConfig() will overwrite with DB values.
@@ -62,6 +65,9 @@ export const config: Config = {
   dailyLossLimitPct: Number(process.env.DAILY_LOSS_LIMIT_PCT ?? 0.1),
   stopLossPct: Number(process.env.STOP_LOSS_PCT ?? 0.05),
   takeProfitPct: Number(process.env.TAKE_PROFIT_PCT ?? 0.015),
+  stagnantExitEnabled: process.env.STAGNANT_EXIT_ENABLED !== 'false',
+  stagnantTimeMinutes: Number(process.env.STAGNANT_TIME_MINUTES ?? 120),
+  stagnantRangePct: Number(process.env.STAGNANT_RANGE_PCT ?? 0.005),
 }
 
 // ── initConfig — call once at startup after runMigrations() ────────────────
@@ -79,14 +85,17 @@ export async function initConfig(): Promise<void> {
       daily_loss_limit_pct: number
       stop_loss_pct: number
       take_profit_pct: number
+      stagnant_exit_enabled: boolean
+      stagnant_time_minutes: number
+      stagnant_range_pct: number
     }>('SELECT * FROM app_config WHERE id = 1')
   ).rows[0]
 
   if (!row) {
     await pool.query(
       `INSERT INTO app_config
-         (id, trade_universe, trade_interval_ms, max_budget_eur, max_position_pct, daily_loss_limit_pct, stop_loss_pct, take_profit_pct, updated_at)
-       VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8)`,
+         (id, trade_universe, trade_interval_ms, max_budget_eur, max_position_pct, daily_loss_limit_pct, stop_loss_pct, take_profit_pct, stagnant_exit_enabled, stagnant_time_minutes, stagnant_range_pct, updated_at)
+       VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         config.tradeUniverse.join(','),
         config.tradeIntervalMs,
@@ -95,6 +104,9 @@ export async function initConfig(): Promise<void> {
         config.dailyLossLimitPct,
         config.stopLossPct,
         config.takeProfitPct,
+        config.stagnantExitEnabled,
+        config.stagnantTimeMinutes,
+        config.stagnantRangePct,
         new Date().toISOString(),
       ]
     )
@@ -112,6 +124,9 @@ export async function initConfig(): Promise<void> {
   config.dailyLossLimitPct = Number(row.daily_loss_limit_pct)
   config.stopLossPct = Number(row.stop_loss_pct)
   config.takeProfitPct = Number(row.take_profit_pct)
+  config.stagnantExitEnabled = row.stagnant_exit_enabled ?? true
+  config.stagnantTimeMinutes = Number(row.stagnant_time_minutes ?? 120)
+  config.stagnantRangePct = Number(row.stagnant_range_pct ?? 0.005)
 }
 
 // ── updateConfig — mutates in-memory config AND persists to DB ──────────────
@@ -126,6 +141,9 @@ export type ConfigUpdate = Partial<
     | 'dailyLossLimitPct'
     | 'stopLossPct'
     | 'takeProfitPct'
+    | 'stagnantExitEnabled'
+    | 'stagnantTimeMinutes'
+    | 'stagnantRangePct'
   >
 >
 
@@ -134,14 +152,17 @@ export async function updateConfig(updates: ConfigUpdate): Promise<void> {
   const pool = getPool()
   await pool.query(
     `UPDATE app_config SET
-       trade_universe       = COALESCE($1, trade_universe),
-       trade_interval_ms    = COALESCE($2, trade_interval_ms),
-       max_budget_eur       = COALESCE($3, max_budget_eur),
-       max_position_pct     = COALESCE($4, max_position_pct),
-       daily_loss_limit_pct = COALESCE($5, daily_loss_limit_pct),
-       stop_loss_pct        = COALESCE($6, stop_loss_pct),
-       take_profit_pct      = COALESCE($7, take_profit_pct),
-       updated_at           = $8
+       trade_universe        = COALESCE($1, trade_universe),
+       trade_interval_ms     = COALESCE($2, trade_interval_ms),
+       max_budget_eur        = COALESCE($3, max_budget_eur),
+       max_position_pct      = COALESCE($4, max_position_pct),
+       daily_loss_limit_pct  = COALESCE($5, daily_loss_limit_pct),
+       stop_loss_pct         = COALESCE($6, stop_loss_pct),
+       take_profit_pct       = COALESCE($7, take_profit_pct),
+       stagnant_exit_enabled = COALESCE($8, stagnant_exit_enabled),
+       stagnant_time_minutes = COALESCE($9, stagnant_time_minutes),
+       stagnant_range_pct    = COALESCE($10, stagnant_range_pct),
+       updated_at            = $11
      WHERE id = 1`,
     [
       updates.tradeUniverse ? updates.tradeUniverse.join(',') : null,
@@ -151,6 +172,9 @@ export async function updateConfig(updates: ConfigUpdate): Promise<void> {
       updates.dailyLossLimitPct ?? null,
       updates.stopLossPct ?? null,
       updates.takeProfitPct ?? null,
+      updates.stagnantExitEnabled ?? null,
+      updates.stagnantTimeMinutes ?? null,
+      updates.stagnantRangePct ?? null,
       new Date().toISOString(),
     ]
   )
