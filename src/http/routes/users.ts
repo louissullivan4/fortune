@@ -5,6 +5,7 @@ import { getPool } from '../../db.js'
 import { encrypt, decrypt } from '../../services/encryption.js'
 import { sendInviteEmail } from '../../services/email.js'
 import { requireAuth, requireAdmin } from '../middleware/auth.js'
+import { evictT212Client } from '../../api/trading212.js'
 
 const router = Router()
 
@@ -263,6 +264,9 @@ router.put('/me/api-keys', async (req, res, next) => {
         t212Mode ?? existing?.t212_mode ?? 'demo',
       ]
     )
+
+    // Evict cached T212 client so next request picks up the new credentials
+    evictT212Client(req.user!.userId)
 
     res.json({ ok: true })
   } catch (err) {

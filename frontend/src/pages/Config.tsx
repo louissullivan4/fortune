@@ -1,16 +1,31 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, Plus, Search } from 'lucide-react'
 import { api, type Config, type Instrument } from '../api/client'
 import { pushToast } from '../components/Toasts'
 
-function msToSec(ms: number) {
-  return Math.round(ms / 1000)
-}
-function secToMs(s: number) {
-  return s * 1000
+// ── Unit helpers ───────────────────────────────────────────────────────────
+
+type TimeUnit = 'seconds' | 'minutes' | 'hours'
+
+function msToUnit(ms: number, unit: TimeUnit): number {
+  if (unit === 'hours') return Math.round(ms / 3_600_000)
+  if (unit === 'minutes') return Math.round(ms / 60_000)
+  return Math.round(ms / 1_000)
 }
 
-type IntervalUnit = 'seconds' | 'minutes'
+function unitToMs(value: number, unit: TimeUnit): number {
+  if (unit === 'hours') return value * 3_600_000
+  if (unit === 'minutes') return value * 60_000
+  return value * 1_000
+}
+
+function bestUnit(ms: number): TimeUnit {
+  if (ms >= 3_600_000 && ms % 3_600_000 === 0) return 'hours'
+  if (ms >= 60_000 && ms % 60_000 === 0) return 'minutes'
+  return 'seconds'
+}
+
+// ── Shared components ──────────────────────────────────────────────────────
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -19,23 +34,71 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
         {label}
       </label>
       {children}
-      {hint && (
-        <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{hint}</span>
-      )}
+      {hint && <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{hint}</span>}
     </div>
   )
 }
+
+// ── DurationInput — number + unit select ───────────────────────────────────
+
+function DurationInput({
+  ms,
+  onChange,
+  min,
+  units = ['seconds', 'minutes', 'hours'],
+}: {
+  ms: number
+  onChange: (ms: number) => void
+  min?: number
+  units?: TimeUnit[]
+}) {
+  const [unit, setUnit] = useState<TimeUnit>(() => bestUnit(ms))
+  const value = msToUnit(ms, unit)
+
+  function handleValue(raw: string) {
+    const n = Math.max(min ?? 0, Number(raw) || 0)
+    onChange(unitToMs(n, unit))
+  }
+
+  function handleUnit(u: TimeUnit) {
+    setUnit(u)
+    // keep the same numeric display value, just change unit
+    onChange(unitToMs(value, u))
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <input
+        type="number"
+        className="input"
+        value={value}
+        min={min}
+        style={{ flex: 1 }}
+        onChange={(e) => handleValue(e.target.value)}
+      />
+      <select
+        className="input"
+        value={unit}
+        onChange={(e) => handleUnit(e.target.value as TimeUnit)}
+        style={{ width: 'auto', minWidth: 100 }}
+      >
+        {units.map((u) => (
+          <option key={u} value={u}>{u}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
 
 export default function ConfigPage() {
   const [cfg, setCfg] = useState<Config | null>(null)
   const [draft, setDraft] = useState<Config | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [intervalUnit, setIntervalUnit] = useState<IntervalUnit>('minutes')
   const [t212Mode, setT212Mode] = useState<string>('demo')
 
-  // API keys
+  // API keys — only sent if the user typed something
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
   const [hasT212Key, setHasT212Key] = useState(false)
   const [keysForm, setKeysForm] = useState({
@@ -44,12 +107,12 @@ export default function ConfigPage() {
     t212KeySecret: '',
     t212Mode: 'demo' as 'demo' | 'live',
   })
-  const [savingKeys, setSavingKeys] = useState(false)
 
   // Instrument search
   const [searchQ, setSearchQ] = useState('')
   const [searchResults, setSearchResults] = useState<Instrument[]>([])
   const [searching, setSearching] = useState(false)
+  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     Promise.all([api.config.get(), api.users.getApiKeys()])
@@ -60,49 +123,63 @@ export default function ConfigPage() {
         setHasAnthropicKey(keys.hasAnthropicKey)
         setHasT212Key(keys.hasT212Key)
         setKeysForm((f) => ({ ...f, t212Mode: keys.t212Mode as 'demo' | 'live' }))
-        if (c.tradeIntervalMs < 60_000) setIntervalUnit('seconds')
       })
       .catch(console.error)
   }, [])
 
-  const save = async () => {
+  const configChanged = JSON.stringify(cfg) !== JSON.stringify(draft)
+  const keysChanged =
+    keysForm.anthropicApiKey !== '' ||
+    keysForm.t212KeyId !== '' ||
+    keysForm.t212KeySecret !== '' ||
+    keysForm.t212Mode !== t212Mode
+  const isChanged = configChanged || keysChanged
+
+  async function saveAll() {
     if (!draft) return
     setSaving(true)
-    setError(null)
-    setSaved(false)
     try {
-      const updated = await api.config.update(draft)
-      setCfg(updated)
-      setDraft(updated)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    } catch (e) {
-      setError((e as Error).message)
+      const tasks: Promise<unknown>[] = []
+
+      if (configChanged) {
+        tasks.push(
+          api.config.update(draft).then((updated) => {
+            setCfg(updated)
+            setDraft(updated)
+          })
+        )
+      }
+
+      if (keysChanged) {
+        tasks.push(
+          api.users
+            .updateApiKeys({
+              anthropicApiKey: keysForm.anthropicApiKey || undefined,
+              t212KeyId: keysForm.t212KeyId || undefined,
+              t212KeySecret: keysForm.t212KeySecret || undefined,
+              t212Mode: keysForm.t212Mode,
+            })
+            .then(() => {
+              if (keysForm.anthropicApiKey) setHasAnthropicKey(true)
+              if (keysForm.t212KeyId) setHasT212Key(true)
+              setT212Mode(keysForm.t212Mode)
+              setKeysForm((f) => ({ ...f, anthropicApiKey: '', t212KeyId: '', t212KeySecret: '' }))
+            })
+        )
+      }
+
+      await Promise.all(tasks)
+      pushToast('Config saved', 'info')
+    } catch (err) {
+      pushToast((err as Error).message, 'error')
     } finally {
       setSaving(false)
     }
   }
 
-  async function saveApiKeys(e: React.FormEvent) {
-    e.preventDefault()
-    setSavingKeys(true)
-    try {
-      await api.users.updateApiKeys({
-        anthropicApiKey: keysForm.anthropicApiKey || undefined,
-        t212KeyId: keysForm.t212KeyId || undefined,
-        t212KeySecret: keysForm.t212KeySecret || undefined,
-        t212Mode: keysForm.t212Mode,
-      })
-      if (keysForm.anthropicApiKey) setHasAnthropicKey(true)
-      if (keysForm.t212KeyId) setHasT212Key(true)
-      setT212Mode(keysForm.t212Mode)
-      setKeysForm((f) => ({ ...f, anthropicApiKey: '', t212KeyId: '', t212KeySecret: '' }))
-      pushToast('API keys saved', 'info')
-    } catch (err) {
-      pushToast((err as Error).message, 'error')
-    } finally {
-      setSavingKeys(false)
-    }
+  function reset() {
+    setDraft(cfg)
+    setKeysForm((f) => ({ ...f, anthropicApiKey: '', t212KeyId: '', t212KeySecret: '', t212Mode: t212Mode as 'demo' | 'live' }))
   }
 
   const search = async (q: string) => {
@@ -130,8 +207,6 @@ export default function ConfigPage() {
     setDraft({ ...draft, tradeUniverse: draft.tradeUniverse.filter((t) => t !== ticker) })
   }
 
-  const isChanged = JSON.stringify(cfg) !== JSON.stringify(draft)
-
   if (!draft)
     return <div style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>Loading...</div>
 
@@ -140,13 +215,11 @@ export default function ConfigPage() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Config</h1>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {saved && <span style={{ fontSize: 12, color: '#16a34a' }}>Saved</span>}
-          {error && <span style={{ fontSize: 12, color: '#dc2626' }}>{error}</span>}
-          <button className="btn btn-secondary" onClick={() => setDraft(cfg!)} disabled={!isChanged || saving}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={reset} disabled={!isChanged || saving}>
             Reset
           </button>
-          <button className="btn btn-primary" onClick={save} disabled={!isChanged || saving}>
+          <button className="btn btn-primary" onClick={saveAll} disabled={!isChanged || saving}>
             {saving ? 'Saving...' : 'Save changes'}
           </button>
         </div>
@@ -156,9 +229,9 @@ export default function ConfigPage() {
         {/* Risk parameters */}
         <div className="card">
           <div className="section-label" style={{ marginBottom: 20 }}>risk parameters</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <Field label="Budget cap (EUR)" hint="Hard cap — no order will exceed this amount">
+            <Field label="Budget cap (EUR)" hint="Hard cap — no single order will exceed this amount">
               <input
                 type="number"
                 className="input"
@@ -169,12 +242,10 @@ export default function ConfigPage() {
               />
             </Field>
 
-            <Field label={`Max position size — ${(draft.maxPositionPct * 100).toFixed(0)}% of budget (€${(draft.maxBudgetEur * draft.maxPositionPct).toFixed(0)})`}>
+            <Field label={`Max position size — ${(draft.maxPositionPct * 100).toFixed(0)}% (€${(draft.maxBudgetEur * draft.maxPositionPct).toFixed(0)})`}>
               <input
                 type="range"
-                min={0.05}
-                max={0.5}
-                step={0.05}
+                min={0.05} max={0.5} step={0.05}
                 value={draft.maxPositionPct}
                 onChange={(e) => setDraft({ ...draft, maxPositionPct: Number(e.target.value) })}
                 style={{ width: '100%' }}
@@ -187,9 +258,7 @@ export default function ConfigPage() {
             <Field label={`Daily loss limit — ${(draft.dailyLossLimitPct * 100).toFixed(0)}%`}>
               <input
                 type="range"
-                min={0.02}
-                max={0.25}
-                step={0.01}
+                min={0.02} max={0.25} step={0.01}
                 value={draft.dailyLossLimitPct}
                 onChange={(e) => setDraft({ ...draft, dailyLossLimitPct: Number(e.target.value) })}
                 style={{ width: '100%' }}
@@ -198,101 +267,99 @@ export default function ConfigPage() {
                 <span>2%</span><span>25%</span>
               </div>
             </Field>
+
+            {/* Stagnant exit */}
+            <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <label style={{ fontSize: 12, color: 'var(--color-text-muted)', letterSpacing: '0.03em' }}>
+                  Stagnant exit
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setDraft({ ...draft, stagnantExitEnabled: !draft.stagnantExitEnabled })}
+                  style={{
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    border: 'none',
+                    cursor: 'pointer',
+                    background: draft.stagnantExitEnabled ? 'var(--color-accent)' : 'var(--color-border)',
+                    position: 'relative',
+                    transition: 'background 0.15s',
+                    flexShrink: 0,
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: draft.stagnantExitEnabled ? 18 : 2,
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 0.15s',
+                  }} />
+                </button>
+              </div>
+
+              {draft.stagnantExitEnabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <Field
+                    label="Sell if held for longer than"
+                    hint="Position must be near break-even to trigger"
+                  >
+                    <DurationInput
+                      ms={draft.stagnantTimeMinutes * 60_000}
+                      onChange={(ms) => setDraft({ ...draft, stagnantTimeMinutes: Math.round(ms / 60_000) })}
+                      min={1}
+                      units={['minutes', 'hours']}
+                    />
+                  </Field>
+
+                  <Field label={`With less than ${(draft.stagnantRangePct * 100).toFixed(1)}% price movement`}>
+                    <input
+                      type="range"
+                      min={0.001} max={0.05} step={0.001}
+                      value={draft.stagnantRangePct}
+                      onChange={(e) => setDraft({ ...draft, stagnantRangePct: Number(e.target.value) })}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                      <span>0.1%</span><span>5%</span>
+                    </div>
+                  </Field>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
 
         {/* Engine parameters */}
         <div className="card">
           <div className="section-label" style={{ marginBottom: 20 }}>engine parameters</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <label style={{ fontSize: 12, color: 'var(--color-text-muted)', letterSpacing: '0.03em' }}>
-                Cycle interval
-              </label>
-              <div style={{ display: 'flex', background: 'var(--color-bg-page)', border: '0.5px solid var(--color-border)', borderRadius: 6, overflow: 'hidden' }}>
-                {(['seconds', 'minutes'] as IntervalUnit[]).map((unit) => (
-                  <button
-                    key={unit}
-                    onClick={() => setIntervalUnit(unit)}
-                    style={{
-                      padding: '3px 10px',
-                      fontSize: 11,
-                      border: 'none',
-                      cursor: 'pointer',
-                      background: intervalUnit === unit ? 'var(--color-bg-surface)' : 'transparent',
-                      color: intervalUnit === unit ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                      borderRight: unit === 'seconds' ? '0.5px solid var(--color-border)' : 'none',
-                    }}
-                  >
-                    {unit}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <Field label="Cycle interval" hint="How often the engine runs a full analysis and decision cycle">
+              <DurationInput
+                ms={draft.tradeIntervalMs}
+                onChange={(ms) => setDraft({ ...draft, tradeIntervalMs: ms })}
+                min={10}
+              />
+            </Field>
 
-            {intervalUnit === 'seconds' ? (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
-                  {[10, 30, 60, 120].map((s) => (
-                    <button
-                      key={s}
-                      className={`btn ${draft.tradeIntervalMs === secToMs(s) ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setDraft({ ...draft, tradeIntervalMs: secToMs(s) })}
-                      style={{ justifyContent: 'center' }}
-                    >
-                      {s}s
-                    </button>
-                  ))}
+            <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div className="section-label" style={{ marginBottom: 6 }}>mode</div>
+                <div style={{ fontSize: 13, fontFamily: 'var(--font-code)', color: t212Mode === 'live' ? '#dc2626' : '#16a34a' }}>
+                  {t212Mode}
                 </div>
-                <Field label="" hint="Minimum 10 seconds">
-                  <input
-                    type="number"
-                    className="input"
-                    value={msToSec(draft.tradeIntervalMs)}
-                    min={10}
-                    placeholder="Custom seconds"
-                    onChange={(e) => setDraft({ ...draft, tradeIntervalMs: secToMs(Number(e.target.value)) })}
-                  />
-                </Field>
-              </>
-            ) : (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, marginBottom: 8 }}>
-                  {[5, 10, 15, 30].map((min) => (
-                    <button
-                      key={min}
-                      className={`btn ${draft.tradeIntervalMs === secToMs(min * 60) ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => setDraft({ ...draft, tradeIntervalMs: secToMs(min * 60) })}
-                      style={{ justifyContent: 'center' }}
-                    >
-                      {min}min
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="number"
-                  className="input"
-                  value={Math.round(msToSec(draft.tradeIntervalMs) / 60)}
-                  min={1}
-                  placeholder="Custom minutes"
-                  onChange={(e) => setDraft({ ...draft, tradeIntervalMs: secToMs(Number(e.target.value) * 60) })}
-                />
-              </>
-            )}
-          </div>
-
-          <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <div className="section-label" style={{ marginBottom: 6 }}>mode</div>
-              <div style={{ fontSize: 13, fontFamily: 'var(--font-code)', color: t212Mode === 'live' ? '#dc2626' : '#16a34a' }}>
-                {t212Mode}
               </div>
-            </div>
-            <div>
-              <div className="section-label" style={{ marginBottom: 6 }}>database</div>
-              <div style={{ fontSize: 12, fontFamily: 'var(--font-code)', color: 'var(--color-text-muted)' }}>
-                postgresql
+              <div>
+                <div className="section-label" style={{ marginBottom: 6 }}>database</div>
+                <div style={{ fontSize: 12, fontFamily: 'var(--font-code)', color: 'var(--color-text-muted)' }}>
+                  postgresql
+                </div>
               </div>
             </div>
           </div>
@@ -310,16 +377,10 @@ export default function ConfigPage() {
             <div
               key={ticker}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                height: 28,
-                padding: '0 10px 0 12px',
-                borderRadius: 9999,
-                border: '0.5px solid var(--color-border)',
-                background: 'var(--color-bg-surface)',
-                fontSize: 12,
-                fontFamily: 'var(--font-code)',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                height: 28, padding: '0 10px 0 12px', borderRadius: 9999,
+                border: '0.5px solid var(--color-border)', background: 'var(--color-bg-surface)',
+                fontSize: 12, fontFamily: 'var(--font-code)',
               }}
             >
               {ticker}
@@ -341,7 +402,12 @@ export default function ConfigPage() {
               style={{ paddingLeft: 30 }}
               placeholder="Search instruments to add..."
               value={searchQ}
-              onChange={(e) => { setSearchQ(e.target.value); search(e.target.value) }}
+              onChange={(e) => {
+                const q = e.target.value
+                setSearchQ(q)
+                if (searchDebounce.current) clearTimeout(searchDebounce.current)
+                searchDebounce.current = setTimeout(() => search(q), 350)
+              }}
             />
           </div>
           {searchResults.length > 0 && (
@@ -370,26 +436,10 @@ export default function ConfigPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <div className="section-label">api keys</div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <span
-              style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 4,
-                background: hasAnthropicKey ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
-                color: hasAnthropicKey ? '#16a34a' : '#dc2626',
-              }}
-            >
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: hasAnthropicKey ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)', color: hasAnthropicKey ? '#16a34a' : '#dc2626' }}>
               Anthropic {hasAnthropicKey ? '✓' : 'not set'}
             </span>
-            <span
-              style={{
-                fontSize: 11,
-                padding: '2px 8px',
-                borderRadius: 4,
-                background: hasT212Key ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
-                color: hasT212Key ? '#16a34a' : '#dc2626',
-              }}
-            >
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: hasT212Key ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)', color: hasT212Key ? '#16a34a' : '#dc2626' }}>
               T212 {hasT212Key ? '✓' : 'not set'}
             </span>
           </div>
@@ -399,62 +449,54 @@ export default function ConfigPage() {
           Keys are encrypted with AES-256-GCM. Leave a field blank to keep the existing key.
         </p>
 
-        <form onSubmit={saveApiKeys}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <Field label="Anthropic API key">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Field label="Anthropic API key">
+            <input
+              type="password"
+              className="input"
+              value={keysForm.anthropicApiKey}
+              onChange={(e) => setKeysForm((f) => ({ ...f, anthropicApiKey: e.target.value }))}
+              placeholder={hasAnthropicKey ? '(leave blank to keep existing)' : 'sk-ant-…'}
+            />
+          </Field>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <Field label="T212 API key ID">
               <input
                 type="password"
                 className="input"
-                value={keysForm.anthropicApiKey}
-                onChange={(e) => setKeysForm((f) => ({ ...f, anthropicApiKey: e.target.value }))}
-                placeholder={hasAnthropicKey ? '(leave blank to keep existing)' : 'sk-ant-…'}
+                value={keysForm.t212KeyId}
+                onChange={(e) => setKeysForm((f) => ({ ...f, t212KeyId: e.target.value }))}
+                placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key ID'}
               />
             </Field>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <Field label="T212 API key ID">
-                <input
-                  type="password"
-                  className="input"
-                  value={keysForm.t212KeyId}
-                  onChange={(e) => setKeysForm((f) => ({ ...f, t212KeyId: e.target.value }))}
-                  placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key ID'}
-                />
-              </Field>
-              <Field label="T212 API key secret">
-                <input
-                  type="password"
-                  className="input"
-                  value={keysForm.t212KeySecret}
-                  onChange={(e) => setKeysForm((f) => ({ ...f, t212KeySecret: e.target.value }))}
-                  placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key secret'}
-                />
-              </Field>
-            </div>
-
-            <Field label="T212 mode">
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['demo', 'live'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`btn ${keysForm.t212Mode === m ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setKeysForm((f) => ({ ...f, t212Mode: m }))}
-                    style={m === 'live' && keysForm.t212Mode === 'live' ? { background: '#dc2626', borderColor: '#dc2626' } : {}}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
+            <Field label="T212 API key secret">
+              <input
+                type="password"
+                className="input"
+                value={keysForm.t212KeySecret}
+                onChange={(e) => setKeysForm((f) => ({ ...f, t212KeySecret: e.target.value }))}
+                placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key secret'}
+              />
             </Field>
-
-            <div style={{ paddingTop: 4 }}>
-              <button type="submit" className="btn btn-primary" disabled={savingKeys}>
-                {savingKeys ? 'Saving…' : 'Save API keys'}
-              </button>
-            </div>
           </div>
-        </form>
+
+          <Field label="T212 mode">
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['demo', 'live'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`btn ${keysForm.t212Mode === m ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setKeysForm((f) => ({ ...f, t212Mode: m }))}
+                  style={m === 'live' && keysForm.t212Mode === 'live' ? { background: '#dc2626', borderColor: '#dc2626' } : {}}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </div>
       </div>
     </div>
   )

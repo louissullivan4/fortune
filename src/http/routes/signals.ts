@@ -5,21 +5,18 @@ import { generateSignals } from '../../strategy/signals.js'
 import { getOpenAiPositions } from '../../analytics/journal.js'
 import { getCachedSignals, setCachedSignals, isCacheFresh } from '../../cache/signals.js'
 import { hub } from '../../ws/hub.js'
-import { getEngine } from '../../engine/EngineService.js'
 import { getUserApiKeys, getUserConfig } from './users.js'
-import { Trading212Client } from '../../api/trading212.js'
+import { getOrCreateT212Client, type Trading212Client } from '../../api/trading212.js'
 
 const router = Router()
 router.use(requireAuth)
 
 async function getT212(userId: string): Promise<Trading212Client> {
-  const engine = getEngine(userId)
-  if (engine) return engine.t212
   const keys = await getUserApiKeys(userId)
   if (!keys?.t212KeyId || !keys?.t212KeySecret) {
     throw new Error('T212 API keys not configured — update them in your profile')
   }
-  return new Trading212Client(keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
+  return getOrCreateT212Client(userId, keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
 }
 
 async function computeSignals(userId: string) {

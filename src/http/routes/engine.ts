@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import { getEngine, createEngine } from '../../engine/EngineService.js'
 import { getUserApiKeys, getUserConfig } from './users.js'
-import { Trading212Client } from '../../api/trading212.js'
+import { getOrCreateT212Client } from '../../api/trading212.js'
 import { isMarketOpen } from '../../engine/scheduler.js'
 
 const router = Router()
@@ -20,7 +20,7 @@ async function resolveEngine(userId: string) {
       throw new Error('Anthropic API key not configured — update it in your profile')
     }
     if (!cfg) throw new Error('User config not found')
-    const t212 = new Trading212Client(keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
+    const t212 = getOrCreateT212Client(userId, keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
     engine = createEngine(userId, t212, keys.anthropicApiKey, cfg)
   }
   return engine
