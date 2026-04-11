@@ -275,7 +275,7 @@ router.post('/create-account', async (req, res, next) => {
 
     res.status(201).json({
       accessToken,
-      user: { userId, email: invite.email, role: 'client' },
+      user: { userId, email: invite.email, role },
     })
   } catch (err) {
     next(err)
