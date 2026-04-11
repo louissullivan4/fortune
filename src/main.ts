@@ -1,7 +1,5 @@
 import 'dotenv/config'
 import { runMigrations } from './db.js'
-import { initConfig } from './config/index.js'
-import { startLoop } from './engine/scheduler.js'
 
 process.on('SIGTERM', () => {
   console.log('[main] SIGTERM received — shutting down gracefully')
@@ -15,8 +13,8 @@ process.on('SIGINT', () => {
 
 async function main() {
   await runMigrations()
-  await initConfig()
-  await startLoop()
+  console.log('[main] Migrations complete. Start the server with server-entry.ts.')
+  process.exit(0)
 }
 
 main().catch((err) => {

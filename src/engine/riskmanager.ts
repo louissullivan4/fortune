@@ -1,6 +1,6 @@
-import { config } from '../config/index.js'
 import type { PortfolioSnapshot } from '../api/trading212.js'
-import { getInstruments } from '../api/trading212.js'
+import type { Trading212Client } from '../api/trading212.js'
+import type { UserConfig } from '../types/user.js'
 
 export interface OrderRequest {
   action: 'buy' | 'sell'
@@ -17,9 +17,11 @@ export interface RiskDecision {
 export async function validateOrder(
   order: OrderRequest,
   snapshot: PortfolioSnapshot,
-  dailyOpenValue: number
+  dailyOpenValue: number,
+  t212: Trading212Client,
+  userConfig: UserConfig
 ): Promise<RiskDecision> {
-  const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = config
+  const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = userConfig
 
   // Daily loss halt
   const drawdown = (dailyOpenValue - snapshot.totalValue) / dailyOpenValue
@@ -31,7 +33,7 @@ export async function validateOrder(
   }
 
   // Instrument minimum quantity check
-  const instruments = await getInstruments()
+  const instruments = await t212.getInstruments()
   const instrument = instruments.get(order.ticker)
   if (instrument && order.quantity < instrument.minTradeQuantity) {
     return {
@@ -43,7 +45,6 @@ export async function validateOrder(
   if (order.action === 'buy') {
     const orderCost = order.quantity * order.estimatedPrice
 
-    // Hard budget cap — order cost must not exceed the configured budget
     if (orderCost > maxBudgetEur) {
       return {
         allowed: false,
@@ -51,7 +52,6 @@ export async function validateOrder(
       }
     }
 
-    // Not enough free cash
     const minBuffer = 5
     if (snapshot.cash.free - orderCost < minBuffer) {
       return {
@@ -60,7 +60,6 @@ export async function validateOrder(
       }
     }
 
-    // No adding to existing positions — one buy per ticker
     const existingPosition = snapshot.positions.find((p) => p.ticker === order.ticker)
     if (existingPosition) {
       return {
@@ -69,7 +68,6 @@ export async function validateOrder(
       }
     }
 
-    // Max position size — use EUR cost basis (invested EUR) not local-currency price
     const maxPositionValue = maxBudgetEur * maxPositionPct
     if (orderCost > maxPositionValue) {
       return {
@@ -99,10 +97,11 @@ export function computeBuyQuantity(
   ticker: string,
   estimatedPrice: number,
   snapshot: PortfolioSnapshot,
+  userConfig: UserConfig,
   minTradeQuantity = 0.01,
   targetFraction = 0.5
 ): number {
-  const maxPositionValue = config.maxBudgetEur * config.maxPositionPct
+  const maxPositionValue = userConfig.maxBudgetEur * userConfig.maxPositionPct
   const existingPosition = snapshot.positions.find((p) => p.ticker === ticker)
   const currentPositionValue = existingPosition
     ? existingPosition.averagePrice * existingPosition.quantity
@@ -110,12 +109,11 @@ export function computeBuyQuantity(
   const remainingPositionRoom = maxPositionValue - currentPositionValue
 
   const targetSpend = Math.min(
-    config.maxBudgetEur * targetFraction,
+    userConfig.maxBudgetEur * targetFraction,
     snapshot.cash.free - 5,
     remainingPositionRoom
   )
   if (targetSpend <= 0 || estimatedPrice <= 0) return 0
-  // Round down to 2dp but ensure we meet minTradeQuantity
   const qty = Math.floor((targetSpend / estimatedPrice) * 100) / 100
   return qty >= minTradeQuantity ? qty : 0
 }

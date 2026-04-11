@@ -1,14 +1,17 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import { getDecisionsPaginated, getDecisionById } from '../../analytics/journal.js'
 
 const router = Router()
+router.use(requireAuth)
 
 // GET /api/decisions?page=1&limit=20
 router.get('/', async (req, res, next) => {
   try {
+    const userId = req.user!.userId
     const page = Math.max(1, parseInt(req.query.page as string) || 1)
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20))
-    const { data, total } = await getDecisionsPaginated(page, limit)
+    const { data, total } = await getDecisionsPaginated(userId, page, limit)
     res.json({ data, total, page, limit, totalPages: Math.ceil(total / limit) })
   } catch (err) {
     next(err)
@@ -20,7 +23,7 @@ router.get('/:id', async (req, res, next) => {
   try {
     const id = parseInt(req.params.id)
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' })
-    const decision = await getDecisionById(id)
+    const decision = await getDecisionById(id, req.user!.userId)
     if (!decision) return res.status(404).json({ error: 'Decision not found' })
     res.json({
       ...decision,

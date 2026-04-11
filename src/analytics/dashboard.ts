@@ -7,9 +7,10 @@ import {
   getDailyValues,
   getAllTimeStats,
 } from './journal.js'
-import { getPortfolioSnapshot } from '../api/trading212.js'
-import { config, initConfig } from '../config/index.js'
+import { Trading212Client } from '../api/trading212.js'
 import { runMigrations } from '../db.js'
+import { getPool } from '../db.js'
+import { decrypt } from '../services/encryption.js'
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -120,18 +121,18 @@ function sectionTitle(title: string): string {
 
 // ── Render ────────────────────────────────────────────────────────────────────
 
-async function render(): Promise<void> {
+async function render(userId: string, t212: Trading212Client): Promise<void> {
   const W = Math.min(process.stdout.columns ?? 80, 90)
 
   const [snapshot, dailyVals, aiCfg, netPositions, recentDecisions, allTime, aiTrades] =
     await Promise.all([
-      getPortfolioSnapshot(),
-      getDailyValues(30),
-      getAiPortfolioConfig(),
-      getAiNetPositions(),
-      getRecentDecisions(1),
-      getAllTimeStats(),
-      getAiTrades(),
+      t212.getPortfolioSnapshot(),
+      getDailyValues(userId, 30),
+      getAiPortfolioConfig(userId),
+      getAiNetPositions(userId),
+      getRecentDecisions(userId, 1),
+      getAllTimeStats(userId),
+      getAiTrades(userId),
     ])
 
   const now = new Date().toLocaleTimeString()
@@ -143,7 +144,7 @@ async function render(): Promise<void> {
   const out: string[] = []
 
   out.push(A.clear)
-  out.push(header(`TRADER AI DASHBOARD  [${config.trading212Mode.toUpperCase()}]`, W))
+  out.push(header(`TRADER AI DASHBOARD  [${t212.mode.toUpperCase()}]`, W))
   out.push('')
 
   const colW = Math.floor((W - 6) / 3)
@@ -232,9 +233,34 @@ async function render(): Promise<void> {
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
+async function getCliT212(): Promise<{ userId: string; t212: Trading212Client }> {
+  const userId = process.env.USER_ID
+  if (!userId) {
+    console.error('USER_ID env var is required (set to your user_id UUID)')
+    process.exit(1)
+  }
+  const pool = getPool()
+  const res = await pool.query<{
+    t212_key_id_enc: string | null
+    t212_key_secret_enc: string | null
+    t212_mode: string
+  }>('SELECT t212_key_id_enc, t212_key_secret_enc, t212_mode FROM user_api_keys WHERE user_id = $1', [userId])
+  const row = res.rows[0]
+  if (!row?.t212_key_id_enc || !row?.t212_key_secret_enc) {
+    console.error('No T212 API keys found for this user. Set them via the web UI.')
+    process.exit(1)
+  }
+  const t212 = new Trading212Client(
+    decrypt(row.t212_key_id_enc),
+    decrypt(row.t212_key_secret_enc),
+    (row.t212_mode ?? 'demo') as 'demo' | 'live'
+  )
+  return { userId, t212 }
+}
+
 async function main(): Promise<void> {
   await runMigrations()
-  await initConfig()
+  const { userId, t212 } = await getCliT212()
 
   process.stdout.write(A.hideCursor)
 
@@ -255,15 +281,15 @@ async function main(): Promise<void> {
       if (k === 'q' || k === '\x03') cleanup()
       if (k === 'r') {
         process.stdout.write(`  ${A.dim}Refreshing...${A.reset}`)
-        await render().catch(console.error)
+        await render(userId, t212).catch(console.error)
       }
     })
   }
 
-  await render().catch(console.error)
+  await render(userId, t212).catch(console.error)
 
   setInterval(async () => {
-    await render().catch(console.error)
+    await render(userId, t212).catch(console.error)
   }, 30_000)
 }
 

@@ -7,27 +7,52 @@ import {
   getClosedAiPositions,
   getAllTimeStats,
 } from './journal.js'
-import { getPortfolioSnapshot } from '../api/trading212.js'
-import { config, initConfig } from '../config/index.js'
-import { runMigrations } from '../db.js'
+import { Trading212Client } from '../api/trading212.js'
+import { runMigrations, getPool } from '../db.js'
+import { decrypt } from '../services/encryption.js'
 
 function line(char = '─', len = 60): string {
   return char.repeat(len)
 }
 
-async function showPerformance(): Promise<void> {
-  const cfg = await getAiPortfolioConfig()
+async function getCliContext(): Promise<{ userId: string; t212: Trading212Client }> {
+  const userId = process.env.USER_ID
+  if (!userId) {
+    console.error('USER_ID env var is required (set to your user_id UUID)')
+    process.exit(1)
+  }
+  const pool = getPool()
+  const res = await pool.query<{
+    t212_key_id_enc: string | null
+    t212_key_secret_enc: string | null
+    t212_mode: string
+  }>('SELECT t212_key_id_enc, t212_key_secret_enc, t212_mode FROM user_api_keys WHERE user_id = $1', [userId])
+  const row = res.rows[0]
+  if (!row?.t212_key_id_enc || !row?.t212_key_secret_enc) {
+    console.error('No T212 API keys found for this user. Set them via the web UI.')
+    process.exit(1)
+  }
+  const t212 = new Trading212Client(
+    decrypt(row.t212_key_id_enc),
+    decrypt(row.t212_key_secret_enc),
+    (row.t212_mode ?? 'demo') as 'demo' | 'live'
+  )
+  return { userId, t212 }
+}
+
+async function showPerformance(userId: string, t212: Trading212Client): Promise<void> {
+  const cfg = await getAiPortfolioConfig(userId)
   if (!cfg) {
     console.log('\nAI portfolio not initialised. Run: npm run performance init\n')
     return
   }
 
   const [trades, openPositions, closedPositions, snapshot, allTime] = await Promise.all([
-    getAiTrades(),
-    getOpenAiPositions(),
-    getClosedAiPositions(),
-    getPortfolioSnapshot(),
-    getAllTimeStats(),
+    getAiTrades(userId),
+    getOpenAiPositions(userId),
+    getClosedAiPositions(userId),
+    t212.getPortfolioSnapshot(),
+    getAllTimeStats(userId),
   ])
 
   const executedTrades = trades.filter(
@@ -54,7 +79,7 @@ async function showPerformance(): Promise<void> {
   console.log(line('═'))
   console.log(`  Started:         ${cfg.startedAt.slice(0, 10)}`)
   console.log(`  Initial budget:  €${cfg.initialBudget.toFixed(2)}`)
-  console.log(`  Mode:            ${config.trading212Mode.toUpperCase()}`)
+  console.log(`  Mode:            ${t212.mode.toUpperCase()}`)
 
   console.log('\n' + line())
   console.log('  ACTIVITY')
@@ -132,10 +157,8 @@ async function showPerformance(): Promise<void> {
   console.log(line('═') + '\n')
 }
 
-async function init(): Promise<void> {
-  const budgetArg = process.argv.find((a) => /^\d+(\.\d+)?$/.test(a))
-  const budget = budgetArg ? parseFloat(budgetArg) : config.maxBudgetEur
-  await initAiPortfolio(budget)
+async function init(userId: string, budget: number): Promise<void> {
+  await initAiPortfolio(userId, budget)
   console.log(`\nAI portfolio initialised with €${budget.toFixed(2)} budget starting now.\n`)
 }
 
@@ -144,11 +167,13 @@ if (process.argv[1]?.endsWith('performance.ts') || process.argv[1]?.endsWith('pe
 
   async function run() {
     await runMigrations()
-    await initConfig()
+    const { userId, t212 } = await getCliContext()
     if (isInit) {
-      await init()
+      const budgetArg = process.argv.find((a) => /^\d+(\.\d+)?$/.test(a))
+      const budget = budgetArg ? parseFloat(budgetArg) : 1000
+      await init(userId, budget)
     } else {
-      await showPerformance()
+      await showPerformance(userId, t212)
     }
     process.exit(0)
   }

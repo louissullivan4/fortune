@@ -1,6 +1,6 @@
 import 'dotenv/config'
+import './config/index.js' // validates JWT_SECRET and ENCRYPTION_KEY at startup
 import { runMigrations } from './db.js'
-import { initConfig } from './config/index.js'
 import { createHttpServer } from './server.js'
 
 process.on('unhandledRejection', (reason) => {
@@ -14,7 +14,6 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10)
 
 async function main() {
   await runMigrations()
-  await initConfig()
 
   const server = createHttpServer()
   server.listen(PORT, () => {

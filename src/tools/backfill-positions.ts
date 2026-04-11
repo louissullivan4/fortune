@@ -3,17 +3,21 @@
 
 import 'dotenv/config'
 import { runMigrations } from '../db.js'
-import { initConfig } from '../config/index.js'
 import { reconcileAiPositions, getOpenAiPositions } from '../analytics/journal.js'
+
+const userId = process.env.USER_ID ?? ''
+if (!userId) {
+  console.error('USER_ID env var is required (set to your user_id UUID)')
+  process.exit(1)
+}
 
 async function main() {
   await runMigrations()
-  await initConfig()
 
   console.log('\nBackfilling AI positions from trade history...\n')
-  const { inserted } = await reconcileAiPositions()
+  const { inserted } = await reconcileAiPositions(userId)
 
-  const open = await getOpenAiPositions()
+  const open = await getOpenAiPositions(userId)
   console.log(`\nDone: ${inserted} inserted/updated`)
   console.log(`\nOpen AI positions (${open.length}):`)
   for (const p of open) {

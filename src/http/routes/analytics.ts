@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import {
   getAllTimeStats,
   getDailyValues,
@@ -11,15 +12,17 @@ import {
 } from '../../analytics/journal.js'
 
 const router = Router()
+router.use(requireAuth)
 
 // GET /api/analytics/summary
-router.get('/summary', async (_req, res, next) => {
+router.get('/summary', async (req, res, next) => {
   try {
+    const userId = req.user!.userId
     const [stats, portfolioConfig, closed, aiUsage] = await Promise.all([
-      getAllTimeStats(),
-      getAiPortfolioConfig(),
-      getClosedAiPositions(),
-      getAiUsageSummary(),
+      getAllTimeStats(userId),
+      getAiPortfolioConfig(userId),
+      getClosedAiPositions(userId),
+      getAiUsageSummary(userId),
     ])
     const realizedPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0)
     const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0).length
@@ -39,9 +42,13 @@ router.get('/summary', async (_req, res, next) => {
 })
 
 // GET /api/analytics/ai-cost
-router.get('/ai-cost', async (_req, res, next) => {
+router.get('/ai-cost', async (req, res, next) => {
   try {
-    const [summary, byDay] = await Promise.all([getAiUsageSummary(), getAiUsageByDay(30)])
+    const userId = req.user!.userId
+    const [summary, byDay] = await Promise.all([
+      getAiUsageSummary(userId),
+      getAiUsageByDay(userId, 30),
+    ])
     res.json({ summary, byDay: byDay.reverse() })
   } catch (err) {
     next(err)
@@ -52,7 +59,7 @@ router.get('/ai-cost', async (_req, res, next) => {
 router.get('/intraday', async (req, res, next) => {
   try {
     const hours = Math.min(48, Math.max(1, parseInt(req.query.hours as string) || 24))
-    const data = await getIntradayValues(hours)
+    const data = await getIntradayValues(req.user!.userId, hours)
     res.json({ data, hours })
   } catch (err) {
     next(err)
@@ -63,7 +70,7 @@ router.get('/intraday', async (req, res, next) => {
 router.get('/snapshots', async (req, res, next) => {
   try {
     const limit = Math.min(365, Math.max(1, parseInt(req.query.limit as string) || 90))
-    const data = await getDailyValues(limit)
+    const data = await getDailyValues(req.user!.userId, limit)
     res.json({ data })
   } catch (err) {
     next(err)
@@ -71,9 +78,13 @@ router.get('/snapshots', async (req, res, next) => {
 })
 
 // GET /api/analytics/positions
-router.get('/positions', async (_req, res, next) => {
+router.get('/positions', async (req, res, next) => {
   try {
-    const [open, closed] = await Promise.all([getOpenAiPositions(), getClosedAiPositions()])
+    const userId = req.user!.userId
+    const [open, closed] = await Promise.all([
+      getOpenAiPositions(userId),
+      getClosedAiPositions(userId),
+    ])
     res.json({ open, closed })
   } catch (err) {
     next(err)
@@ -81,12 +92,13 @@ router.get('/positions', async (_req, res, next) => {
 })
 
 // GET /api/analytics/performance
-router.get('/performance', async (_req, res, next) => {
+router.get('/performance', async (req, res, next) => {
   try {
+    const userId = req.user!.userId
     const [closed, open, stats] = await Promise.all([
-      getClosedAiPositions(),
-      getOpenAiPositions(),
-      getAllTimeStats(),
+      getClosedAiPositions(userId),
+      getOpenAiPositions(userId),
+      getAllTimeStats(userId),
     ])
     const realizedPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0)
     const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0)

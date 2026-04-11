@@ -1,10 +1,53 @@
 const BASE = '/api'
 
+// ── Token store (in-memory, not localStorage — XSS safe) ─────────────────
+let _accessToken: string | null = null
+
+export function setAccessToken(token: string | null): void {
+  _accessToken = token
+}
+
+export function getAccessToken(): string | null {
+  return _accessToken
+}
+
+// ── Fetch wrapper with automatic token refresh ─────────────────────────────
+
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(opts?.headers as Record<string, string>),
+  }
+  if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+
+  let res = await fetch(`${BASE}${path}`, {
+    credentials: 'include',
     ...opts,
+    headers,
   })
+
+  // On 401, attempt token refresh then retry once
+  if (res.status === 401 && path !== '/auth/login' && path !== '/auth/refresh') {
+    const refreshRes = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (refreshRes.ok) {
+      const { accessToken } = await refreshRes.json()
+      _accessToken = accessToken
+      headers['Authorization'] = `Bearer ${accessToken}`
+      res = await fetch(`${BASE}${path}`, {
+        credentials: 'include',
+        ...opts,
+        headers,
+      })
+    } else {
+      // Refresh failed — clear token and let the error propagate
+      _accessToken = null
+      throw new Error('Session expired — please log in again')
+    }
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error((body as { error?: string }).error ?? res.statusText)
@@ -13,6 +56,44 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  userId: string
+  email: string
+  role: 'admin' | 'client'
+}
+
+export interface UserProfile {
+  user_id: string
+  email: string
+  username: string
+  first_name: string
+  last_name: string
+  dob: string | null
+  address1: string | null
+  address2: string | null
+  city: string | null
+  county: string | null
+  country: string | null
+  zipcode: string | null
+  phone: string | null
+  user_role: string
+  is_active: boolean
+  created_at: string
+  t212_mode: string
+  has_anthropic_key: boolean
+  has_t212_key: boolean
+}
+
+export interface Invitation {
+  id: number
+  email: string
+  is_used: boolean
+  created_at: string
+  expires_at: string
+  used_at: string | null
+  invited_by_username: string | null
+}
 
 export interface EngineStatus {
   running: boolean
@@ -201,7 +282,11 @@ export interface Config {
   maxBudgetEur: number
   maxPositionPct: number
   dailyLossLimitPct: number
-  trading212Mode: string
+  stopLossPct: number
+  takeProfitPct: number
+  stagnantExitEnabled: boolean
+  stagnantTimeMinutes: number
+  stagnantRangePct: number
 }
 
 export interface Instrument {
@@ -216,6 +301,84 @@ export interface Instrument {
 // ── API functions ─────────────────────────────────────────────────────────
 
 export const api = {
+  auth: {
+    login: (email: string, password: string) =>
+      req<{ accessToken: string; user: AuthUser }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+    logout: () =>
+      req<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+    refresh: () =>
+      req<{ accessToken: string }>('/auth/refresh', { method: 'POST' }),
+    me: () => req<AuthUser>('/auth/me'),
+    verifyInvite: (token: string) =>
+      req<{ email: string; valid: boolean }>(`/auth/invite/verify?token=${token}`),
+    createAccount: (body: Record<string, string>) =>
+      req<{ accessToken: string; user: AuthUser }>('/auth/create-account', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    forgotPassword: (email: string) =>
+      req<{ ok: boolean }>('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      }),
+    resetPassword: (token: string, password: string) =>
+      req<{ ok: boolean }>('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token, password }),
+      }),
+  },
+
+  users: {
+    me: () => req<UserProfile>('/users/me'),
+    updateMe: (body: Partial<UserProfile>) =>
+      req<{ ok: boolean }>('/users/me', { method: 'PUT', body: JSON.stringify(body) }),
+    updatePassword: (currentPassword: string, newPassword: string) =>
+      req<{ ok: boolean }>('/users/me/password', {
+        method: 'PUT',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      }),
+    getApiKeys: () =>
+      req<{ hasAnthropicKey: boolean; hasT212Key: boolean; t212Mode: string }>(
+        '/users/me/api-keys'
+      ),
+    updateApiKeys: (body: {
+      anthropicApiKey?: string
+      t212KeyId?: string
+      t212KeySecret?: string
+      t212Mode?: string
+    }) =>
+      req<{ ok: boolean }>('/users/me/api-keys', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    getConfig: () => req<Config>('/users/me/config'),
+    updateConfig: (body: Partial<Config>) =>
+      req<Config>('/users/me/config', { method: 'PUT', body: JSON.stringify(body) }),
+
+    // Admin
+    list: () => req<UserProfile[]>('/users'),
+    get: (userId: string) => req<UserProfile>(`/users/${userId}`),
+    invite: (email: string) =>
+      req<{ ok: boolean; email: string }>('/users/invite', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      }),
+    invitations: () => req<Invitation[]>('/users/invitations'),
+    setRole: (userId: string, role: string) =>
+      req<{ ok: boolean }>(`/users/${userId}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role }),
+      }),
+    setActive: (userId: string, isActive: boolean) =>
+      req<{ ok: boolean }>(`/users/${userId}/active`, {
+        method: 'PUT',
+        body: JSON.stringify({ isActive }),
+      }),
+  },
+
   health: () =>
     req<{ status: string; uptime: number; wsConnections: number }>('/health'.replace('/api', '')),
 
@@ -265,7 +428,9 @@ export const api = {
 
   instruments: {
     search: (q: string) =>
-      req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(q)}`),
+      req<{ data: Instrument[]; total: number }>(
+        `/instruments/search?q=${encodeURIComponent(q)}`
+      ),
     lookup: async (ticker: string): Promise<Instrument | null> => {
       const res = await req<{ data: Instrument[]; total: number }>(
         `/instruments/search?q=${encodeURIComponent(ticker)}`

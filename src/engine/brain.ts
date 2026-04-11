@@ -1,12 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { config } from '../config/index.js'
 import type { TickerSignal } from '../strategy/signals.js'
 import type { PortfolioSnapshot } from '../api/trading212.js'
+import type { Trading212Client } from '../api/trading212.js'
 import type { RecentDecision } from '../analytics/journal.js'
+import type { UserConfig } from '../types/user.js'
 import { computeBuyQuantity } from './riskmanager.js'
-import { getInstruments } from '../api/trading212.js'
-
-const client = new Anthropic({ apiKey: config.anthropicApiKey })
 
 export interface TradeDecision {
   action: 'buy' | 'sell' | 'hold'
@@ -52,7 +50,7 @@ function formatSignals(signals: TickerSignal[]): string {
     .join('\n\n')
 }
 
-function formatPortfolio(snapshot: PortfolioSnapshot): string {
+function formatPortfolio(snapshot: PortfolioSnapshot, userConfig: UserConfig): string {
   const lines = [
     `Cash: €${snapshot.cash.free.toFixed(2)} free / €${snapshot.cash.total.toFixed(2)} total`,
     `Total portfolio value: €${snapshot.totalValue.toFixed(2)}`,
@@ -60,7 +58,7 @@ function formatPortfolio(snapshot: PortfolioSnapshot): string {
     '',
     'Positions:',
   ]
-  const maxPositionValue = config.maxBudgetEur * config.maxPositionPct
+  const maxPositionValue = userConfig.maxBudgetEur * userConfig.maxPositionPct
   if (snapshot.positions.length === 0) {
     lines.push('  (none)')
   } else {
@@ -85,18 +83,18 @@ function formatRecentDecisions(decisions: RecentDecision[]): string {
     .join('\n')
 }
 
-const SYSTEM_PROMPT = `You are an autonomous stock trading agent managing a small trading budget of €${config.maxBudgetEur}. Your job is to decide ONE trading action per cycle: buy, sell, or hold.
+function buildSystemPrompt(userConfig: UserConfig): string {
+  return `You are an autonomous stock trading agent managing a small trading budget of €${userConfig.maxBudgetEur}. Your job is to decide ONE trading action per cycle: buy, sell, or hold.
 
 HARD RULES — you must never violate these:
-- Never spend more than €${config.maxBudgetEur} total cash on a single buy order
-- Never invest more than €${(config.maxBudgetEur * config.maxPositionPct).toFixed(0)} in a single stock
+- Never spend more than €${userConfig.maxBudgetEur} total cash on a single buy order
+- Never invest more than €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)} in a single stock
 - Never buy a stock you already hold a position in — one position per ticker maximum
 - Always keep at least €5 in cash as a buffer
-- Hard exits (stop-loss ≥${(config.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(config.takeProfitPct * 100).toFixed(1)}% up, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself
-- Stagnant exits (position held >${config.stagnantTimeMinutes} minutes with <${(config.stagnantRangePct * 100).toFixed(1)}% movement at break-even or better, when a stronger opportunity exists) are also handled automatically — you do NOT need to manage these
+- Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself
+- Stagnant exits (position held >${userConfig.stagnantTimeMinutes} minutes with <${(userConfig.stagnantRangePct * 100).toFixed(1)}% movement at break-even or better, when a stronger opportunity exists) are also handled automatically — you do NOT need to manage these
 - You may SELL a held position if technical signals have turned bearish, even if the automatic stop hasn't triggered yet
 - Only BUY stocks in the signal universe
-- You are running in ${config.trading212Mode.toUpperCase()} mode
 - NOTE: Portfolio position prices may be in their local currency (USD/GBP), not EUR — ignore total portfolio value when deciding; focus on available EUR cash
 
 STRATEGY:
@@ -109,7 +107,7 @@ STRATEGY:
     • RSI < 45 showing room to run without being overbought
 - Sell candidates (early/signal-based): overbought RSI >75, MACD bearish crossover with bearish Stochastic, or price above upper Bollinger Band — the automatic trailing stop handles exits when price reverses from peak
 - HOLD only when all signals are genuinely bearish or there is truly nothing actionable
-- Prefer buying something over sitting on cash — the budget is €${config.maxBudgetEur}, use it
+- Prefer buying something over sitting on cash — the budget is €${userConfig.maxBudgetEur}, use it
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown, no explanation outside the JSON:
 {
@@ -119,13 +117,18 @@ OUTPUT FORMAT — respond with ONLY valid JSON, no markdown, no explanation outs
   "estimatedPrice": number | null,
   "reasoning": "concise explanation of your decision"
 }`
+}
 
 export async function decide(
   signals: TickerSignal[],
   snapshot: PortfolioSnapshot,
-  recentDecisions: RecentDecision[]
+  recentDecisions: RecentDecision[],
+  anthropicApiKey: string,
+  t212: Trading212Client,
+  userConfig: UserConfig
 ): Promise<DecideResult> {
-  // Pre-compute suggested buy quantities and attach to relevant signals
+  const client = new Anthropic({ apiKey: anthropicApiKey })
+
   const actionableSignals = signals.filter(
     (s) =>
       s.signal === 'buy' ||
@@ -136,7 +139,7 @@ export async function decide(
   )
 
   const prompt = `## Current Portfolio
-${formatPortfolio(snapshot)}
+${formatPortfolio(snapshot, userConfig)}
 
 ## Market Signals (${signals.length} tickers analysed)
 ${formatSignals(actionableSignals.length > 0 ? actionableSignals : signals.slice(0, 10))}
@@ -151,7 +154,7 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
   const message = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: buildSystemPrompt(userConfig),
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -171,8 +174,6 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
   const text = message.content.find((b) => b.type === 'text')?.text ?? ''
 
   try {
-    // Find all top-level JSON objects in the response and take the last one.
-    // Claude sometimes writes a draft hold then reconsiders — the final object is correct.
     const candidates: string[] = []
     for (let i = 0; i < text.length; i++) {
       if (text[i] !== '{') continue
@@ -198,24 +199,20 @@ Analyse the above and decide on ONE action for this cycle. Be conservative — p
       reasoning: string
     }
 
-    // For buys, always clamp quantity to what the risk manager will allow.
-    // Claude's arithmetic is unreliable — computeBuyQuantity is authoritative.
     if (parsed.action === 'buy' && parsed.ticker) {
       const signal = signals.find((s) => s.ticker === parsed.ticker)
       const price = parsed.estimatedPrice ?? signal?.indicators.currentPrice ?? null
       if (price) {
-        const instruments = await getInstruments()
+        const instruments = await t212.getInstruments()
         const minQty = instruments.get(parsed.ticker)?.minTradeQuantity ?? 0.01
-        const maxQty = computeBuyQuantity(parsed.ticker, price, snapshot, minQty)
+        const maxQty = computeBuyQuantity(parsed.ticker, price, snapshot, userConfig, minQty)
         if (maxQty <= 0) {
-          // No room left — override to hold
           parsed.action = 'hold'
           parsed.ticker = null
           parsed.quantity = null
           parsed.estimatedPrice = null
           parsed.reasoning += ' [overridden to hold: position cap reached or insufficient cash]'
         } else {
-          // Cap Claude's quantity to the safe maximum
           parsed.quantity =
             parsed.quantity && parsed.quantity > 0 ? Math.min(parsed.quantity, maxQty) : maxQty
           parsed.estimatedPrice = price

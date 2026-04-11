@@ -1,8 +1,8 @@
 import 'dotenv/config'
 import { getDailyStats, getOrdersForDay, getAllTimeStats, getRecentDecisions } from './journal.js'
-import { getPortfolioSnapshot } from '../api/trading212.js'
-import { runMigrations } from '../db.js'
-import { initConfig } from '../config/index.js'
+import { Trading212Client } from '../api/trading212.js'
+import { runMigrations, getPool } from '../db.js'
+import { decrypt } from '../services/encryption.js'
 
 function today(): string {
   return new Date().toISOString().slice(0, 10)
@@ -12,11 +12,36 @@ function line(char = '─', len = 60): string {
   return char.repeat(len)
 }
 
-export async function dailyReport(date = today()): Promise<void> {
+async function getCliContext(): Promise<{ userId: string; t212: Trading212Client }> {
+  const userId = process.env.USER_ID
+  if (!userId) {
+    console.error('USER_ID env var is required (set to your user_id UUID)')
+    process.exit(1)
+  }
+  const pool = getPool()
+  const res = await pool.query<{
+    t212_key_id_enc: string | null
+    t212_key_secret_enc: string | null
+    t212_mode: string
+  }>('SELECT t212_key_id_enc, t212_key_secret_enc, t212_mode FROM user_api_keys WHERE user_id = $1', [userId])
+  const row = res.rows[0]
+  if (!row?.t212_key_id_enc || !row?.t212_key_secret_enc) {
+    console.error('No T212 API keys found for this user. Set them via the web UI.')
+    process.exit(1)
+  }
+  const t212 = new Trading212Client(
+    decrypt(row.t212_key_id_enc),
+    decrypt(row.t212_key_secret_enc),
+    (row.t212_mode ?? 'demo') as 'demo' | 'live'
+  )
+  return { userId, t212 }
+}
+
+export async function dailyReport(userId: string, t212: Trading212Client, date = today()): Promise<void> {
   const [stats, trades, snapshot] = await Promise.all([
-    getDailyStats(date),
-    getOrdersForDay(date),
-    getPortfolioSnapshot(),
+    getDailyStats(date, userId),
+    getOrdersForDay(date, userId),
+    t212.getPortfolioSnapshot(),
   ])
 
   console.log('\n' + line('═'))
@@ -70,11 +95,11 @@ export async function dailyReport(date = today()): Promise<void> {
   console.log('\n' + line('═') + '\n')
 }
 
-export async function fullReport(): Promise<void> {
+export async function fullReport(userId: string, t212: Trading212Client): Promise<void> {
   const [stats, recent, snapshot] = await Promise.all([
-    getAllTimeStats(),
-    getRecentDecisions(20),
-    getPortfolioSnapshot(),
+    getAllTimeStats(userId),
+    getRecentDecisions(userId, 20),
+    t212.getPortfolioSnapshot(),
   ])
 
   console.log('\n' + line('═'))
@@ -105,11 +130,11 @@ if (process.argv[1]?.endsWith('reporter.ts') || process.argv[1]?.endsWith('repor
 
   async function run() {
     await runMigrations()
-    await initConfig()
+    const { userId, t212 } = await getCliContext()
     if (allFlag) {
-      await fullReport()
+      await fullReport(userId, t212)
     } else {
-      await dailyReport(dateArg)
+      await dailyReport(userId, t212, dateArg)
     }
     process.exit(0)
   }
