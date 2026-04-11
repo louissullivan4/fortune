@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js'
 import {
   getAllTimeStats,
   getDailyValues,
+  getDailyStatsRange,
   getIntradayValues,
   getOpenAiPositions,
   getClosedAiPositions,
@@ -47,9 +48,20 @@ router.get('/ai-cost', async (req, res, next) => {
     const userId = req.user!.userId
     const [summary, byDay] = await Promise.all([
       getAiUsageSummary(userId),
-      getAiUsageByDay(userId, 30),
+      getAiUsageByDay(userId, 365),
     ])
     res.json({ summary, byDay: byDay.reverse() })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/analytics/daily-stats?limit=365
+router.get('/daily-stats', async (req, res, next) => {
+  try {
+    const limit = Math.min(365, Math.max(1, parseInt(req.query.limit as string) || 365))
+    const data = await getDailyStatsRange(req.user!.userId, limit)
+    res.json({ data })
   } catch (err) {
     next(err)
   }

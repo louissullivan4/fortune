@@ -812,9 +812,29 @@ export async function resetDailySnapshot(date: string, userId?: string): Promise
   }
 }
 
+export async function getDailyStatsRange(
+  userId: string,
+  limit: number
+): Promise<Array<{ date: string; pnl: number | null; tradesCount: number }>> {
+  const pool = getPool()
+  const res = await pool.query<{ date: string; pnl: string | null; trades_count: string }>(
+    `SELECT date, pnl, COALESCE(trades_count, 0) AS trades_count
+     FROM daily_snapshots
+     WHERE user_id = $1
+     ORDER BY date DESC
+     LIMIT $2`,
+    [userId, limit]
+  )
+  return res.rows.reverse().map((r) => ({
+    date: r.date,
+    pnl: r.pnl != null ? Number(Number(r.pnl).toFixed(2)) : null,
+    tradesCount: Number(r.trades_count),
+  }))
+}
+
 export async function getAiUsageByDay(
   userId: string,
-  limit = 30
+  limit = 365
 ): Promise<Array<{ date: string; costUsd: number; calls: number }>> {
   const pool = getPool()
   const res = await pool.query<{ date: string; costusd: string; calls: string }>(

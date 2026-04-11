@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -6,8 +6,6 @@ import {
   Clock,
   BarChart2,
   Settings,
-  PanelLeftClose,
-  PanelLeftOpen,
   User,
   Shield,
   LogOut,
@@ -20,7 +18,7 @@ import Config from '../pages/Config'
 import Profile from '../pages/Profile'
 import Admin from '../pages/Admin'
 import { useAuth } from '../context/AuthContext'
-import { setAccessToken } from '../api/client'
+import { setAccessToken, api } from '../api/client'
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -35,20 +33,28 @@ interface Props {
 }
 
 export default function Layout({ wsConnected: _wsConnected }: Props) {
-  const [collapsed, setCollapsed] = useState(false)
   const { user, logout } = useAuth()
+  const [username, setUsername] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.users.me()
+      .then((p) => setUsername(p.username || null))
+      .catch(() => {})
+  }, [])
 
   async function handleLogout() {
     await logout()
     setAccessToken(null)
   }
 
+  const displayName = username ?? user?.email?.split('@')[0] ?? '?'
+  const initials = displayName.slice(0, 2).toUpperCase()
+
   return (
-    <div className={`layout${collapsed ? ' sidebar-collapsed' : ''}`}>
+    <div className="layout sidebar-collapsed">
       <aside className="sidebar">
         <div className="sidebar-logo">
           <span className="sidebar-logo-icon">T</span>
-          <span className="sidebar-logo-text">Trader</span>
         </div>
 
         <hr className="divider" />
@@ -63,7 +69,6 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
               <Icon size={16} />
-              <span className="nav-label">{label}</span>
             </NavLink>
           ))}
 
@@ -73,7 +78,6 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
             className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
           >
             <User size={16} />
-            <span className="nav-label">Profile</span>
           </NavLink>
 
           {user?.role === 'admin' && (
@@ -83,7 +87,6 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
               <Shield size={16} />
-              <span className="nav-label">Admin</span>
             </NavLink>
           )}
         </nav>
@@ -92,17 +95,10 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
 
         {user && (
           <div
-            style={{
-              padding: '8px 16px',
-              fontSize: '0.8rem',
-              color: 'var(--muted)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-            title={user.email}
+            title={username ?? user.email}
+            style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}
           >
-            <span className="nav-label">{user.email}</span>
+            <div className="nav-avatar">{initials}</div>
           </div>
         )}
 
@@ -110,19 +106,9 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
           className="nav-item"
           onClick={handleLogout}
           title="Sign out"
-          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)' }}
+          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}
         >
           <LogOut size={16} />
-          <span className="nav-label">Sign out</span>
-        </button>
-
-        <button
-          className="sidebar-collapse-btn"
-          onClick={() => setCollapsed((c) => !c)}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
-          <span className="nav-label">{collapsed ? 'Expand' : 'Collapse'}</span>
         </button>
       </aside>
 

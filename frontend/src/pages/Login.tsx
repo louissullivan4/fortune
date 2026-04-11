@@ -6,7 +6,7 @@ import { setAccessToken } from '../api/client'
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -16,7 +16,7 @@ export default function Login() {
     setError(null)
     setLoading(true)
     try {
-      await login(email, password)
+      await login(identifier, password)
       navigate('/')
     } catch (err) {
       setError((err as Error).message)
@@ -37,15 +37,16 @@ export default function Login() {
         {error && <div className="auth-error">{error}</div>}
 
         <form onSubmit={handleSubmit} className="auth-form">
-          <label className="auth-label">Email</label>
+          <label className="auth-label">Email or username</label>
           <input
-            type="email"
+            type="text"
             className="auth-input"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
+            value={identifier}
+            onChange={(e) => setIdentifier(e.target.value)}
+            placeholder="you@example.com or username"
             required
             autoFocus
+            autoComplete="username"
           />
 
           <label className="auth-label">Password</label>

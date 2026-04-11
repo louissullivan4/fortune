@@ -34,9 +34,9 @@ function setRefreshCookie(res: import('express').Response, token: string): void 
 // ── POST /api/auth/login ───────────────────────────────────────────────────
 router.post('/login', async (req, res, next) => {
   try {
-    const { email, password } = req.body as { email: string; password: string }
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' })
+    const { identifier, password } = req.body as { identifier: string; password: string }
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'Email/username and password are required' })
     }
 
     const pool = getPool()
@@ -46,13 +46,14 @@ router.post('/login', async (req, res, next) => {
       password_hash: string
       user_role: string
       is_active: boolean
-    }>('SELECT user_id, email, password_hash, user_role, is_active FROM users WHERE email = $1', [
-      email.toLowerCase().trim(),
-    ])
+    }>(
+      'SELECT user_id, email, password_hash, user_role, is_active FROM users WHERE email = LOWER($1) OR LOWER(username) = LOWER($1)',
+      [identifier.trim()]
+    )
 
     const user = result.rows[0]
     if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password' })
+      return res.status(401).json({ error: 'Invalid email/username or password' })
     }
     if (!user.is_active) {
       return res.status(401).json({ error: 'Account is not active. Please complete registration.' })
@@ -60,7 +61,7 @@ router.post('/login', async (req, res, next) => {
 
     const valid = await bcrypt.compare(password, user.password_hash)
     if (!valid) {
-      return res.status(401).json({ error: 'Invalid email or password' })
+      return res.status(401).json({ error: 'Invalid email/username or password' })
     }
 
     const payload: JwtPayload = {

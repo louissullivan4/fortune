@@ -71,7 +71,7 @@ body {
 }
 
 .sidebar {
-  width: 220px;
+  width: 52px;
   flex-shrink: 0;
   border-right: 0.5px solid var(--color-border);
   background: var(--color-bg-page);
@@ -83,37 +83,13 @@ body {
   left: 0;
   bottom: 0;
   overflow-y: auto;
-  transition: width 200ms ease;
 }
 
 .sidebar-logo {
-  padding: 20px 16px 16px;
+  padding: 16px 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.sidebar-collapse-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  font-size: 13px;
-  font-family: var(--font-ui);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border: none;
-  background: none;
-  width: 100%;
-  text-align: left;
-  transition:
-    background 150ms ease,
-    color 150ms ease;
-}
-.sidebar-collapse-btn:hover {
-  background: var(--color-bg-raised);
-  color: var(--color-text-primary);
+  justify-content: center;
 }
 
 .sidebar-logo-icon {
@@ -130,41 +106,11 @@ body {
   border-radius: 4px;
 }
 
-.sidebar-logo-text {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  overflow: hidden;
-  transition:
-    opacity 200ms ease,
-    width 200ms ease;
-}
-
 .main-content {
-  margin-left: 220px;
+  margin-left: 52px;
   flex: 1;
   min-width: 0;
   padding: 32px 40px;
-  transition: margin-left 200ms ease;
-}
-
-.sidebar-collapsed .sidebar {
-  width: 52px;
-}
-
-.sidebar-collapsed .sidebar-logo-text {
-  opacity: 0;
-  width: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.sidebar-collapsed .sidebar-logo {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
 }
 
 .sidebar-collapsed .nav-label {
@@ -176,40 +122,23 @@ body {
   padding: 10px 0;
 }
 
-.sidebar-collapsed .main-content {
-  margin-left: 52px;
+.nav-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--color-bg-raised);
+  border: 0.5px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  user-select: none;
 }
 
 @media (max-width: 768px) {
-  .sidebar {
-    width: 52px;
-  }
-
-  .sidebar-logo-text {
-    opacity: 0;
-    width: 0;
-    overflow: hidden;
-    pointer-events: none;
-  }
-
-  .sidebar-logo {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  .nav-label {
-    display: none;
-  }
-
-  .nav-item,
-  .sidebar-collapse-btn {
-    justify-content: center;
-    padding: 10px 0;
-  }
-
   .main-content {
-    margin-left: 52px;
     padding: 24px 20px;
   }
 }
@@ -437,8 +366,8 @@ body {
 }
 
 .auth-title {
-  font-size: 1.3rem;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 500;
   margin: 0 0 24px;
   color: var(--color-text-primary);
 }

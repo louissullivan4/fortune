@@ -214,6 +214,12 @@ export interface DailySnapshot {
   value: number
 }
 
+export interface DailyStatsPoint {
+  date: string
+  pnl: number | null
+  tradesCount: number
+}
+
 export interface IntradayPoint {
   timestamp: string
   value: number
@@ -419,6 +425,8 @@ export const api = {
     aiCost: () => req<AiCostResponse>('/analytics/ai-cost'),
     positions: () => req<{ open: AiPosition[]; closed: AiPosition[] }>('/analytics/positions'),
     performance: () => req<Performance>('/analytics/performance'),
+    dailyStats: (limit = 365) =>
+      req<{ data: DailyStatsPoint[] }>(`/analytics/daily-stats?limit=${limit}`),
   },
 
   config: {

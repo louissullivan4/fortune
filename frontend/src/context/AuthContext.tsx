@@ -15,7 +15,7 @@ export interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null
   accessToken: string | null
-  login: (email: string, password: string) => Promise<void>
+  login: (identifier: string, password: string) => Promise<void>
   logout: () => Promise<void>
   setAuth: (token: string, user: AuthUser) => void
 }
@@ -31,12 +31,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(u)
   }, [])
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (identifier: string, password: string) => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: 'Login failed' }))
