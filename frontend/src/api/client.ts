@@ -1,4 +1,4 @@
-const BASE = '/api'
+const BASE = (import.meta.env.VITE_API_URL ?? '') + '/api'
 
 // ── Token store (in-memory, not localStorage — XSS safe) ─────────────────
 let _accessToken: string | null = null
