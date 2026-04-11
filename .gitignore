@@ -5,3 +5,7 @@ data/
 out.txt
 .DS_Store
 prompts/
+ideas/
+.claude/
+tasks/
+CLAUDE.md
