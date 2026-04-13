@@ -61,29 +61,53 @@ export interface PortfolioSnapshot {
 }
 
 // ── Request queue ──────────────────────────────────────────────────────────
-// Serialises all T212 API calls with a minimum gap between them.
-// Tracks a global rate-limit window so that a 429 on any request
-// pauses the entire queue until the window expires.
+// Serialises all T212 API calls. Paces requests using the rate-limit headers
+// T212 returns on every response (x-ratelimit-remaining / x-ratelimit-reset).
+// Falls back to a conservative interval when headers are absent.
+// A 429 also sets a hard backoff from the Retry-After header.
 
-const MIN_INTERVAL_MS = 7_000 // T212 demo rate limit is ~10 req/min; 7s gap = ~8/min safely under limit
+const FALLBACK_INTERVAL_MS = 1_500
+const MIN_BURST_GAP_MS = 100
 
 class RequestQueue {
   private queue: Array<() => Promise<void>> = []
   private busy = false
   private lastAt = 0
   private rateLimitedUntil = 0
+  private limitRemaining: number | null = null
+  private limitResetAt = 0
+
+  updateFromHeaders(headers: Headers): void {
+    const remaining = headers.get('x-ratelimit-remaining')
+    const reset = headers.get('x-ratelimit-reset')
+    if (remaining !== null) this.limitRemaining = Number(remaining)
+    if (reset !== null) {
+      const val = Number(reset)
+      // Unix timestamp in seconds vs seconds-until-reset
+      this.limitResetAt = val > 1_000_000_000 ? val * 1_000 : Date.now() + val * 1_000
+    }
+  }
 
   enqueue<T>(fn: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
       this.queue.push(async () => {
-        // If a previous 429 set a backoff window, wait it out before issuing anything
         const rlWait = this.rateLimitedUntil - Date.now()
         if (rlWait > 0) await new Promise((r) => setTimeout(r, rlWait))
 
-        const gap = MIN_INTERVAL_MS - (Date.now() - this.lastAt)
+        if (this.limitRemaining !== null && this.limitRemaining <= 0 && this.limitResetAt > Date.now()) {
+          const resetWait = this.limitResetAt - Date.now() + 200
+          await new Promise((r) => setTimeout(r, resetWait))
+          this.limitRemaining = null
+        }
+
+        const elapsed = Date.now() - this.lastAt
+        const minGap = this.limitRemaining === null ? FALLBACK_INTERVAL_MS : MIN_BURST_GAP_MS
+        const gap = minGap - elapsed
         if (gap > 0) await new Promise((r) => setTimeout(r, gap))
 
         this.lastAt = Date.now()
+        if (this.limitRemaining !== null && this.limitRemaining > 0) this.limitRemaining--
+
         try {
           resolve(await fn())
         } catch (e) {
@@ -94,7 +118,6 @@ class RequestQueue {
     })
   }
 
-  /** Called when a 429 is received — blocks the whole queue until `ms` elapses. */
   setRateLimited(ms: number): void {
     this.rateLimitedUntil = Math.max(this.rateLimitedUntil, Date.now() + ms)
   }
@@ -147,14 +170,15 @@ export class Trading212Client {
         ...(init?.headers ?? {}),
       },
     })
+    this.q.updateFromHeaders(res.headers)
     if (res.status === 401) throw new Error('T212 auth failed — check API key ID and secret')
     if (res.status === 403) throw new Error('T212 access denied — check key permissions')
     if (res.status === 429) {
       if (retries <= 0) throw new Error('T212 rate limited — too many retries, slow down requests')
-      const retryAfterMs = (Number(res.headers.get('Retry-After') ?? 10) * 1000) || 10_000
-      // Block the entire queue so no other request fires during the backoff
+      const retryAfterMs = (Number(res.headers.get('Retry-After') ?? 10) * 1_000) || 10_000
       this.q.setRateLimited(retryAfterMs)
-      const secs = Math.round(retryAfterMs / 1000)
+      this.q.updateFromHeaders(res.headers)
+      const secs = Math.round(retryAfterMs / 1_000)
       console.warn(`[t212] Rate limited — queue paused for ${secs}s (${retries} retries left)`)
       hub.broadcast('toast', { message: `T212 rate limited — pausing ${secs}s`, level: 'warning' })
       await new Promise((r) => setTimeout(r, retryAfterMs))
