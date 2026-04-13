@@ -137,6 +137,7 @@ class RequestQueue {
 export class Trading212Client {
   private q = new RequestQueue()
   private _instrumentCache: Map<string, T212Instrument> | null = null
+  private _instrumentsInFlight: Promise<Map<string, T212Instrument>> | null = null
   private _snapshotCache: { data: PortfolioSnapshot; expiresAt: number } | null = null
   private _snapshotRefreshing = false
   private _snapshotInFlight: Promise<PortfolioSnapshot> | null = null
@@ -210,9 +211,16 @@ export class Trading212Client {
 
   async getInstruments(): Promise<Map<string, T212Instrument>> {
     if (this._instrumentCache) return this._instrumentCache
-    const data = await this.apiFetch<T212Instrument[]>('/equity/metadata/instruments')
-    this._instrumentCache = new Map(data.map((i) => [i.ticker, i]))
-    return this._instrumentCache
+    if (this._instrumentsInFlight) return this._instrumentsInFlight
+    this._instrumentsInFlight = this.apiFetch<T212Instrument[]>('/equity/metadata/instruments')
+      .then((data) => {
+        this._instrumentCache = new Map(data.map((i) => [i.ticker, i]))
+        return this._instrumentCache
+      })
+      .finally(() => {
+        this._instrumentsInFlight = null
+      })
+    return this._instrumentsInFlight
   }
 
   // ── Portfolio & cash ─────────────────────────────────────────────────────
