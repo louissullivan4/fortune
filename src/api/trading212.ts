@@ -96,6 +96,7 @@ class RequestQueue {
 
         if (this.limitRemaining !== null && this.limitRemaining <= 0 && this.limitResetAt > Date.now()) {
           const resetWait = this.limitResetAt - Date.now() + 200
+          console.log(`[t212] Rate limit capacity exhausted — waiting ${Math.round(resetWait / 1_000)}s for window reset`)
           await new Promise((r) => setTimeout(r, resetWait))
           this.limitRemaining = null
         }
@@ -162,6 +163,7 @@ export class Trading212Client {
     init: RequestInit | undefined,
     retries: number
   ): Promise<T> {
+    console.log(`[t212] → ${init?.method ?? 'GET'} ${path}`)
     const res = await fetch(`${this.baseUrl()}${path}`, {
       ...init,
       headers: {
@@ -175,13 +177,22 @@ export class Trading212Client {
     if (res.status === 403) throw new Error('T212 access denied — check key permissions')
     if (res.status === 429) {
       if (retries <= 0) throw new Error('T212 rate limited — too many retries, slow down requests')
-      const retryAfterMs = (Number(res.headers.get('Retry-After') ?? 10) * 1_000) || 10_000
-      this.q.setRateLimited(retryAfterMs)
+      const retryAfterSecs = Number(res.headers.get('Retry-After') ?? 0)
+      const resetHeader = res.headers.get('x-ratelimit-reset')
+      let backoffMs: number
+      if (resetHeader) {
+        const resetVal = Number(resetHeader)
+        const resetMs = resetVal > 1_000_000_000 ? resetVal * 1_000 : Date.now() + resetVal * 1_000
+        backoffMs = Math.max(resetMs - Date.now() + 500, retryAfterSecs * 1_000 || 10_000)
+      } else {
+        backoffMs = retryAfterSecs * 1_000 || 10_000
+      }
+      this.q.setRateLimited(backoffMs)
       this.q.updateFromHeaders(res.headers)
-      const secs = Math.round(retryAfterMs / 1_000)
+      const secs = Math.round(backoffMs / 1_000)
       console.warn(`[t212] Rate limited — queue paused for ${secs}s (${retries} retries left)`)
       hub.broadcast('toast', { message: `T212 rate limited — pausing ${secs}s`, level: 'warning' })
-      await new Promise((r) => setTimeout(r, retryAfterMs))
+      await new Promise((r) => setTimeout(r, backoffMs))
       return this.apiFetchInner<T>(path, init, retries - 1)
     }
     if (!res.ok) {
@@ -222,10 +233,11 @@ export class Trading212Client {
     side: 'buy' | 'sell'
   ): Promise<PlaceOrderResult> {
     const signedQty = side === 'sell' ? -Math.abs(quantity) : Math.abs(quantity)
-    return this.apiFetch<PlaceOrderResult>('/equity/orders/market', {
-      method: 'POST',
-      body: JSON.stringify({ ticker, quantity: signedQty }),
-    })
+    return this.apiFetch<PlaceOrderResult>(
+      '/equity/orders/market',
+      { method: 'POST', body: JSON.stringify({ ticker, quantity: signedQty }) },
+      5
+    )
   }
 
   async getOpenOrders(): Promise<T212Order[]> {

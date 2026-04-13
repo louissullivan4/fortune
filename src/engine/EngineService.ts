@@ -399,10 +399,14 @@ export class EngineService {
       `[engine:${this.userId}] Portfolio: €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} free cash${pendingNote}`
     )
 
+    console.log(`[engine:${this.userId}] Checking hard exits...`)
     const exitsPlaced = await this._checkHardExits(snapshot, timestamp)
     if (exitsPlaced > 0) {
+      console.log(`[engine:${this.userId}] ${exitsPlaced} hard exit(s) placed — refreshing snapshot`)
       const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
       Object.assign(snapshot, freshSnapshot)
+    } else {
+      console.log(`[engine:${this.userId}] No hard exits triggered`)
     }
 
     const dailyOpenValue = (await getDailyOpenValue(dateStr, this.userId)) ?? snapshot.totalValue
@@ -452,12 +456,15 @@ export class EngineService {
 
     await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
 
+    console.log(`[engine:${this.userId}] Checking stagnant exits...`)
     const stagnantExits = await this._checkStagnantExits(snapshot, signals, timestamp)
     if (stagnantExits > 0) {
       const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
       Object.assign(snapshot, freshSnapshot)
       this._lastSignalState = null
-      console.log(`[engine:${this.userId}] ${stagnantExits} stagnant exit(s)`)
+      console.log(`[engine:${this.userId}] ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`)
+    } else {
+      console.log(`[engine:${this.userId}] No stagnant exits triggered`)
     }
 
     const currentFingerprint = computeSignalFingerprint(signals)
@@ -551,6 +558,7 @@ export class EngineService {
         return
       }
 
+      console.log(`[engine:${this.userId}] Risk check passed — submitting order to T212`)
       try {
         console.log(
           `[engine:${this.userId}] Placing ${decision.action} order: ${decision.quantity} × ${decision.ticker}`
@@ -612,12 +620,16 @@ export class EngineService {
     }
     this._cycleRunning = true
     this._lastCycleAt = new Date().toISOString()
+    const cycleStart = Date.now()
     try {
       await this._cycle()
       this._cycleCount++
+      const elapsed = ((Date.now() - cycleStart) / 1_000).toFixed(1)
+      console.log(`[engine:${this.userId}] Cycle #${this._cycleCount} complete in ${elapsed}s`)
     } catch (err) {
       const msg = (err as Error).message
-      console.error(`[engine:${this.userId}] Cycle error:`, msg)
+      const elapsed = ((Date.now() - cycleStart) / 1_000).toFixed(1)
+      console.error(`[engine:${this.userId}] Cycle failed after ${elapsed}s: ${msg}`)
       hub.broadcast('toast', { message: `Cycle error: ${msg}`, level: 'error' })
     } finally {
       this._cycleRunning = false
