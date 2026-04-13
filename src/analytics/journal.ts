@@ -123,10 +123,7 @@ export interface RecentDecision {
   reasoning: string
 }
 
-export async function getRecentDecisions(
-  userId: string,
-  limit = 5
-): Promise<RecentDecision[]> {
+export async function getRecentDecisions(userId: string, limit = 5): Promise<RecentDecision[]> {
   const pool = getPool()
   const res = await pool.query<RecentDecision>(
     'SELECT timestamp, action, ticker, quantity, reasoning FROM decisions WHERE user_id = $1 ORDER BY id DESC LIMIT $2',
@@ -368,10 +365,9 @@ export async function getAllTimeStats(
       "SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND user_id = $1",
       [userId]
     ),
-    pool.query<{ c: string }>(
-      'SELECT COUNT(*) AS c FROM daily_snapshots WHERE user_id = $1',
-      [userId]
-    ),
+    pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM daily_snapshots WHERE user_id = $1', [
+      userId,
+    ]),
   ])
   return {
     totalDecisions: Number(d.rows[0].c),
@@ -510,10 +506,7 @@ export async function getDecisionsPaginated(
   return { data, total }
 }
 
-export async function getDecisionById(
-  id: number,
-  userId: string
-): Promise<DecisionRow | null> {
+export async function getDecisionById(id: number, userId: string): Promise<DecisionRow | null> {
   const pool = getPool()
   const res = await pool.query<{
     id: number
@@ -712,16 +705,17 @@ export async function getAiTrades(userId: string): Promise<AiTrade[]> {
   return res.rows.map((r) => ({
     action: r.action,
     ticker: r.ticker,
-    estimatedValue: r.estimated_price != null && r.quantity != null
-      ? r.estimated_price * r.quantity
-      : null,
+    estimatedValue:
+      r.estimated_price != null && r.quantity != null ? r.estimated_price * r.quantity : null,
     orderStatus: r.order_status,
     timestamp: r.timestamp,
   }))
 }
 
 /** Net positions view (ticker + net quantity from decisions). Legacy compat. */
-export async function getAiNetPositions(userId: string): Promise<Array<{ ticker: string; netQuantity: number }>> {
+export async function getAiNetPositions(
+  userId: string
+): Promise<Array<{ ticker: string; netQuantity: number }>> {
   const positions = await getOpenAiPositions(userId)
   return positions.map((p) => ({ ticker: p.ticker, netQuantity: p.quantity }))
 }

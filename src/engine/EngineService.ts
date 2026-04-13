@@ -4,7 +4,6 @@ import { validateOrder } from './riskmanager.js'
 import {
   reconcileAiPositions,
   getOpenAiPositions,
-  getClosedAiPositions,
   closeAiPosition,
   closeAllAiPositions,
   openAiPosition,
@@ -176,7 +175,9 @@ export class EngineService {
         }
       }
     }
-    console.log(`[engine:${this.userId}] Ready. Universe: ${this.userConfig.tradeUniverse.join(', ')}`)
+    console.log(
+      `[engine:${this.userId}] Ready. Universe: ${this.userConfig.tradeUniverse.join(', ')}`
+    )
   }
 
   // ── Adjusted snapshot (session cash accounting) ─────────────────────────
@@ -206,10 +207,7 @@ export class EngineService {
 
   // ── Hard exit check ─────────────────────────────────────────────────────
 
-  private async _checkHardExits(
-    snapshot: PortfolioSnapshot,
-    timestamp: string
-  ): Promise<number> {
+  private async _checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): Promise<number> {
     const openPositions = await getOpenAiPositions(this.userId)
     if (openPositions.length === 0) return 0
 
@@ -251,7 +249,12 @@ export class EngineService {
 
       const sellQty = live.quantity
       const risk = await validateOrder(
-        { action: 'sell', ticker: pos.ticker, quantity: sellQty, estimatedPrice: live.currentPrice },
+        {
+          action: 'sell',
+          ticker: pos.ticker,
+          quantity: sellQty,
+          estimatedPrice: live.currentPrice,
+        },
         snapshot,
         dailyOpen ?? snapshot.totalValue,
         this.t212,
@@ -267,7 +270,10 @@ export class EngineService {
         estimatedPrice: live.currentPrice,
         reasoning: reason,
         signalsJson: '[]',
-        portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, cash: snapshot.cash.free }),
+        portfolioJson: JSON.stringify({
+          totalValue: snapshot.totalValue,
+          cash: snapshot.cash.free,
+        }),
         userId: this.userId,
       })
 
@@ -369,7 +375,10 @@ export class EngineService {
         estimatedPrice: currentPrice,
         reasoning: reason,
         signalsJson: '[]',
-        portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, cash: snapshot.cash.free }),
+        portfolioJson: JSON.stringify({
+          totalValue: snapshot.totalValue,
+          cash: snapshot.cash.free,
+        }),
         userId: this.userId,
       })
 
@@ -430,7 +439,9 @@ export class EngineService {
     console.log(`[engine:${this.userId}] Checking hard exits...`)
     const exitsPlaced = await this._checkHardExits(snapshot, timestamp)
     if (exitsPlaced > 0) {
-      console.log(`[engine:${this.userId}] ${exitsPlaced} hard exit(s) placed — refreshing snapshot`)
+      console.log(
+        `[engine:${this.userId}] ${exitsPlaced} hard exit(s) placed — refreshing snapshot`
+      )
       const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
       Object.assign(snapshot, freshSnapshot)
     } else {
@@ -486,10 +497,7 @@ export class EngineService {
       `[engine:${this.userId}] Signals: ${signals.length} tickers, ${actionable} actionable`
     )
 
-    const aiPositionsValue = botPositions.reduce(
-      (sum, p) => sum + p.currentPrice * p.quantity,
-      0
-    )
+    const aiPositionsValue = botPositions.reduce((sum, p) => sum + p.currentPrice * p.quantity, 0)
     const aiValue = snapshot.cash.free + aiPositionsValue
 
     await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
@@ -500,7 +508,9 @@ export class EngineService {
       const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
       Object.assign(snapshot, freshSnapshot)
       this._lastSignalState = null
-      console.log(`[engine:${this.userId}] ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`)
+      console.log(
+        `[engine:${this.userId}] ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`
+      )
     } else {
       console.log(`[engine:${this.userId}] No stagnant exits triggered`)
     }
@@ -513,7 +523,9 @@ export class EngineService {
       lastState.fingerprint === currentFingerprint
 
     if (shouldSkipAi) {
-      console.log(`[engine:${this.userId}] Signals + cash unchanged since last hold — skipping AI call`)
+      console.log(
+        `[engine:${this.userId}] Signals + cash unchanged since last hold — skipping AI call`
+      )
       return
     }
 
@@ -531,7 +543,11 @@ export class EngineService {
         signalsJson: JSON.stringify(
           signals.map((s) => ({ ticker: s.ticker, signal: s.signal, reasons: s.reasons }))
         ),
-        portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, aiValue, cash: snapshot.cash.free }),
+        portfolioJson: JSON.stringify({
+          totalValue: snapshot.totalValue,
+          aiValue,
+          cash: snapshot.cash.free,
+        }),
         userId: this.userId,
       })
       this._lastSignalState = { fingerprint: currentFingerprint, lastDecisionAction: 'hold' }
@@ -641,7 +657,9 @@ export class EngineService {
           this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
-        console.log(`[engine:${this.userId}] Order placed: ${orderResult.id} (${orderResult.status})`)
+        console.log(
+          `[engine:${this.userId}] Order placed: ${orderResult.id} (${orderResult.status})`
+        )
         await logOrder({
           decisionId,
           t212OrderId: orderResult.id,
@@ -711,27 +729,16 @@ export class EngineService {
       return
     }
 
-    this._nextCycleAt = new Date(
-      Date.now() + this.userConfig.tradeIntervalMs
-    ).toISOString()
+    this._nextCycleAt = new Date(Date.now() + this.userConfig.tradeIntervalMs).toISOString()
     this._runCycle()
       .then(() => {
         if (!this._running) return
-        this._timer = setTimeout(
-          () => this._scheduleTick(),
-          this.userConfig.tradeIntervalMs
-        )
+        this._timer = setTimeout(() => this._scheduleTick(), this.userConfig.tradeIntervalMs)
       })
       .catch((err) => {
-        console.error(
-          `[engine:${this.userId}] Unhandled cycle error:`,
-          (err as Error).message
-        )
+        console.error(`[engine:${this.userId}] Unhandled cycle error:`, (err as Error).message)
         if (this._running) {
-          this._timer = setTimeout(
-            () => this._scheduleTick(),
-            this.userConfig.tradeIntervalMs
-          )
+          this._timer = setTimeout(() => this._scheduleTick(), this.userConfig.tradeIntervalMs)
         }
       })
   }

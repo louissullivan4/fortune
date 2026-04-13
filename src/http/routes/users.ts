@@ -188,10 +188,10 @@ router.put('/me/password', async (req, res, next) => {
     if (!valid) return res.status(401).json({ error: 'Current password is incorrect' })
 
     const hash = await bcrypt.hash(newPassword, 12)
-    await pool.query(
-      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2',
-      [hash, req.user!.userId]
-    )
+    await pool.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE user_id = $2', [
+      hash,
+      req.user!.userId,
+    ])
     res.json({ ok: true })
   } catch (err) {
     next(err)
@@ -258,9 +258,9 @@ router.put('/me/api-keys', async (req, res, next) => {
          updated_at              = NOW()`,
       [
         req.user!.userId,
-        anthropicApiKey ? encrypt(anthropicApiKey) : existing?.anthropic_api_key_enc ?? null,
-        t212KeyId ? encrypt(t212KeyId) : existing?.t212_api_key_id_enc ?? null,
-        t212KeySecret ? encrypt(t212KeySecret) : existing?.t212_api_key_secret_enc ?? null,
+        anthropicApiKey ? encrypt(anthropicApiKey) : (existing?.anthropic_api_key_enc ?? null),
+        t212KeyId ? encrypt(t212KeyId) : (existing?.t212_api_key_id_enc ?? null),
+        t212KeySecret ? encrypt(t212KeySecret) : (existing?.t212_api_key_secret_enc ?? null),
         t212Mode ?? existing?.t212_mode ?? 'demo',
       ]
     )
@@ -391,7 +391,9 @@ router.post('/invite', requireAdmin, async (req, res, next) => {
     const pool = getPool()
 
     // Check if user already exists
-    const existing = await pool.query('SELECT user_id FROM users WHERE email = $1', [normalizedEmail])
+    const existing = await pool.query('SELECT user_id FROM users WHERE email = $1', [
+      normalizedEmail,
+    ])
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: 'A user with this email already exists' })
     }
@@ -466,10 +468,10 @@ router.put('/:userId/role', requireAdmin, async (req, res, next) => {
       return res.status(400).json({ error: 'Role must be admin or client' })
     }
     const pool = getPool()
-    await pool.query(
-      'UPDATE users SET user_role = $1, updated_at = NOW() WHERE user_id = $2',
-      [role, req.params.userId]
-    )
+    await pool.query('UPDATE users SET user_role = $1, updated_at = NOW() WHERE user_id = $2', [
+      role,
+      req.params.userId,
+    ])
     res.json({ ok: true })
   } catch (err) {
     next(err)
@@ -481,10 +483,10 @@ router.put('/:userId/active', requireAdmin, async (req, res, next) => {
   try {
     const { isActive } = req.body as { isActive: boolean }
     const pool = getPool()
-    await pool.query(
-      'UPDATE users SET is_active = $1, updated_at = NOW() WHERE user_id = $2',
-      [isActive, req.params.userId]
-    )
+    await pool.query('UPDATE users SET is_active = $1, updated_at = NOW() WHERE user_id = $2', [
+      isActive,
+      req.params.userId,
+    ])
     res.json({ ok: true })
   } catch (err) {
     next(err)

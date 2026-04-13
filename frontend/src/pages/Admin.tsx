@@ -21,7 +21,9 @@ export default function Admin() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+  }, [])
 
   async function sendInvite(e: React.FormEvent) {
     e.preventDefault()
@@ -58,16 +60,19 @@ export default function Admin() {
       await api.users.setRole(u.user_id, newRole)
       pushToast(`${u.username} is now ${newRole}`, 'info')
       setUsers((prev) =>
-        prev.map((user) =>
-          user.user_id === u.user_id ? { ...user, user_role: newRole } : user
-        )
+        prev.map((user) => (user.user_id === u.user_id ? { ...user, user_role: newRole } : user))
       )
     } catch (err) {
       pushToast((err as Error).message, 'error')
     }
   }
 
-  if (loading) return <div className="page"><p style={{ color: 'var(--muted)' }}>Loading…</p></div>
+  if (loading)
+    return (
+      <div className="page">
+        <p style={{ color: 'var(--muted)' }}>Loading…</p>
+      </div>
+    )
 
   return (
     <div className="page">
@@ -118,31 +123,57 @@ export default function Admin() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>User</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Email</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Role</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Keys</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Status</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Actions</th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  User
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Email
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Role
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Keys
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Status
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
                 <tr key={u.user_id} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 12px' }}>
-                    <div style={{ fontWeight: 500 }}>{u.first_name} {u.last_name}</div>
+                    <div style={{ fontWeight: 500 }}>
+                      {u.first_name} {u.last_name}
+                    </div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>@{u.username}</div>
                   </td>
                   <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{u.email}</td>
                   <td style={{ padding: '10px 12px' }}>
-                    <span className={`badge ${u.user_role === 'admin' ? 'badge-purple' : 'badge-blue'}`}>
+                    <span
+                      className={`badge ${u.user_role === 'admin' ? 'badge-purple' : 'badge-blue'}`}
+                    >
                       {u.user_role}
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <span className={`badge ${u.has_anthropic_key ? 'badge-green' : 'badge-red'}`} title="Anthropic">AI</span>
-                      <span className={`badge ${u.has_t212_key ? 'badge-green' : 'badge-red'}`} title="T212">T212</span>
+                      <span
+                        className={`badge ${u.has_anthropic_key ? 'badge-green' : 'badge-red'}`}
+                        title="Anthropic"
+                      >
+                        AI
+                      </span>
+                      <span
+                        className={`badge ${u.has_t212_key ? 'badge-green' : 'badge-red'}`}
+                        title="T212"
+                      >
+                        T212
+                      </span>
                     </div>
                   </td>
                   <td style={{ padding: '10px 12px' }}>
@@ -183,11 +214,21 @@ export default function Admin() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Email</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Invited By</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Sent</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Expires</th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>Status</th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Email
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Invited By
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Sent
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Expires
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                  Status
+                </th>
               </tr>
             </thead>
             <tbody>

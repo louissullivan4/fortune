@@ -41,9 +41,7 @@ export default function ResetPassword() {
         <h1 className="auth-title">Reset Password</h1>
 
         {done ? (
-          <div className="auth-success">
-            Password reset successfully. Redirecting to sign in…
-          </div>
+          <div className="auth-success">Password reset successfully. Redirecting to sign in…</div>
         ) : (
           <>
             {error && <div className="auth-error">{error}</div>}
@@ -66,7 +64,11 @@ export default function ResetPassword() {
                 onChange={(e) => setConfirm(e.target.value)}
                 required
               />
-              <button type="submit" className="btn btn-primary auth-btn" disabled={loading || !token}>
+              <button
+                type="submit"
+                className="btn btn-primary auth-btn"
+                disabled={loading || !token}
+              >
                 {loading ? 'Resetting…' : 'Reset Password'}
               </button>
             </form>

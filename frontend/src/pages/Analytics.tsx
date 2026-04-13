@@ -38,7 +38,7 @@ const COLOR_RED = '#dc2626'
 const COLOR_ACCENT = '#2563eb'
 
 type Range = '1W' | '1M' | '3M' | 'All'
-const RANGE_DAYS: Record<Range, number | null> = { '1W': 7, '1M': 30, '3M': 90, 'All': null }
+const RANGE_DAYS: Record<Range, number | null> = { '1W': 7, '1M': 30, '3M': 90, All: null }
 
 function sliceDays<T>(arr: T[], days: number | null): T[] {
   return days == null ? arr : arr.slice(-days)
@@ -59,12 +59,14 @@ function dateLabel(date: string) {
 function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
   const options: Range[] = ['1W', '1M', '3M', 'All']
   return (
-    <div style={{
-      display: 'flex',
-      border: '0.5px solid var(--color-border)',
-      borderRadius: 4,
-      overflow: 'hidden',
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        border: '0.5px solid var(--color-border)',
+        borderRadius: 4,
+        overflow: 'hidden',
+      }}
+    >
       {options.map((r, i) => (
         <button
           key={r}
@@ -89,7 +91,15 @@ function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range)
   )
 }
 
-function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+function ChartCard({
+  title,
+  sub,
+  children,
+}: {
+  title: string
+  sub?: string
+  children: React.ReactNode
+}) {
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
@@ -103,14 +113,16 @@ function ChartCard({ title, sub, children }: { title: string; sub?: string; chil
 
 function Empty() {
   return (
-    <div style={{
-      height: CHART_HEIGHT,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'var(--color-text-muted)',
-      fontSize: 12,
-    }}>
+    <div
+      style={{
+        height: CHART_HEIGHT,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--color-text-muted)',
+        fontSize: 12,
+      }}
+    >
       No data
     </div>
   )
@@ -121,7 +133,9 @@ export default function Analytics() {
   const [performance, setPerformance] = useState<Performance | null>(null)
   const [snapshots, setSnapshots] = useState<DailySnapshot[]>([])
   const [dailyStats, setDailyStats] = useState<DailyStatsPoint[]>([])
-  const [positions, setPositions] = useState<{ open: AiPosition[]; closed: AiPosition[] } | null>(null)
+  const [positions, setPositions] = useState<{ open: AiPosition[]; closed: AiPosition[] } | null>(
+    null
+  )
   const [aiCost, setAiCost] = useState<AiCostResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<Range>('1M')
@@ -148,7 +162,7 @@ export default function Analytics() {
   }, [])
 
   const days = RANGE_DAYS[range]
-  const closedPositions = positions?.closed ?? []
+  const closedPositions = useMemo(() => positions?.closed ?? [], [positions])
 
   const portfolioPoints = useMemo(
     () => sliceDays(snapshots, days).map((s) => ({ label: dateLabel(s.date), value: s.value })),
@@ -164,7 +178,8 @@ export default function Analytics() {
   )
 
   const tradesPerDayPoints = useMemo(
-    () => sliceDays(dailyStats, days).map((s) => ({ label: dateLabel(s.date), trades: s.tradesCount })),
+    () =>
+      sliceDays(dailyStats, days).map((s) => ({ label: dateLabel(s.date), trades: s.tradesCount })),
     [dailyStats, days]
   )
 
@@ -193,13 +208,13 @@ export default function Analytics() {
       const date = p.closedAt.slice(0, 10)
       pnlByDate[date] = (pnlByDate[date] ?? 0) + p.realizedPnl
     }
-    let running = 0
     return Object.keys(pnlByDate)
       .sort()
-      .map((date) => {
-        running = Number((running + pnlByDate[date]).toFixed(2))
-        return { label: dateLabel(date), cumPnl: running }
-      })
+      .reduce<{ label: string; cumPnl: number }[]>((acc, date) => {
+        const prev = acc[acc.length - 1]?.cumPnl ?? 0
+        acc.push({ label: dateLabel(date), cumPnl: Number((prev + pnlByDate[date]).toFixed(2)) })
+        return acc
+      }, [])
   }, [closedPositions])
 
   const tickerPnlBars = useMemo(() => {
@@ -216,8 +231,7 @@ export default function Analytics() {
     const acc: Record<string, { totalHours: number; count: number }> = {}
     for (const p of closedPositions) {
       if (!p.closedAt) continue
-      const hours =
-        (new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime()) / 3_600_000
+      const hours = (new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime()) / 3_600_000
       if (!acc[p.ticker]) acc[p.ticker] = { totalHours: 0, count: 0 }
       acc[p.ticker].totalHours += hours
       acc[p.ticker].count += 1
@@ -244,16 +258,31 @@ export default function Analytics() {
   const netPnl = totalPnl != null ? totalPnl - aiCostEur : null
   const lastCumPnl = cumulativePnlPoints[cumulativePnlPoints.length - 1]?.cumPnl ?? 0
 
-  if (loading) return <div style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>Loading...</div>
+  if (loading)
+    return <div style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>Loading...</div>
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 24,
+        }}
+      >
         <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Analytics</h1>
         <RangeSelector value={range} onChange={setRange} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
         <StatCard
           label="Realized P&L"
           value={fmtEur(totalPnl)}
@@ -280,19 +309,50 @@ export default function Analytics() {
         />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
         <ChartCard title="portfolio value">
           {portfolioPoints.length > 1 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <LineChart data={portfolioPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `€${v}`} width={52} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [`€${v.toFixed(2)}`, 'Value']} />
-                <Line type="monotone" dataKey="value" stroke={COLOR_ACCENT} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `€${v}`}
+                  width={52}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'Value']}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  stroke={COLOR_ACCENT}
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                />
               </LineChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="daily P&L">
@@ -300,17 +360,38 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={dailyPnlPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `€${v}`} width={52} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']} />
+                <XAxis
+                  dataKey="label"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `€${v}`}
+                  width={52}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']}
+                />
                 <Bar dataKey="pnl" isAnimationActive={false} radius={[2, 2, 0, 0]}>
                   {dailyPnlPoints.map((entry, i) => (
-                    <Cell key={i} fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED} fillOpacity={0.75} />
+                    <Cell
+                      key={i}
+                      fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED}
+                      fillOpacity={0.75}
+                    />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="cumulative P&L" sub="all-time">
@@ -318,9 +399,24 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <LineChart data={cumulativePnlPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `€${v}`} width={52} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [`€${v.toFixed(2)}`, 'Cumulative P&L']} />
+                <XAxis
+                  dataKey="label"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `€${v}`}
+                  width={52}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'Cumulative P&L']}
+                />
                 <Line
                   type="monotone"
                   dataKey="cumPnl"
@@ -331,7 +427,9 @@ export default function Analytics() {
                 />
               </LineChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="trades per day">
@@ -339,13 +437,33 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={tradesPerDayPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} width={32} />
+                <XAxis
+                  dataKey="label"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  width={32}
+                />
                 <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [v, 'Trades']} />
-                <Bar dataKey="trades" fill={COLOR_ACCENT} fillOpacity={0.65} isAnimationActive={false} radius={[2, 2, 0, 0]} />
+                <Bar
+                  dataKey="trades"
+                  fill={COLOR_ACCENT}
+                  fillOpacity={0.65}
+                  isAnimationActive={false}
+                  radius={[2, 2, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="win / loss" sub="all-time">
@@ -364,27 +482,54 @@ export default function Analytics() {
                   <Cell fill={COLOR_GREEN} fillOpacity={0.8} />
                   <Cell fill={COLOR_RED} fillOpacity={0.7} />
                 </Pie>
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number, name: string) => [v, name]} />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number, name: string) => [v, name]}
+                />
               </PieChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="P&L by ticker" sub="all-time">
           {tickerPnlBars.length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={tickerPnlBars} layout="vertical">
-                <XAxis type="number" tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `€${v}`} />
-                <YAxis type="category" dataKey="ticker" tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }} tickLine={false} axisLine={false} width={80} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']} />
+                <XAxis
+                  type="number"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `€${v}`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker"
+                  tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={80}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']}
+                />
                 <Bar dataKey="pnl" isAnimationActive={false} radius={[0, 2, 2, 0]}>
                   {tickerPnlBars.map((entry, i) => (
-                    <Cell key={i} fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED} fillOpacity={0.75} />
+                    <Cell
+                      key={i}
+                      fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED}
+                      fillOpacity={0.75}
+                    />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="AI cost per day">
@@ -392,13 +537,36 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={aiCostPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `$${v.toFixed(3)}`} width={56} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [`$${v.toFixed(5)}`, 'Cost']} />
-                <Bar dataKey="cost" fill={COLOR_ACCENT} fillOpacity={0.65} isAnimationActive={false} radius={[2, 2, 0, 0]} />
+                <XAxis
+                  dataKey="label"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `$${v.toFixed(3)}`}
+                  width={56}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`$${v.toFixed(5)}`, 'Cost']}
+                />
+                <Bar
+                  dataKey="cost"
+                  fill={COLOR_ACCENT}
+                  fillOpacity={0.65}
+                  isAnimationActive={false}
+                  radius={[2, 2, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="AI calls per day">
@@ -406,32 +574,78 @@ export default function Analytics() {
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={aiCallsPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} width={32} />
+                <XAxis
+                  dataKey="label"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  width={32}
+                />
                 <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [v, 'Calls']} />
-                <Bar dataKey="calls" fill={COLOR_ACCENT} fillOpacity={0.45} isAnimationActive={false} radius={[2, 2, 0, 0]} />
+                <Bar
+                  dataKey="calls"
+                  fill={COLOR_ACCENT}
+                  fillOpacity={0.45}
+                  isAnimationActive={false}
+                  radius={[2, 2, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
 
         <ChartCard title="avg hold time" sub="hours · all-time">
           {holdTimeBars.length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={holdTimeBars} layout="vertical">
-                <XAxis type="number" tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={(v: number) => `${v}h`} />
-                <YAxis type="category" dataKey="ticker" tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }} tickLine={false} axisLine={false} width={80} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [`${v}h`, 'Avg hold']} />
-                <Bar dataKey="avgHours" fill={COLOR_ACCENT} fillOpacity={0.45} isAnimationActive={false} radius={[0, 2, 2, 0]} />
+                <XAxis
+                  type="number"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `${v}h`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker"
+                  tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={80}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`${v}h`, 'Avg hold']}
+                />
+                <Bar
+                  dataKey="avgHours"
+                  fill={COLOR_ACCENT}
+                  fillOpacity={0.45}
+                  isAnimationActive={false}
+                  radius={[0, 2, 2, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
-          ) : <Empty />}
+          ) : (
+            <Empty />
+          )}
         </ChartCard>
       </div>
 
       {aiCost && aiCost.summary.callCount > 0 && (
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-          AI cost: ${totalAiCostUsd.toFixed(4)} total · {aiCost.summary.callCount} calls · avg ${aiCost.summary.avgCostPerCallUsd.toFixed(5)}/call · claude-sonnet-4-6 · $3/MTok in · $15/MTok out
+          AI cost: ${totalAiCostUsd.toFixed(4)} total · {aiCost.summary.callCount} calls · avg $
+          {aiCost.summary.avgCostPerCallUsd.toFixed(5)}/call · claude-sonnet-4-6 · $3/MTok in ·
+          $15/MTok out
         </div>
       )}
 
@@ -463,20 +677,34 @@ export default function Analytics() {
                   <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
                     {p.exitPrice != null ? `€${p.exitPrice.toFixed(2)}` : '—'}
                   </td>
-                  <td style={{
-                    textAlign: 'right',
-                    fontFamily: 'var(--font-code)',
-                    color: (p.realizedPnl ?? 0) >= 0 ? COLOR_GREEN : COLOR_RED,
-                    fontWeight: 500,
-                  }}>
+                  <td
+                    style={{
+                      textAlign: 'right',
+                      fontFamily: 'var(--font-code)',
+                      color: (p.realizedPnl ?? 0) >= 0 ? COLOR_GREEN : COLOR_RED,
+                      fontWeight: 500,
+                    }}
+                  >
                     {p.realizedPnl != null
                       ? `${p.realizedPnl >= 0 ? '+' : ''}€${p.realizedPnl.toFixed(2)}`
                       : '—'}
                   </td>
-                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)', fontFamily: 'var(--font-code)' }}>
+                  <td
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--color-text-muted)',
+                      fontFamily: 'var(--font-code)',
+                    }}
+                  >
                     {new Date(p.openedAt).toLocaleDateString()}
                   </td>
-                  <td style={{ fontSize: 12, color: 'var(--color-text-muted)', fontFamily: 'var(--font-code)' }}>
+                  <td
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--color-text-muted)',
+                      fontFamily: 'var(--font-code)',
+                    }}
+                  >
                     {p.closedAt ? new Date(p.closedAt).toLocaleDateString() : '—'}
                   </td>
                 </tr>

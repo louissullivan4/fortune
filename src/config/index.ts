@@ -7,9 +7,7 @@ import { z } from 'zod'
 
 const ServerSchema = z.object({
   jwtSecret: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  encryptionKey: z
-    .string()
-    .length(64, 'ENCRYPTION_KEY must be 64 hex characters (32 bytes)'),
+  encryptionKey: z.string().length(64, 'ENCRYPTION_KEY must be 64 hex characters (32 bytes)'),
 })
 
 const result = ServerSchema.safeParse({

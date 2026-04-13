@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { getPool } from '../../db.js'
-import { sendInviteEmail, sendPasswordResetEmail } from '../../services/email.js'
+import { sendPasswordResetEmail } from '../../services/email.js'
 import { requireAuth } from '../middleware/auth.js'
 import type { JwtPayload } from '../../types/user.js'
 
@@ -144,10 +144,7 @@ router.get('/invite/verify', async (req, res, next) => {
       email: string
       is_used: boolean
       expires_at: string
-    }>(
-      'SELECT email, is_used, expires_at FROM user_invitations WHERE token = $1',
-      [token]
-    )
+    }>('SELECT email, is_used, expires_at FROM user_invitations WHERE token = $1', [token])
     const invite = result.rows[0]
     if (!invite) return res.status(404).json({ error: 'Invitation not found' })
     if (invite.is_used) return res.status(400).json({ error: 'Invitation has already been used' })
@@ -208,7 +205,9 @@ router.post('/create-account', async (req, res, next) => {
       expires_at: string
       id: number
       is_admin: boolean
-    }>('SELECT id, email, is_used, expires_at, is_admin FROM user_invitations WHERE token = $1', [token])
+    }>('SELECT id, email, is_used, expires_at, is_admin FROM user_invitations WHERE token = $1', [
+      token,
+    ])
 
     const invite = inviteResult.rows[0]
     if (!invite) return res.status(404).json({ error: 'Invitation not found' })
@@ -218,10 +217,9 @@ router.post('/create-account', async (req, res, next) => {
     }
 
     // Check username uniqueness
-    const usernameCheck = await pool.query(
-      'SELECT id FROM users WHERE username = $1',
-      [username.trim()]
-    )
+    const usernameCheck = await pool.query('SELECT id FROM users WHERE username = $1', [
+      username.trim(),
+    ])
     if (usernameCheck.rows.length > 0) {
       return res.status(409).json({ error: 'Username already taken' })
     }
@@ -264,10 +262,9 @@ router.post('/create-account', async (req, res, next) => {
     )
 
     // Mark invitation as used
-    await pool.query(
-      `UPDATE user_invitations SET is_used = true, used_at = NOW() WHERE id = $1`,
-      [invite.id]
-    )
+    await pool.query(`UPDATE user_invitations SET is_used = true, used_at = NOW() WHERE id = $1`, [
+      invite.id,
+    ])
 
     const payload: JwtPayload = { userId, email: invite.email, role }
     const accessToken = signAccess(payload)
@@ -308,10 +305,10 @@ router.post('/forgot-password', async (req, res, next) => {
       `UPDATE password_reset_tokens SET is_used = true WHERE user_id = $1 AND is_used = false`,
       [userId]
     )
-    await pool.query(
-      `INSERT INTO password_reset_tokens (user_id, token) VALUES ($1, $2)`,
-      [userId, token]
-    )
+    await pool.query(`INSERT INTO password_reset_tokens (user_id, token) VALUES ($1, $2)`, [
+      userId,
+      token,
+    ])
 
     await sendPasswordResetEmail(email, token)
     res.json({ ok: true })
@@ -337,10 +334,9 @@ router.post('/reset-password', async (req, res, next) => {
       user_id: string
       is_used: boolean
       expires_at: string
-    }>(
-      'SELECT id, user_id, is_used, expires_at FROM password_reset_tokens WHERE token = $1',
-      [token]
-    )
+    }>('SELECT id, user_id, is_used, expires_at FROM password_reset_tokens WHERE token = $1', [
+      token,
+    ])
 
     const resetToken = result.rows[0]
     if (!resetToken) return res.status(404).json({ error: 'Reset token not found' })

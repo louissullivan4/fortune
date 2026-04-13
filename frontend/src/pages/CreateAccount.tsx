@@ -124,11 +124,21 @@ export default function CreateAccount() {
           <div className="form-row">
             <div style={{ flex: 1 }}>
               <label className="auth-label">First Name *</label>
-              <input className="auth-input" value={form.firstName} onChange={set('firstName')} required />
+              <input
+                className="auth-input"
+                value={form.firstName}
+                onChange={set('firstName')}
+                required
+              />
             </div>
             <div style={{ flex: 1 }}>
               <label className="auth-label">Last Name *</label>
-              <input className="auth-input" value={form.lastName} onChange={set('lastName')} required />
+              <input
+                className="auth-input"
+                value={form.lastName}
+                onChange={set('lastName')}
+                required
+              />
             </div>
           </div>
 
@@ -138,11 +148,23 @@ export default function CreateAccount() {
           <div className="form-row">
             <div style={{ flex: 1 }}>
               <label className="auth-label">Password *</label>
-              <input type="password" className="auth-input" value={form.password} onChange={set('password')} required />
+              <input
+                type="password"
+                className="auth-input"
+                value={form.password}
+                onChange={set('password')}
+                required
+              />
             </div>
             <div style={{ flex: 1 }}>
               <label className="auth-label">Confirm Password *</label>
-              <input type="password" className="auth-input" value={form.confirmPassword} onChange={set('confirmPassword')} required />
+              <input
+                type="password"
+                className="auth-input"
+                value={form.confirmPassword}
+                onChange={set('confirmPassword')}
+                required
+              />
             </div>
           </div>
 

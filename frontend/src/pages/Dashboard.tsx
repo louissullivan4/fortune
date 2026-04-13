@@ -1,11 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Play, Square, RefreshCw } from 'lucide-react'
-import {
-  api,
-  type EngineStatus,
-  type Portfolio,
-  type Decision,
-} from '../api/client'
+import { api, type EngineStatus, type Portfolio, type Decision } from '../api/client'
 import StatCard from '../components/StatCard'
 import MarketClock from '../components/MarketClock'
 

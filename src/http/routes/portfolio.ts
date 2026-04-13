@@ -35,16 +35,22 @@ router.get('/', async (req, res, next) => {
       const exitPriceByTicker = new Map<string, number | null>()
 
       for (const ticker of soldTickers) {
-        const fillPrice = orderHistory
-          .filter((o) => o.ticker === ticker && o.quantity < 0 && o.filledPrice != null)
-          .sort((a, b) => new Date(b.dateModified).getTime() - new Date(a.dateModified).getTime())
-          .at(0)?.filledPrice ?? null
+        const fillPrice =
+          orderHistory
+            .filter((o) => o.ticker === ticker && o.quantity < 0 && o.filledPrice != null)
+            .sort((a, b) => new Date(b.dateModified).getTime() - new Date(a.dateModified).getTime())
+            .at(0)?.filledPrice ?? null
         exitPriceByTicker.set(ticker, fillPrice)
       }
 
       await Promise.all(
         soldPositions.map((p) =>
-          closeAllAiPositions(p.ticker, exitPriceByTicker.get(p.ticker) ?? null, now, req.user!.userId)
+          closeAllAiPositions(
+            p.ticker,
+            exitPriceByTicker.get(p.ticker) ?? null,
+            now,
+            req.user!.userId
+          )
         )
       )
     }

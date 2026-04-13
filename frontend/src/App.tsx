@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { useWebSocket, type WsMessage } from './api/ws'
 import Layout from './components/Layout'
 import ToastContainer, { pushToast, type ToastLevel } from './components/Toasts'
@@ -78,10 +78,7 @@ export default function App() {
     <>
       <Routes>
         {/* Public auth routes */}
-        <Route
-          path="/login"
-          element={user ? <Navigate to="/" replace /> : <Login />}
-        />
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
         <Route path="/create-account" element={<CreateAccount />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />

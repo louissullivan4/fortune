@@ -37,7 +37,8 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
   const [username, setUsername] = useState<string | null>(null)
 
   useEffect(() => {
-    api.users.me()
+    api.users
+      .me()
       .then((p) => setUsername(p.username || null))
       .catch(() => {})
   }, [])
@@ -106,7 +107,13 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
           className="nav-item"
           onClick={handleLogout}
           title="Sign out"
-          style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+          style={{
+            width: '100%',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--color-text-muted)',
+          }}
         >
           <LogOut size={16} />
         </button>

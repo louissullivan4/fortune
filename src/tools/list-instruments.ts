@@ -15,7 +15,10 @@ async function main() {
       t212_key_id_enc: string | null
       t212_key_secret_enc: string | null
       t212_mode: string
-    }>('SELECT t212_key_id_enc, t212_key_secret_enc, t212_mode FROM user_api_keys WHERE user_id = $1', [userId])
+    }>(
+      'SELECT t212_key_id_enc, t212_key_secret_enc, t212_mode FROM user_api_keys WHERE user_id = $1',
+      [userId]
+    )
     const row = res.rows[0]
     if (!row?.t212_key_id_enc || !row?.t212_key_secret_enc) {
       console.error('No T212 API keys found for this user.')

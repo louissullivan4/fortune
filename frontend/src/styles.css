@@ -466,20 +466,32 @@ select.auth-input {
   font-weight: 500;
 }
 
-.badge-green { background: rgba(34,197,94,0.15); color: #22c55e; }
-.badge-red   { background: rgba(239,68,68,0.15); color: #ef4444; }
-.badge-blue  { background: rgba(59,130,246,0.15); color: #3b82f6; }
-.badge-purple{ background: rgba(139,92,246,0.15); color: #8b5cf6; }
+.badge-green {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+.badge-red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+.badge-blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+.badge-purple {
+  background: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+}
 
 /* ── Additional button variants ──────────────────────────────────────────── */
 .btn-danger {
-  background: rgba(239,68,68,0.1);
+  background: rgba(239, 68, 68, 0.1);
   color: #ef4444;
-  border: 0.5px solid rgba(239,68,68,0.3);
+  border: 0.5px solid rgba(239, 68, 68, 0.3);
 }
 
 .btn-danger:hover {
-  background: rgba(239,68,68,0.2);
+  background: rgba(239, 68, 68, 0.2);
 }
 
 /* ── Section / page helpers ──────────────────────────────────────────────── */

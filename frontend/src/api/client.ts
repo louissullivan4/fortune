@@ -315,10 +315,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       }),
-    logout: () =>
-      req<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
-    refresh: () =>
-      req<{ accessToken: string }>('/auth/refresh', { method: 'POST' }),
+    logout: () => req<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+    refresh: () => req<{ accessToken: string }>('/auth/refresh', { method: 'POST' }),
     me: () => req<AuthUser>('/auth/me'),
     verifyInvite: (token: string) =>
       req<{ email: string; valid: boolean }>(`/auth/invite/verify?token=${token}`),
@@ -438,9 +436,7 @@ export const api = {
 
   instruments: {
     search: (q: string) =>
-      req<{ data: Instrument[]; total: number }>(
-        `/instruments/search?q=${encodeURIComponent(q)}`
-      ),
+      req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(q)}`),
     lookup: async (ticker: string): Promise<Instrument | null> => {
       const res = await req<{ data: Instrument[]; total: number }>(
         `/instruments/search?q=${encodeURIComponent(ticker)}`

@@ -49,11 +49,7 @@ router.put('/', async (req, res, next) => {
     ) {
       updates.daily_loss_limit_pct = body.dailyLossLimitPct
     }
-    if (
-      typeof body.stopLossPct === 'number' &&
-      body.stopLossPct > 0 &&
-      body.stopLossPct <= 1
-    ) {
+    if (typeof body.stopLossPct === 'number' && body.stopLossPct > 0 && body.stopLossPct <= 1) {
       updates.stop_loss_pct = body.stopLossPct
     }
     if (

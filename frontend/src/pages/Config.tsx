@@ -47,7 +47,15 @@ function pct(v: number, decimals = 1) {
   return `${(v * 100).toFixed(decimals)}%`
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <label style={{ fontSize: 12, color: 'var(--color-text-muted)', letterSpacing: '0.03em' }}>
@@ -86,7 +94,14 @@ function SliderField({
         <span style={{ fontSize: 12, color: 'var(--color-text-muted)', letterSpacing: '0.03em' }}>
           {label}
         </span>
-        <span style={{ fontSize: 14, fontWeight: 500, fontFamily: 'var(--font-code)', color: 'var(--color-text-primary)' }}>
+        <span
+          style={{
+            fontSize: 14,
+            fontWeight: 500,
+            fontFamily: 'var(--font-code)',
+            color: 'var(--color-text-primary)',
+          }}
+        >
           {displayValue}
         </span>
       </div>
@@ -99,7 +114,14 @@ function SliderField({
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ width: '100%' }}
       />
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--color-text-muted)' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 11,
+          color: 'var(--color-text-muted)',
+        }}
+      >
         <span>{minLabel}</span>
         <span>{maxLabel}</span>
       </div>
@@ -131,7 +153,15 @@ function ExitRuleCard({
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="section-label">{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 500, fontFamily: 'var(--font-code)', color: 'var(--color-text-primary)', lineHeight: 1 }}>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 500,
+          fontFamily: 'var(--font-code)',
+          color: 'var(--color-text-primary)',
+          lineHeight: 1,
+        }}
+      >
         {displayValue}
       </div>
       <input
@@ -143,7 +173,14 @@ function ExitRuleCard({
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ width: '100%' }}
       />
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--color-text-muted)' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 11,
+          color: 'var(--color-text-muted)',
+        }}
+      >
         <span>{minLabel}</span>
         <span>{maxLabel}</span>
       </div>
@@ -192,7 +229,9 @@ function DurationInput({
         style={{ width: 'auto', minWidth: 100 }}
       >
         {units.map((u) => (
-          <option key={u} value={u}>{u}</option>
+          <option key={u} value={u}>
+            {u}
+          </option>
         ))}
       </select>
     </div>
@@ -216,16 +255,18 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
         flexShrink: 0,
       }}
     >
-      <span style={{
-        position: 'absolute',
-        top: 2,
-        left: value ? 18 : 2,
-        width: 16,
-        height: 16,
-        borderRadius: '50%',
-        background: value ? '#fff' : 'var(--color-text-muted)',
-        transition: 'left 150ms ease',
-      }} />
+      <span
+        style={{
+          position: 'absolute',
+          top: 2,
+          left: value ? 18 : 2,
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          background: value ? '#fff' : 'var(--color-text-muted)',
+          transition: 'left 150ms ease',
+        }}
+      />
     </button>
   )
 }
@@ -315,11 +356,20 @@ export default function ConfigPage() {
 
   function reset() {
     setDraft(cfg)
-    setKeysForm((f) => ({ ...f, anthropicApiKey: '', t212KeyId: '', t212KeySecret: '', t212Mode: t212Mode as 'demo' | 'live' }))
+    setKeysForm((f) => ({
+      ...f,
+      anthropicApiKey: '',
+      t212KeyId: '',
+      t212KeySecret: '',
+      t212Mode: t212Mode as 'demo' | 'live',
+    }))
   }
 
   async function search(q: string) {
-    if (q.length < 1) { setSearchResults([]); return }
+    if (q.length < 1) {
+      setSearchResults([])
+      return
+    }
     setSearching(true)
     try {
       const res = await api.instruments.search(q)
@@ -348,7 +398,14 @@ export default function ConfigPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 24,
+        }}
+      >
         <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Config</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-secondary" onClick={reset} disabled={!isChanged || saving}>
@@ -391,16 +448,24 @@ export default function ConfigPage() {
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div className="section-label">engine</div>
-            <span style={{
-              fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 500,
-              background: t212Mode === 'live' ? 'rgba(220,38,38,0.1)' : 'rgba(22,163,74,0.12)',
-              color: t212Mode === 'live' ? '#dc2626' : '#16a34a',
-            }}>
+            <span
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                fontWeight: 500,
+                background: t212Mode === 'live' ? 'rgba(220,38,38,0.1)' : 'rgba(22,163,74,0.12)',
+                color: t212Mode === 'live' ? '#dc2626' : '#16a34a',
+              }}
+            >
               {t212Mode}
             </span>
           </div>
 
-          <Field label="Cycle interval" hint="How often the engine runs a full analysis and decision cycle">
+          <Field
+            label="Cycle interval"
+            hint="How often the engine runs a full analysis and decision cycle"
+          >
             <DurationInput
               ms={draft.tradeIntervalMs}
               onChange={(ms) => setDraft({ ...draft, tradeIntervalMs: ms })}
@@ -410,7 +475,9 @@ export default function ConfigPage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div
+        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}
+      >
         <ExitRuleCard
           label="stop-loss"
           value={draft.stopLossPct}
@@ -447,22 +514,37 @@ export default function ConfigPage() {
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: draft.stagnantExitEnabled ? 20 : 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: draft.stagnantExitEnabled ? 20 : 0,
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div className="section-label">stagnant exit</div>
             <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
               sell flat positions held past threshold
             </span>
           </div>
-          <Toggle value={draft.stagnantExitEnabled} onChange={(v) => setDraft({ ...draft, stagnantExitEnabled: v })} />
+          <Toggle
+            value={draft.stagnantExitEnabled}
+            onChange={(v) => setDraft({ ...draft, stagnantExitEnabled: v })}
+          />
         </div>
 
         {draft.stagnantExitEnabled && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Field label="Sell if held for longer than" hint="Position must be near break-even to trigger">
+            <Field
+              label="Sell if held for longer than"
+              hint="Position must be near break-even to trigger"
+            >
               <DurationInput
                 ms={draft.stagnantTimeMinutes * 60_000}
-                onChange={(ms) => setDraft({ ...draft, stagnantTimeMinutes: Math.round(ms / 60_000) })}
+                onChange={(ms) =>
+                  setDraft({ ...draft, stagnantTimeMinutes: Math.round(ms / 60_000) })
+                }
                 min={1}
                 units={['minutes', 'hours']}
               />
@@ -493,16 +575,29 @@ export default function ConfigPage() {
             <div
               key={ticker}
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                height: 28, padding: '0 10px 0 12px', borderRadius: 9999,
-                border: '0.5px solid var(--color-border)', background: 'var(--color-bg-page)',
-                fontSize: 12, fontFamily: 'var(--font-code)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                height: 28,
+                padding: '0 10px 0 12px',
+                borderRadius: 9999,
+                border: '0.5px solid var(--color-border)',
+                background: 'var(--color-bg-page)',
+                fontSize: 12,
+                fontFamily: 'var(--font-code)',
               }}
             >
               {ticker}
               <button
                 onClick={() => removeTicker(ticker)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex', padding: 1 }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--color-text-muted)',
+                  display: 'flex',
+                  padding: 1,
+                }}
               >
                 <X size={11} />
               </button>
@@ -512,7 +607,16 @@ export default function ConfigPage() {
 
         <div style={{ position: 'relative', maxWidth: 360 }}>
           <div style={{ position: 'relative' }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }} />
+            <Search
+              size={13}
+              style={{
+                position: 'absolute',
+                left: 10,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--color-text-muted)',
+              }}
+            />
             <input
               className="input"
               style={{ paddingLeft: 30 }}
@@ -528,34 +632,86 @@ export default function ConfigPage() {
             />
           </div>
           {searchResults.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, marginTop: 4, background: 'var(--color-bg-page)', border: '0.5px solid var(--color-border)', borderRadius: 6, overflow: 'hidden' }}>
+            <div
+              style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                zIndex: 10,
+                marginTop: 4,
+                background: 'var(--color-bg-page)',
+                border: '0.5px solid var(--color-border)',
+                borderRadius: 6,
+                overflow: 'hidden',
+              }}
+            >
               {searchResults.map((inst) => (
                 <div
                   key={inst.ticker}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', cursor: 'pointer', borderBottom: '0.5px solid var(--color-border)', fontSize: 13 }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    borderBottom: '0.5px solid var(--color-border)',
+                    fontSize: 13,
+                  }}
                   onMouseDown={() => addTicker(inst.ticker)}
                 >
                   <div>
-                    <span style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>{inst.ticker}</span>
-                    <span style={{ color: 'var(--color-text-muted)', marginLeft: 8, fontSize: 12 }}>{inst.name}</span>
+                    <span style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
+                      {inst.ticker}
+                    </span>
+                    <span style={{ color: 'var(--color-text-muted)', marginLeft: 8, fontSize: 12 }}>
+                      {inst.name}
+                    </span>
                   </div>
                   <Plus size={13} style={{ color: 'var(--color-text-muted)' }} />
                 </div>
               ))}
             </div>
           )}
-          {searching && <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>Searching...</div>}
+          {searching && (
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 6 }}>
+              Searching...
+            </div>
+          )}
         </div>
       </div>
 
       <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 16,
+          }}
+        >
           <div className="section-label">api keys</div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: hasAnthropicKey ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)', color: hasAnthropicKey ? '#16a34a' : '#dc2626' }}>
+            <span
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: hasAnthropicKey ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
+                color: hasAnthropicKey ? '#16a34a' : '#dc2626',
+              }}
+            >
               Anthropic {hasAnthropicKey ? '✓' : 'not set'}
             </span>
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: hasT212Key ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)', color: hasT212Key ? '#16a34a' : '#dc2626' }}>
+            <span
+              style={{
+                fontSize: 11,
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: hasT212Key ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
+                color: hasT212Key ? '#16a34a' : '#dc2626',
+              }}
+            >
               T212 {hasT212Key ? '✓' : 'not set'}
             </span>
           </div>
@@ -608,7 +764,11 @@ export default function ConfigPage() {
                   type="button"
                   className={`btn ${keysForm.t212Mode === m ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => setKeysForm((f) => ({ ...f, t212Mode: m }))}
-                  style={m === 'live' && keysForm.t212Mode === 'live' ? { background: '#dc2626', borderColor: '#dc2626' } : {}}
+                  style={
+                    m === 'live' && keysForm.t212Mode === 'live'
+                      ? { background: '#dc2626', borderColor: '#dc2626' }
+                      : {}
+                  }
                 >
                   {m}
                 </button>

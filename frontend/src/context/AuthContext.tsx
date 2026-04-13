@@ -1,10 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  type ReactNode,
-} from 'react'
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
 export interface AuthUser {
   userId: string

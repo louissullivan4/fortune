@@ -94,9 +94,15 @@ class RequestQueue {
         const rlWait = this.rateLimitedUntil - Date.now()
         if (rlWait > 0) await new Promise((r) => setTimeout(r, rlWait))
 
-        if (this.limitRemaining !== null && this.limitRemaining <= 0 && this.limitResetAt > Date.now()) {
+        if (
+          this.limitRemaining !== null &&
+          this.limitRemaining <= 0 &&
+          this.limitResetAt > Date.now()
+        ) {
           const resetWait = this.limitResetAt - Date.now() + 200
-          console.log(`[t212] Rate limit capacity exhausted — waiting ${Math.round(resetWait / 1_000)}s for window reset`)
+          console.log(
+            `[t212] Rate limit capacity exhausted — waiting ${Math.round(resetWait / 1_000)}s for window reset`
+          )
           await new Promise((r) => setTimeout(r, resetWait))
           this.limitRemaining = null
         }
