@@ -257,7 +257,8 @@ export class Trading212Client {
   }
 
   async getOrderHistory(): Promise<T212Order[]> {
-    return this.apiFetch<T212Order[]>('/equity/history/orders?limit=50')
+    const response = await this.apiFetch<{ items: T212Order[] }>('/equity/history/orders?limit=50')
+    return response.items
   }
 
   // ── Portfolio snapshot (with short-lived cache) ───────────────────────────

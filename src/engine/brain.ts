@@ -88,7 +88,7 @@ function buildSystemPrompt(userConfig: UserConfig): string {
 
 HARD RULES — you must never violate these:
 - Never spend more than €${userConfig.maxBudgetEur} total cash on a single buy order
-- Never invest more than €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)} in a single stock
+- Never invest more than €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)} in a single stock — always use fractional shares to stay within this limit (e.g. if a stock costs €150 and your cap is €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)}, buy ${(userConfig.maxBudgetEur * userConfig.maxPositionPct / 150).toFixed(2)} shares)
 - Never buy a stock you already hold a position in — one position per ticker maximum
 - Always keep at least €5 in cash as a buffer
 - Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself

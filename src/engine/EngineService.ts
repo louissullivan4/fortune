@@ -35,6 +35,14 @@ export interface EngineStatus {
   userId: string
 }
 
+// ── Constants ─────────────────────────────────────────────────────────────
+
+const CASH_BUFFER_EUR = 5
+const MIN_DEPLOYABLE_EUR = 6
+const TICKER_COOLDOWN_MS = 20 * 60 * 1_000
+const TRAIL_ACTIVATION_PCT = 0.5
+const TRAIL_STOP_PCT = 0.4
+
 // ── Signal fingerprinting ──────────────────────────────────────────────────
 
 interface SignalFingerprint {
@@ -50,8 +58,9 @@ function pplBucket(pctChange: number): string {
   return 'profit'
 }
 
-function computeSignalFingerprint(signals: TickerSignal[]): string {
-  return signals
+function computeSignalFingerprint(signals: TickerSignal[], freeCash: number): string {
+  const cashBucket = freeCash < CASH_BUFFER_EUR + MIN_DEPLOYABLE_EUR ? 'c:low' : 'c:ok'
+  const signalPart = signals
     .filter((s) => s.signal !== 'hold' || s.heldPosition)
     .map((s) => {
       const heldPart = s.heldPosition
@@ -61,6 +70,7 @@ function computeSignalFingerprint(signals: TickerSignal[]): string {
     })
     .sort()
     .join('|')
+  return `${cashBucket}|${signalPart}`
 }
 
 // ── Per-user EngineService ─────────────────────────────────────────────────
@@ -79,6 +89,7 @@ export class EngineService {
   private _sessionCashCommitted = 0
   private _lastKnownFreeCash: number | null = null
   private _cycleRunning = false
+  private _recentlyClosedTickers = new Map<string, number>()
 
   constructor(
     public readonly userId: string,
@@ -180,6 +191,19 @@ export class EngineService {
     return { ...snapshot, cash: { ...snapshot.cash, free: effectiveFree } }
   }
 
+  // ── Ticker cooldown ─────────────────────────────────────────────────────
+
+  private _recordTickerClose(ticker: string): void {
+    this._recentlyClosedTickers.set(ticker, Date.now())
+  }
+
+  private _purgeStaleCooldowns(): void {
+    const cutoff = Date.now() - TICKER_COOLDOWN_MS
+    for (const [ticker, closedAt] of this._recentlyClosedTickers) {
+      if (closedAt < cutoff) this._recentlyClosedTickers.delete(ticker)
+    }
+  }
+
   // ── Hard exit check ─────────────────────────────────────────────────────
 
   private async _checkHardExits(
@@ -191,8 +215,6 @@ export class EngineService {
 
     let exitsPlaced = 0
     const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId)
-    const TRAIL_ACTIVATION_PCT = 1.5
-    const TRAIL_STOP_PCT = 3.0
 
     const seenTickers = new Set<string>()
     for (const pos of openPositions) {
@@ -252,6 +274,7 @@ export class EngineService {
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
         await closeAllAiPositions(pos.ticker, live.currentPrice, timestamp, this.userId)
+        this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         await logOrder({
           decisionId,
@@ -317,7 +340,10 @@ export class EngineService {
         Math.abs(pctFromEntry) < this.userConfig.stagnantRangePct * 100
       const atBreakEven = currentPrice >= pos.entryPrice
 
-      if (!isStagnant || !atBreakEven) continue
+      const hwm = pos.highWaterMark ?? pos.entryPrice
+      const positionRanUp = hwm > pos.entryPrice * (1 + this.userConfig.stagnantRangePct)
+
+      if (!isStagnant || !atBreakEven || positionRanUp) continue
 
       const sellQty = live.quantity
       const risk = await validateOrder(
@@ -350,6 +376,7 @@ export class EngineService {
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
         await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId)
+        this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         await logOrder({
           decisionId,
@@ -388,6 +415,7 @@ export class EngineService {
     const dateStr = now.toISOString().slice(0, 10)
     const timestamp = now.toISOString()
 
+    this._purgeStaleCooldowns()
     console.log(`\n[engine:${this.userId}] ${timestamp} — running cycle`)
 
     const snapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
@@ -429,8 +457,13 @@ export class EngineService {
     const manualTickers = new Set(
       snapshot.positions.map((p) => p.ticker).filter((t) => !botTickers.has(t))
     )
+    const coolingTickers = new Set(
+      [...this._recentlyClosedTickers.keys()].filter(
+        (t) => Date.now() - (this._recentlyClosedTickers.get(t) ?? 0) < TICKER_COOLDOWN_MS
+      )
+    )
     const buyUniverse = this.userConfig.tradeUniverse.filter(
-      (t) => !botTickers.has(t) && !manualTickers.has(t)
+      (t) => !botTickers.has(t) && !manualTickers.has(t) && !coolingTickers.has(t)
     )
     if (botTickers.size > 0) {
       console.log(
@@ -440,6 +473,11 @@ export class EngineService {
     if (manualTickers.size > 0) {
       console.log(
         `[engine:${this.userId}] Excluding manually held tickers from buy universe: ${[...manualTickers].join(', ')}`
+      )
+    }
+    if (coolingTickers.size > 0) {
+      console.log(
+        `[engine:${this.userId}] Cooling down tickers (recently closed): ${[...coolingTickers].join(', ')}`
       )
     }
     const signals = generateSignals(buyUniverse, histories, botPositions)
@@ -467,7 +505,7 @@ export class EngineService {
       console.log(`[engine:${this.userId}] No stagnant exits triggered`)
     }
 
-    const currentFingerprint = computeSignalFingerprint(signals)
+    const currentFingerprint = computeSignalFingerprint(signals, snapshot.cash.free)
     const lastState = this._lastSignalState
     const shouldSkipAi =
       lastState !== null &&
@@ -475,7 +513,28 @@ export class EngineService {
       lastState.fingerprint === currentFingerprint
 
     if (shouldSkipAi) {
-      console.log(`[engine:${this.userId}] Signals unchanged since last hold — skipping AI call`)
+      console.log(`[engine:${this.userId}] Signals + cash unchanged since last hold — skipping AI call`)
+      return
+    }
+
+    const deployable = snapshot.cash.free - CASH_BUFFER_EUR
+    if (deployable < MIN_DEPLOYABLE_EUR) {
+      const reason = `Cash-constrained hold: €${snapshot.cash.free.toFixed(2)} free, €${deployable.toFixed(2)} deployable after €${CASH_BUFFER_EUR} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
+      console.log(`[engine:${this.userId}] ${reason}`)
+      await logDecision({
+        timestamp,
+        action: 'hold',
+        ticker: null,
+        quantity: null,
+        estimatedPrice: null,
+        reasoning: reason,
+        signalsJson: JSON.stringify(
+          signals.map((s) => ({ ticker: s.ticker, signal: s.signal, reasons: s.reasons }))
+        ),
+        portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, aiValue, cash: snapshot.cash.free }),
+        userId: this.userId,
+      })
+      this._lastSignalState = { fingerprint: currentFingerprint, lastDecisionAction: 'hold' }
       return
     }
 
@@ -579,6 +638,7 @@ export class EngineService {
           )
         } else if (decision.action === 'sell') {
           await closeAllAiPositions(decision.ticker, estimatedPrice, timestamp, this.userId)
+          this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
         console.log(`[engine:${this.userId}] Order placed: ${orderResult.id} (${orderResult.status})`)
