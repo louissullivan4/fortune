@@ -9,52 +9,95 @@ const NYSE_HOLIDAYS = new Set([
   '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24',
 ])
 
-const MARKETS = [
-  { name: 'NYSE', openH: 14, openM: 30, closeH: 21, closeM: 0, holidays: NYSE_HOLIDAYS },
-] as const
+const NYSE_OPEN_EASTERN_MINS = 9 * 60 + 30
+const NYSE_CLOSE_EASTERN_MINS = 16 * 60
 
-function utcDateString(d: Date): string {
-  return d.toISOString().slice(0, 10)
+function nyDateString(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+  }).format(date)
 }
 
-function isWeekday(d: Date) {
-  const day = d.getUTCDay()
-  return day >= 1 && day <= 5
+function nyMinutesOfDay(date: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0') % 24
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0')
+  return hour * 60 + minute
 }
 
-function isHoliday(m: (typeof MARKETS)[number], d: Date): boolean {
-  return m.holidays.has(utcDateString(d))
+function nyIsWeekday(date: Date): boolean {
+  const day = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+  }).format(date)
+  return day !== 'Sun' && day !== 'Sat'
 }
 
-function msUntilClose(m: (typeof MARKETS)[number], now: Date): number {
-  const t = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), m.closeH, m.closeM, 0)
-  )
-  return t.getTime() - now.getTime()
+function nyIsHoliday(date: Date): boolean {
+  return NYSE_HOLIDAYS.has(nyDateString(date))
 }
 
-function msUntilNextOpen(m: (typeof MARKETS)[number], now: Date): number {
-  if (isWeekday(now) && !isHoliday(m, now)) {
-    const todayOpen = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), m.openH, m.openM, 0)
-    )
-    if (todayOpen.getTime() > now.getTime()) {
-      return todayOpen.getTime() - now.getTime()
-    }
+function nyseOpenUtcTime(date: Date): Date {
+  const dateStr = nyDateString(date)
+  const ref = new Date(`${dateStr}T17:00:00Z`)
+  const refEasternHour =
+    parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        hour: '2-digit',
+        hourCycle: 'h23',
+      })
+        .formatToParts(ref)
+        .find(p => p.type === 'hour')?.value ?? '13',
+    ) % 24
+  const offsetHours = 17 - refEasternHour
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return new Date(`${dateStr}T09:30:00-${pad(offsetHours)}:00`)
+}
+
+function nyseCloseUtcTime(date: Date): Date {
+  const dateStr = nyDateString(date)
+  const ref = new Date(`${dateStr}T17:00:00Z`)
+  const refEasternHour =
+    parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        hour: '2-digit',
+        hourCycle: 'h23',
+      })
+        .formatToParts(ref)
+        .find(p => p.type === 'hour')?.value ?? '13',
+    ) % 24
+  const offsetHours = 17 - refEasternHour
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return new Date(`${dateStr}T16:00:00-${pad(offsetHours)}:00`)
+}
+
+function isNyseOpen(now: Date): boolean {
+  if (!nyIsWeekday(now) || nyIsHoliday(now)) return false
+  const mins = nyMinutesOfDay(now)
+  return mins >= NYSE_OPEN_EASTERN_MINS && mins < NYSE_CLOSE_EASTERN_MINS
+}
+
+function msUntilNextOpen(now: Date): number {
+  if (nyIsWeekday(now) && !nyIsHoliday(now)) {
+    const openTime = nyseOpenUtcTime(now)
+    if (openTime.getTime() > now.getTime()) return openTime.getTime() - now.getTime()
   }
-  const next = new Date(now)
-  next.setUTCDate(next.getUTCDate() + 1)
-  while (!isWeekday(next) || isHoliday(m, next)) next.setUTCDate(next.getUTCDate() + 1)
-  next.setUTCHours(m.openH, m.openM, 0, 0)
-  return next.getTime() - now.getTime()
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 12, 0, 0),
+  )
+  while (!nyIsWeekday(next) || nyIsHoliday(next)) next.setUTCDate(next.getUTCDate() + 1)
+  return nyseOpenUtcTime(next).getTime() - now.getTime()
 }
 
-function isOpen(m: (typeof MARKETS)[number], now: Date): boolean {
-  if (!isWeekday(now) || isHoliday(m, now)) return false
-  const mins = now.getUTCHours() * 60 + now.getUTCMinutes()
-  const open = m.openH * 60 + m.openM
-  const close = m.closeH * 60 + m.closeM
-  return mins >= open && mins < close
+function msUntilClose(now: Date): number {
+  return nyseCloseUtcTime(now).getTime() - now.getTime()
 }
 
 function fmtDuration(ms: number): string {
@@ -84,6 +127,9 @@ export default function MarketClock() {
     return () => clearInterval(t)
   }, [])
 
+  const open = isNyseOpen(now)
+  const ms = open ? msUntilClose(now) : msUntilNextOpen(now)
+
   return (
     <div
       style={{
@@ -97,7 +143,6 @@ export default function MarketClock() {
         fontSize: 12,
       }}
     >
-      {/* Clock */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
         <span
           style={{
@@ -118,50 +163,43 @@ export default function MarketClock() {
 
       <div style={{ width: 1, height: 28, background: 'var(--color-border)' }} />
 
-      {/* Markets */}
-      {MARKETS.map((m) => {
-        const open = isOpen(m, now)
-        const ms = open ? msUntilClose(m, now) : msUntilNextOpen(m, now)
-        return (
-          <div key={m.name} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: open ? '#16a34a' : 'var(--color-text-muted)',
-                  boxShadow: open ? '0 0 4px #16a34a88' : 'none',
-                }}
-              />
-              <span
-                style={{
-                  fontWeight: 500,
-                  color: open ? 'var(--color-text)' : 'var(--color-text-muted)',
-                }}
-              >
-                {m.name}
-              </span>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  padding: '1px 5px',
-                  borderRadius: 4,
-                  background: open ? 'rgba(22,163,74,0.12)' : 'var(--color-bg-surface)',
-                  color: open ? '#16a34a' : 'var(--color-text-muted)',
-                }}
-              >
-                {open ? 'OPEN' : 'CLOSED'}
-              </span>
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)', paddingLeft: 12 }}>
-              {open ? `closes in ${fmtDuration(ms)}` : `opens in ${fmtDuration(ms)}`}
-            </span>
-          </div>
-        )
-      })}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span
+            style={{
+              display: 'inline-block',
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: open ? '#16a34a' : 'var(--color-text-muted)',
+              boxShadow: open ? '0 0 4px #16a34a88' : 'none',
+            }}
+          />
+          <span
+            style={{
+              fontWeight: 500,
+              color: open ? 'var(--color-text)' : 'var(--color-text-muted)',
+            }}
+          >
+            NYSE
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: '1px 5px',
+              borderRadius: 4,
+              background: open ? 'rgba(22,163,74,0.12)' : 'var(--color-bg-surface)',
+              color: open ? '#16a34a' : 'var(--color-text-muted)',
+            }}
+          >
+            {open ? 'OPEN' : 'CLOSED'}
+          </span>
+        </div>
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted)', paddingLeft: 12 }}>
+          {open ? `closes in ${fmtDuration(ms)}` : `opens in ${fmtDuration(ms)}`}
+        </span>
+      </div>
     </div>
   )
 }

@@ -1,14 +1,3 @@
-// ── Market hours utilities ─────────────────────────────────────────────────
-
-interface MarketWindow {
-  name: string
-  openUtcHour: number
-  openUtcMin: number
-  closeUtcHour: number
-  closeUtcMin: number
-  holidays: Set<string>
-}
-
 const NYSE_HOLIDAYS = new Set([
   '2025-01-01', '2025-01-20', '2025-02-17', '2025-04-18', '2025-05-26',
   '2025-06-19', '2025-07-04', '2025-09-01', '2025-11-27', '2025-12-25',
@@ -18,56 +7,79 @@ const NYSE_HOLIDAYS = new Set([
   '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24',
 ])
 
-const MARKETS: MarketWindow[] = [
-  { name: 'NYSE', openUtcHour: 14, openUtcMin: 30, closeUtcHour: 21, closeUtcMin: 0, holidays: NYSE_HOLIDAYS },
-]
+const NYSE_OPEN_EASTERN_MINS = 9 * 60 + 30
+const NYSE_CLOSE_EASTERN_MINS = 16 * 60
 
-function isWeekday(date: Date): boolean {
-  const day = date.getUTCDay()
-  return day >= 1 && day <= 5
+function nyDateString(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+  }).format(date)
 }
 
-function toMinutes(hour: number, min: number): number {
-  return hour * 60 + min
+function nyMinutesOfDay(date: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0') % 24
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0')
+  return hour * 60 + minute
 }
 
-function utcDateString(date: Date): string {
-  return date.toISOString().slice(0, 10)
+function nyIsWeekday(date: Date): boolean {
+  const day = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+  }).format(date)
+  return day !== 'Sun' && day !== 'Sat'
+}
+
+function nyIsHoliday(date: Date): boolean {
+  return NYSE_HOLIDAYS.has(nyDateString(date))
+}
+
+function nyseOpenUtcTime(date: Date): Date {
+  const dateStr = nyDateString(date)
+  const ref = new Date(`${dateStr}T17:00:00Z`)
+  const refEasternHour =
+    parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        hour: '2-digit',
+        hourCycle: 'h23',
+      })
+        .formatToParts(ref)
+        .find(p => p.type === 'hour')?.value ?? '13',
+    ) % 24
+  const offsetHours = 17 - refEasternHour
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return new Date(`${dateStr}T09:30:00-${pad(offsetHours)}:00`)
 }
 
 export function isMarketOpen(): boolean {
   const now = new Date()
-  if (!isWeekday(now)) return false
-  const today = utcDateString(now)
-  const currentMins = toMinutes(now.getUTCHours(), now.getUTCMinutes())
-  return MARKETS.some((m) => {
-    if (m.holidays.has(today)) return false
-    const open = toMinutes(m.openUtcHour, m.openUtcMin)
-    const close = toMinutes(m.closeUtcHour, m.closeUtcMin)
-    return currentMins >= open && currentMins < close
-  })
+  if (!nyIsWeekday(now) || nyIsHoliday(now)) return false
+  const mins = nyMinutesOfDay(now)
+  return mins >= NYSE_OPEN_EASTERN_MINS && mins < NYSE_CLOSE_EASTERN_MINS
 }
 
 export function nextOpenMs(): number {
   const now = new Date()
-  const today = utcDateString(now)
 
-  for (const m of MARKETS) {
-    if (!m.holidays.has(today)) {
-      const openTime = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), m.openUtcHour, m.openUtcMin, 0, 0)
-      )
-      if (openTime.getTime() > now.getTime()) {
-        return openTime.getTime() - now.getTime()
-      }
+  if (nyIsWeekday(now) && !nyIsHoliday(now)) {
+    const openTime = nyseOpenUtcTime(now)
+    if (openTime.getTime() > now.getTime()) {
+      return openTime.getTime() - now.getTime()
     }
   }
 
-  const next = new Date(now)
-  next.setUTCDate(next.getUTCDate() + 1)
-  while (!isWeekday(next) || MARKETS[0].holidays.has(utcDateString(next))) {
+  const next = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 12, 0, 0),
+  )
+  while (!nyIsWeekday(next) || nyIsHoliday(next)) {
     next.setUTCDate(next.getUTCDate() + 1)
   }
-  next.setUTCHours(MARKETS[0].openUtcHour, MARKETS[0].openUtcMin, 0, 0)
-  return next.getTime() - now.getTime()
+  return nyseOpenUtcTime(next).getTime() - now.getTime()
 }
