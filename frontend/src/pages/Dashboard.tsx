@@ -202,7 +202,10 @@ export default function Dashboard() {
     try {
       const port = await api.portfolio.get()
       setPortfolio(port)
-      await fetchMissingNames(port.aiPositions.map((p) => p.ticker))
+      await fetchMissingNames([
+        ...port.aiPositions.map((p) => p.ticker),
+        ...port.manualPositions.map((p) => p.ticker),
+      ])
     } catch {
       // don't clobber the main error
     } finally {
@@ -224,8 +227,10 @@ export default function Dashboard() {
       setSnapshots(snaps.data)
       setDecisions(decs.data)
       setMaxBudget(cfg.maxBudgetEur)
-      // Fetch names immediately on initial load
-      fetchMissingNames(port.aiPositions.map((p) => p.ticker))
+      fetchMissingNames([
+        ...port.aiPositions.map((p) => p.ticker),
+        ...port.manualPositions.map((p) => p.ticker),
+      ])
     } catch (e) {
       setError((e as Error).message)
     }
@@ -376,7 +381,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* AI-tracked positions only */}
+        {/* Positions card — AI-tracked + manual */}
         <div className="card">
           <div
             style={{
@@ -504,6 +509,96 @@ export default function Dashboard() {
               No AI positions open
             </div>
           )}
+
+          {/* Manual positions */}
+          {portfolio?.manualPositions.length ? (
+            <>
+              <div
+                style={{
+                  borderTop: '0.5px solid var(--color-border)',
+                  margin: '16px 0 12px',
+                }}
+              />
+              <div className="section-label" style={{ marginBottom: 10 }}>
+                manual positions
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th style={{ textAlign: 'right' }}>Avg Entry</th>
+                    <th style={{ textAlign: 'right' }}>Current</th>
+                    <th style={{ textAlign: 'right' }}>P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolio.manualPositions.map((pos) => {
+                    const pct =
+                      pos.averagePrice > 0
+                        ? ((pos.currentPrice - pos.averagePrice) / pos.averagePrice) * 100
+                        : null
+                    const displayTicker = pos.ticker.replace(/_US_EQ$|_GB_EQ$|_EQ$/, '')
+                    const name = instrumentNames[pos.ticker]
+                    return (
+                      <tr key={pos.ticker}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
+                              {displayTicker}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 500,
+                                padding: '1px 5px',
+                                borderRadius: 9999,
+                                background: 'var(--color-bg-raised)',
+                                color: 'var(--color-text-muted)',
+                              }}
+                            >
+                              manual
+                            </span>
+                          </div>
+                          {name && name !== displayTicker && (
+                            <span
+                              style={{
+                                display: 'block',
+                                fontSize: 11,
+                                color: 'var(--color-text-muted)',
+                                marginTop: 1,
+                              }}
+                            >
+                              {name}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                          €{pos.averagePrice.toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                          €{pos.currentPrice.toFixed(2)}
+                        </td>
+                        <td
+                          style={{
+                            textAlign: 'right',
+                            color: pos.ppl >= 0 ? '#16a34a' : '#dc2626',
+                          }}
+                        >
+                          {pos.ppl >= 0 ? '+' : ''}€{pos.ppl.toFixed(2)}
+                          {pct != null && (
+                            <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>
+                              ({pct >= 0 ? '+' : ''}
+                              {pct.toFixed(1)}%)
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </>
+          ) : null}
         </div>
       </div>
 

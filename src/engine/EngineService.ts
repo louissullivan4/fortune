@@ -422,10 +422,20 @@ export class EngineService {
 
     const botTickers = new Set((await getOpenAiPositions(this.userId)).map((p) => p.ticker))
     const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
-    const buyUniverse = this.userConfig.tradeUniverse.filter((t) => !botTickers.has(t))
+    const manualTickers = new Set(
+      snapshot.positions.map((p) => p.ticker).filter((t) => !botTickers.has(t))
+    )
+    const buyUniverse = this.userConfig.tradeUniverse.filter(
+      (t) => !botTickers.has(t) && !manualTickers.has(t)
+    )
     if (botTickers.size > 0) {
       console.log(
-        `[engine:${this.userId}] Excluding held tickers from buy universe: ${[...botTickers].join(', ')}`
+        `[engine:${this.userId}] Excluding bot-held tickers from buy universe: ${[...botTickers].join(', ')}`
+      )
+    }
+    if (manualTickers.size > 0) {
+      console.log(
+        `[engine:${this.userId}] Excluding manually held tickers from buy universe: ${[...manualTickers].join(', ')}`
       )
     }
     const signals = generateSignals(buyUniverse, histories, botPositions)

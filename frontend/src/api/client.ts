@@ -133,6 +133,7 @@ export interface Portfolio {
   totalValue: number
   totalPpl: number
   aiPositions: AiPosition[]
+  manualPositions: T212Position[]
 }
 
 export interface Indicators {

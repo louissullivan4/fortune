@@ -24,8 +24,10 @@ router.get('/', async (req, res, next) => {
       t212.getPortfolioSnapshot(),
       getOpenAiPositions(req.user!.userId),
     ])
+    const botTickers = new Set(aiPositions.map((p) => p.ticker))
+    const manualPositions = snapshot.positions.filter((p) => !botTickers.has(p.ticker))
     hub.broadcast('portfolio_update', { totalValue: snapshot.totalValue })
-    res.json({ ...snapshot, aiPositions })
+    res.json({ ...snapshot, aiPositions, manualPositions })
   } catch (err) {
     next(err)
   }
