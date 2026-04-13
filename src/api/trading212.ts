@@ -65,7 +65,7 @@ export interface PortfolioSnapshot {
 // Tracks a global rate-limit window so that a 429 on any request
 // pauses the entire queue until the window expires.
 
-const MIN_INTERVAL_MS = 1_200 // safely under T212's ~1 req/sec limit
+const MIN_INTERVAL_MS = 7_000 // T212 demo rate limit is ~10 req/min; 7s gap = ~8/min safely under limit
 
 class RequestQueue {
   private queue: Array<() => Promise<void>> = []
@@ -115,6 +115,7 @@ export class Trading212Client {
   private _instrumentCache: Map<string, T212Instrument> | null = null
   private _snapshotCache: { data: PortfolioSnapshot; expiresAt: number } | null = null
   private _snapshotRefreshing = false
+  private _snapshotInFlight: Promise<PortfolioSnapshot> | null = null
 
   constructor(
     private keyId: string,
@@ -220,6 +221,7 @@ export class Trading212Client {
   invalidatePortfolioCache(): void {
     this._snapshotCache = null
     this._snapshotRefreshing = false
+    this._snapshotInFlight = null
   }
 
   async getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
@@ -252,15 +254,25 @@ export class Trading212Client {
       return this._snapshotCache.data
     }
 
-    const [positions, cash] = await Promise.all([this.getPortfolio(), this.getCash()])
-    const data: PortfolioSnapshot = {
-      cash,
-      positions,
-      totalValue: cash.free + cash.invested + cash.ppl,
-      totalPpl: cash.ppl,
-    }
-    this._snapshotCache = { data, expiresAt: Date.now() + SNAPSHOT_TTL_MS }
-    return data
+    // No cache — deduplicate concurrent cold-start callers onto a single in-flight fetch.
+    if (this._snapshotInFlight) return this._snapshotInFlight
+
+    this._snapshotInFlight = Promise.all([this.getPortfolio(), this.getCash()])
+      .then(([positions, cash]) => {
+        const data: PortfolioSnapshot = {
+          cash,
+          positions,
+          totalValue: cash.free + cash.invested + cash.ppl,
+          totalPpl: cash.ppl,
+        }
+        this._snapshotCache = { data, expiresAt: Date.now() + SNAPSHOT_TTL_MS }
+        return data
+      })
+      .finally(() => {
+        this._snapshotInFlight = null
+      })
+
+    return this._snapshotInFlight
   }
 }
 
