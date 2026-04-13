@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 
 const MARKETS = [
-  { name: 'LSE', openH: 8, openM: 0, closeH: 16, closeM: 30 },
   { name: 'NYSE', openH: 14, openM: 30, closeH: 21, closeM: 0 },
 ] as const
 

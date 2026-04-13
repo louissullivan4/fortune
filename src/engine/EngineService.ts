@@ -78,6 +78,7 @@ export class EngineService {
   private _lastSignalState: SignalFingerprint | null = null
   private _sessionCashCommitted = 0
   private _lastKnownFreeCash: number | null = null
+  private _cycleRunning = false
 
   constructor(
     public readonly userId: string,
@@ -421,11 +422,10 @@ export class EngineService {
 
     const botTickers = new Set((await getOpenAiPositions(this.userId)).map((p) => p.ticker))
     const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
-    const heldTickers = new Set(botPositions.map((p) => p.ticker))
-    const buyUniverse = this.userConfig.tradeUniverse.filter((t) => !heldTickers.has(t))
-    if (heldTickers.size > 0) {
+    const buyUniverse = this.userConfig.tradeUniverse.filter((t) => !botTickers.has(t))
+    if (botTickers.size > 0) {
       console.log(
-        `[engine:${this.userId}] Excluding held tickers from buy universe: ${[...heldTickers].join(', ')}`
+        `[engine:${this.userId}] Excluding held tickers from buy universe: ${[...botTickers].join(', ')}`
       )
     }
     const signals = generateSignals(buyUniverse, histories, botPositions)
@@ -596,6 +596,11 @@ export class EngineService {
   }
 
   private async _runCycle(): Promise<void> {
+    if (this._cycleRunning) {
+      console.log(`[engine:${this.userId}] Cycle already in progress — skipping`)
+      return
+    }
+    this._cycleRunning = true
     this._lastCycleAt = new Date().toISOString()
     try {
       await this._cycle()
@@ -604,6 +609,8 @@ export class EngineService {
       const msg = (err as Error).message
       console.error(`[engine:${this.userId}] Cycle error:`, msg)
       hub.broadcast('toast', { message: `Cycle error: ${msg}`, level: 'error' })
+    } finally {
+      this._cycleRunning = false
     }
     hub.broadcast('engine_status', this.status)
   }
