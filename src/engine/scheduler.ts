@@ -50,20 +50,24 @@ export function isMarketOpen(): boolean {
 
 export function nextOpenMs(): number {
   const now = new Date()
-  const todayMins = toMinutes(now.getUTCHours(), now.getUTCMinutes())
+  const today = utcDateString(now)
 
   for (const m of MARKETS) {
-    const open = toMinutes(m.openUtcHour, m.openUtcMin)
-    if (open > todayMins) {
-      return (open - todayMins) * 60 * 1000
+    if (!m.holidays.has(today)) {
+      const openTime = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), m.openUtcHour, m.openUtcMin, 0, 0)
+      )
+      if (openTime.getTime() > now.getTime()) {
+        return openTime.getTime() - now.getTime()
+      }
     }
   }
 
-  const tomorrow = new Date(now)
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
-  while (!isWeekday(tomorrow)) {
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+  const next = new Date(now)
+  next.setUTCDate(next.getUTCDate() + 1)
+  while (!isWeekday(next) || MARKETS[0].holidays.has(utcDateString(next))) {
+    next.setUTCDate(next.getUTCDate() + 1)
   }
-  tomorrow.setUTCHours(MARKETS[0].openUtcHour, MARKETS[0].openUtcMin, 0, 0)
-  return tomorrow.getTime() - now.getTime()
+  next.setUTCHours(MARKETS[0].openUtcHour, MARKETS[0].openUtcMin, 0, 0)
+  return next.getTime() - now.getTime()
 }

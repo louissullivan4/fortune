@@ -1,12 +1,29 @@
 import { useEffect, useState } from 'react'
 
+const NYSE_HOLIDAYS = new Set([
+  '2025-01-01', '2025-01-20', '2025-02-17', '2025-04-18', '2025-05-26',
+  '2025-06-19', '2025-07-04', '2025-09-01', '2025-11-27', '2025-12-25',
+  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
+  '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+  '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31',
+  '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24',
+])
+
 const MARKETS = [
-  { name: 'NYSE', openH: 14, openM: 30, closeH: 21, closeM: 0 },
+  { name: 'NYSE', openH: 14, openM: 30, closeH: 21, closeM: 0, holidays: NYSE_HOLIDAYS },
 ] as const
+
+function utcDateString(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
 
 function isWeekday(d: Date) {
   const day = d.getUTCDay()
   return day >= 1 && day <= 5
+}
+
+function isHoliday(m: (typeof MARKETS)[number], d: Date): boolean {
+  return m.holidays.has(utcDateString(d))
 }
 
 function msUntilClose(m: (typeof MARKETS)[number], now: Date): number {
@@ -17,23 +34,23 @@ function msUntilClose(m: (typeof MARKETS)[number], now: Date): number {
 }
 
 function msUntilNextOpen(m: (typeof MARKETS)[number], now: Date): number {
-  // Today's open (if still in future and it's a weekday)
-  const todayOpen = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), m.openH, m.openM, 0)
-  )
-  if (isWeekday(now) && todayOpen.getTime() > now.getTime()) {
-    return todayOpen.getTime() - now.getTime()
+  if (isWeekday(now) && !isHoliday(m, now)) {
+    const todayOpen = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), m.openH, m.openM, 0)
+    )
+    if (todayOpen.getTime() > now.getTime()) {
+      return todayOpen.getTime() - now.getTime()
+    }
   }
-  // Find next weekday
   const next = new Date(now)
   next.setUTCDate(next.getUTCDate() + 1)
-  while (!isWeekday(next)) next.setUTCDate(next.getUTCDate() + 1)
+  while (!isWeekday(next) || isHoliday(m, next)) next.setUTCDate(next.getUTCDate() + 1)
   next.setUTCHours(m.openH, m.openM, 0, 0)
   return next.getTime() - now.getTime()
 }
 
 function isOpen(m: (typeof MARKETS)[number], now: Date): boolean {
-  if (!isWeekday(now)) return false
+  if (!isWeekday(now) || isHoliday(m, now)) return false
   const mins = now.getUTCHours() * 60 + now.getUTCMinutes()
   const open = m.openH * 60 + m.openM
   const close = m.closeH * 60 + m.closeM
