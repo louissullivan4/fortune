@@ -4,20 +4,10 @@ import {
   api,
   type EngineStatus,
   type Portfolio,
-  type DailySnapshot,
   type Decision,
 } from '../api/client'
 import StatCard from '../components/StatCard'
 import MarketClock from '../components/MarketClock'
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts'
 
 function fmt(n: number | null | undefined, decimals = 2, prefix = '') {
   if (n == null) return '—'
@@ -161,7 +151,6 @@ function EngineCard({
 export default function Dashboard() {
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
-  const [snapshots, setSnapshots] = useState<DailySnapshot[]>([])
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [maxBudget, setMaxBudget] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -215,16 +204,14 @@ export default function Dashboard() {
 
   const loadData = useCallback(async () => {
     try {
-      const [status, port, snaps, decs, cfg] = await Promise.all([
+      const [status, port, decs, cfg] = await Promise.all([
         api.engine.status(),
         api.portfolio.get(),
-        api.analytics.snapshots(30),
         api.decisions.list(1, 10),
         api.config.get(),
       ])
       setEngineStatus(status)
       setPortfolio(port)
-      setSnapshots(snaps.data)
       setDecisions(decs.data)
       setMaxBudget(cfg.maxBudgetEur)
       fetchMissingNames([
@@ -283,11 +270,6 @@ export default function Dashboard() {
     const budgetRemaining = maxBudget != null ? maxBudget - invested : null
     return { invested, currentValue, pnl, budgetRemaining }
   })()
-  const snapshotData = snapshots.map((s) => ({
-    date: s.date.slice(5), // MM-DD
-    value: Number(s.value.toFixed(2)),
-  }))
-
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
@@ -324,64 +306,7 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
-        {/* Portfolio chart */}
-        <div className="card">
-          <div className="section-label" style={{ marginBottom: 16 }}>
-            AI portfolio value — 30d
-          </div>
-          {snapshotData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={160}>
-              <LineChart data={snapshotData}>
-                <CartesianGrid vertical={false} stroke="var(--color-border)" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v) => `€${v}`}
-                  width={48}
-                />
-                <Tooltip
-                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'Value']}
-                  contentStyle={{
-                    background: 'var(--color-bg-surface)',
-                    border: '0.5px solid var(--color-border)',
-                    borderRadius: 6,
-                    fontSize: 12,
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke="var(--color-accent)"
-                  strokeWidth={1.5}
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div
-              style={{
-                height: 160,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--color-text-muted)',
-                fontSize: 13,
-              }}
-            >
-              No snapshot data yet
-            </div>
-          )}
-        </div>
-
-        {/* Positions card — AI-tracked + manual */}
+        {/* AI positions */}
         <div className="card">
           <div
             style={{
@@ -410,16 +335,8 @@ export default function Dashboard() {
           </div>
           {portfolio?.aiPositions.length ? (
             (() => {
-              // Aggregate multiple lots of the same ticker into one row
               const grouped = portfolio.aiPositions.reduce<
-                Record<
-                  string,
-                  {
-                    ticker: string
-                    totalQty: number
-                    weightedEntrySum: number
-                  }
-                >
+                Record<string, { ticker: string; totalQty: number; weightedEntrySum: number }>
               >((acc, ai) => {
                 if (!acc[ai.ticker])
                   acc[ai.ticker] = { ticker: ai.ticker, totalQty: 0, weightedEntrySum: 0 }
@@ -427,7 +344,6 @@ export default function Dashboard() {
                 acc[ai.ticker].weightedEntrySum += (ai.entryPrice ?? 0) * ai.quantity
                 return acc
               }, {})
-
               return (
                 <table className="table">
                   <thead>
@@ -509,96 +425,80 @@ export default function Dashboard() {
               No AI positions open
             </div>
           )}
+        </div>
 
-          {/* Manual positions */}
+        {/* Manual positions */}
+        <div className="card">
+          <div className="section-label" style={{ marginBottom: 12 }}>
+            manual positions
+          </div>
           {portfolio?.manualPositions.length ? (
-            <>
-              <div
-                style={{
-                  borderTop: '0.5px solid var(--color-border)',
-                  margin: '16px 0 12px',
-                }}
-              />
-              <div className="section-label" style={{ marginBottom: 10 }}>
-                manual positions
-              </div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Ticker</th>
-                    <th style={{ textAlign: 'right' }}>Avg Entry</th>
-                    <th style={{ textAlign: 'right' }}>Current</th>
-                    <th style={{ textAlign: 'right' }}>P&L</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {portfolio.manualPositions.map((pos) => {
-                    const pct =
-                      pos.averagePrice > 0
-                        ? ((pos.currentPrice - pos.averagePrice) / pos.averagePrice) * 100
-                        : null
-                    const displayTicker = pos.ticker.replace(/_US_EQ$|_GB_EQ$|_EQ$/, '')
-                    const name = instrumentNames[pos.ticker]
-                    return (
-                      <tr key={pos.ticker}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
-                              {displayTicker}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 500,
-                                padding: '1px 5px',
-                                borderRadius: 9999,
-                                background: 'var(--color-bg-raised)',
-                                color: 'var(--color-text-muted)',
-                              }}
-                            >
-                              manual
-                            </span>
-                          </div>
-                          {name && name !== displayTicker && (
-                            <span
-                              style={{
-                                display: 'block',
-                                fontSize: 11,
-                                color: 'var(--color-text-muted)',
-                                marginTop: 1,
-                              }}
-                            >
-                              {name}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                          €{pos.averagePrice.toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                          €{pos.currentPrice.toFixed(2)}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: 'right',
-                            color: pos.ppl >= 0 ? '#16a34a' : '#dc2626',
-                          }}
-                        >
-                          {pos.ppl >= 0 ? '+' : ''}€{pos.ppl.toFixed(2)}
-                          {pct != null && (
-                            <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>
-                              ({pct >= 0 ? '+' : ''}
-                              {pct.toFixed(1)}%)
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </>
-          ) : null}
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th style={{ textAlign: 'right' }}>Avg Entry</th>
+                  <th style={{ textAlign: 'right' }}>Current</th>
+                  <th style={{ textAlign: 'right' }}>P&L</th>
+                </tr>
+              </thead>
+              <tbody>
+                {portfolio.manualPositions.map((pos) => {
+                  const pct =
+                    pos.averagePrice > 0
+                      ? ((pos.currentPrice - pos.averagePrice) / pos.averagePrice) * 100
+                      : null
+                  const displayTicker = pos.ticker.replace(/_US_EQ$|_GB_EQ$|_EQ$/, '')
+                  const name = instrumentNames[pos.ticker]
+                  return (
+                    <tr key={pos.ticker}>
+                      <td>
+                        <span style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
+                          {displayTicker}
+                        </span>
+                        {name && name !== displayTicker && (
+                          <span
+                            style={{
+                              display: 'block',
+                              fontSize: 11,
+                              color: 'var(--color-text-muted)',
+                              marginTop: 1,
+                            }}
+                          >
+                            {name}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                        €{pos.averagePrice.toFixed(2)}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                        €{pos.currentPrice.toFixed(2)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          color: pos.ppl >= 0 ? '#16a34a' : '#dc2626',
+                        }}
+                      >
+                        {pos.ppl >= 0 ? '+' : ''}€{pos.ppl.toFixed(2)}
+                        {pct != null && (
+                          <span style={{ fontSize: 11, marginLeft: 4, opacity: 0.8 }}>
+                            ({pct >= 0 ? '+' : ''}
+                            {pct.toFixed(1)}%)
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ fontSize: 13, color: 'var(--color-text-muted)', paddingTop: 8 }}>
+              No manual positions
+            </div>
+          )}
         </div>
       </div>
 

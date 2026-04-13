@@ -114,6 +114,7 @@ export class Trading212Client {
   private q = new RequestQueue()
   private _instrumentCache: Map<string, T212Instrument> | null = null
   private _snapshotCache: { data: PortfolioSnapshot; expiresAt: number } | null = null
+  private _snapshotRefreshing = false
 
   constructor(
     private keyId: string,
@@ -218,13 +219,39 @@ export class Trading212Client {
 
   invalidatePortfolioCache(): void {
     this._snapshotCache = null
+    this._snapshotRefreshing = false
   }
 
   async getPortfolioSnapshot(): Promise<PortfolioSnapshot> {
-    const SNAPSHOT_TTL_MS = 60_000 // 1 minute — reduces T212 calls significantly
+    const SNAPSHOT_TTL_MS = 60_000
+
     if (this._snapshotCache && Date.now() < this._snapshotCache.expiresAt) {
       return this._snapshotCache.data
     }
+
+    // Stale-while-revalidate: return expired cache immediately, refresh in background.
+    // Only blocks when there is no cache at all (cold start or post-order invalidation).
+    if (this._snapshotCache) {
+      if (!this._snapshotRefreshing) {
+        this._snapshotRefreshing = true
+        Promise.all([this.getPortfolio(), this.getCash()])
+          .then(([positions, cash]) => {
+            const data: PortfolioSnapshot = {
+              cash,
+              positions,
+              totalValue: cash.free + cash.invested + cash.ppl,
+              totalPpl: cash.ppl,
+            }
+            this._snapshotCache = { data, expiresAt: Date.now() + SNAPSHOT_TTL_MS }
+          })
+          .catch(() => {})
+          .finally(() => {
+            this._snapshotRefreshing = false
+          })
+      }
+      return this._snapshotCache.data
+    }
+
     const [positions, cash] = await Promise.all([this.getPortfolio(), this.getCash()])
     const data: PortfolioSnapshot = {
       cash,
