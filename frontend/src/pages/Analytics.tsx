@@ -37,8 +37,11 @@ const COLOR_GREEN = '#16a34a'
 const COLOR_RED = '#dc2626'
 const COLOR_ACCENT = '#2563eb'
 
-type Range = '1W' | '1M' | '3M' | 'All'
-const RANGE_DAYS: Record<Range, number | null> = { '1W': 7, '1M': 30, '3M': 90, All: null }
+type Range = 'Today' | '1W' | '1M' | '3M' | 'All'
+const RANGE_DAYS: Record<Range, number | null> = { Today: 1, '1W': 7, '1M': 30, '3M': 90, All: null }
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function sliceDays<T>(arr: T[], days: number | null): T[] {
   return days == null ? arr : arr.slice(-days)
@@ -53,40 +56,82 @@ function fmtPct(v: number | null | undefined) {
 }
 
 function dateLabel(date: string) {
-  return date.slice(5)
+  return date.slice(5, 10)
 }
 
-function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
-  const options: Range[] = ['1W', '1M', '3M', 'All']
+function fmtUsdAxis(v: number): string {
+  if (v === 0) return '$0'
+  if (v < 0.001) return `$${v.toFixed(5)}`
+  if (v < 0.01) return `$${v.toFixed(4)}`
+  return `$${parseFloat(v.toFixed(3))}`
+}
+
+function fmtEurAxis(v: number): string {
+  if (v === 0) return '€0'
+  if (Math.abs(v) >= 1000) return `€${(v / 1000).toFixed(1)}k`
+  return `€${parseFloat(v.toFixed(2))}`
+}
+
+function RangeSelector({
+  value,
+  onChange,
+  pickedDate,
+  onPickDate,
+}: {
+  value: Range
+  onChange: (r: Range) => void
+  pickedDate: string | null
+  onPickDate: (d: string | null) => void
+}) {
+  const options: Range[] = ['Today', '1W', '1M', '3M', 'All']
   return (
-    <div
-      style={{
-        display: 'flex',
-        border: '0.5px solid var(--color-border)',
-        borderRadius: 4,
-        overflow: 'hidden',
-      }}
-    >
-      {options.map((r, i) => (
-        <button
-          key={r}
-          onClick={() => onChange(r)}
-          style={{
-            height: 28,
-            padding: '0 12px',
-            border: 'none',
-            borderRight: i < options.length - 1 ? '0.5px solid var(--color-border)' : 'none',
-            background: value === r ? 'var(--color-bg-raised)' : 'transparent',
-            color: value === r ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-            fontSize: 12,
-            fontWeight: value === r ? 500 : 400,
-            cursor: 'pointer',
-            transition: 'background 150ms ease, color 150ms ease',
-          }}
-        >
-          {r}
-        </button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          border: '0.5px solid var(--color-border)',
+          borderRadius: 4,
+          overflow: 'hidden',
+        }}
+      >
+        {options.map((r, i) => (
+          <button
+            key={r}
+            onClick={() => { onChange(r); onPickDate(null) }}
+            style={{
+              height: 28,
+              padding: '0 12px',
+              border: 'none',
+              borderRight: i < options.length - 1 ? '0.5px solid var(--color-border)' : 'none',
+              background: value === r && pickedDate === null ? 'var(--color-bg-raised)' : 'transparent',
+              color: value === r && pickedDate === null ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+              fontSize: 12,
+              fontWeight: value === r && pickedDate === null ? 500 : 400,
+              cursor: 'pointer',
+              transition: 'background 150ms ease, color 150ms ease',
+            }}
+          >
+            {r}
+          </button>
       ))}
+      </div>
+      <input
+        type="date"
+        value={pickedDate ?? ''}
+        max={localDateStr(new Date())}
+        onChange={(e) => onPickDate(e.target.value || null)}
+        style={{
+          height: 28,
+          padding: '0 8px',
+          border: `0.5px solid ${pickedDate ? 'var(--color-accent)' : 'var(--color-border)'}`,
+          borderRadius: 4,
+          background: 'var(--color-bg-surface)',
+          color: pickedDate ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+          fontSize: 12,
+          cursor: 'pointer',
+          outline: 'none',
+        }}
+      />
     </div>
   )
 }
@@ -128,8 +173,11 @@ function Empty() {
   )
 }
 
+const PAGE_SIZE = 10
+
 export default function Analytics() {
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [posPage, setPosPage] = useState(1)
   const [performance, setPerformance] = useState<Performance | null>(null)
   const [snapshots, setSnapshots] = useState<DailySnapshot[]>([])
   const [dailyStats, setDailyStats] = useState<DailyStatsPoint[]>([])
@@ -138,7 +186,11 @@ export default function Analytics() {
   )
   const [aiCost, setAiCost] = useState<AiCostResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [range, setRange] = useState<Range>('1M')
+  const [range, setRange] = useState<Range>('Today')
+  const [pickedDate, setPickedDate] = useState<string | null>(null)
+
+  function handleRangeChange(r: Range) { setRange(r); setPosPage(1) }
+  function handlePickDate(d: string | null) { setPickedDate(d); setPosPage(1) }
 
   useEffect(() => {
     Promise.all([
@@ -161,49 +213,161 @@ export default function Analytics() {
       .finally(() => setLoading(false))
   }, [])
 
-  const days = RANGE_DAYS[range]
   const closedPositions = useMemo(() => positions?.closed ?? [], [positions])
+  const isHourlyMode = range === 'Today' || pickedDate !== null
+
+  const rangeCutoff: number | null = (() => {
+    if (pickedDate !== null) return null
+    switch (range) {
+      case 'Today': return Date.now() - 24 * 3600 * 1000
+      case '1W': return Date.now() - 7 * 24 * 3600 * 1000
+      case '1M': return Date.now() - 30 * 24 * 3600 * 1000
+      case '3M': return Date.now() - 90 * 24 * 3600 * 1000
+      case 'All': return null
+    }
+  })()
+
+  function inWindow(dateStr: string): boolean {
+    const d = new Date(dateStr)
+    if (pickedDate !== null) return localDateStr(d) === pickedDate
+    return rangeCutoff === null || d.getTime() >= rangeCutoff
+  }
+
+  function inWindowDate(dateStr: string): boolean {
+    const d = new Date(dateStr)
+    if (pickedDate !== null) return localDateStr(d) === pickedDate
+    if (rangeCutoff === null) return true
+    const endOfDay = d.getTime() + 24 * 3600 * 1000
+    return endOfDay > rangeCutoff
+  }
+
+  function hKey(isoDate: string): string {
+    const d = new Date(isoDate)
+    return `${localDateStr(d)}T${String(d.getHours()).padStart(2, '0')}`
+  }
+
+  function hLabel(key: string): string {
+    return `${key.slice(11)}:00`
+  }
+
+  const periodLabel = pickedDate
+    ? new Date(`${pickedDate}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    : range === 'All' ? 'all-time' : range === 'Today' ? 'last 24h' : range
+
+  const filteredClosedPositions = useMemo(
+    () => closedPositions.filter((p) => p.closedAt && inWindow(p.closedAt)),
+    [closedPositions, pickedDate, range]
+  )
+
+  const filteredAiDays = useMemo(
+    () => (aiCost?.byDay ?? []).filter((d) => inWindowDate(d.date)),
+    [aiCost, pickedDate, range]
+  )
+
+  const filteredStats = useMemo(() => {
+    const wins = filteredClosedPositions.filter((p) => (p.realizedPnl ?? 0) > 0)
+    const losses = filteredClosedPositions.filter((p) => (p.realizedPnl ?? 0) < 0)
+    const decided = wins.length + losses.length
+    const daysTraded = new Set(
+      filteredClosedPositions.map((p) => p.closedAt?.slice(0, 10)).filter(Boolean)
+    ).size
+    return {
+      realizedPnl: filteredClosedPositions.reduce((s, p) => s + (p.realizedPnl ?? 0), 0),
+      wins: wins.length,
+      losses: losses.length,
+      winRate: decided > 0 ? (wins.length / decided) * 100 : null,
+      totalTrades: filteredClosedPositions.length,
+      daysTraded,
+    }
+  }, [filteredClosedPositions])
+
+  const filteredAiCostUsd = useMemo(
+    () => filteredAiDays.reduce((s, d) => s + d.costUsd, 0),
+    [filteredAiDays]
+  )
+
+  const filteredAiCalls = useMemo(
+    () => filteredAiDays.reduce((s, d) => s + d.calls, 0),
+    [filteredAiDays]
+  )
+
+  const hourlyPnlPoints = useMemo(() => {
+    if (!isHourlyMode) return []
+    const byHour: Record<string, number> = {}
+    for (const p of filteredClosedPositions) {
+      if (!p.closedAt || p.realizedPnl == null) continue
+      const k = hKey(p.closedAt)
+      byHour[k] = (byHour[k] ?? 0) + p.realizedPnl
+    }
+    return Object.keys(byHour).sort().map((k) => ({ label: hLabel(k), pnl: Number(byHour[k].toFixed(2)) }))
+  }, [filteredClosedPositions, isHourlyMode])
+
+  const hourlyTradesPoints = useMemo(() => {
+    if (!isHourlyMode) return []
+    const byHour: Record<string, number> = {}
+    for (const p of filteredClosedPositions) {
+      if (!p.closedAt) continue
+      const k = hKey(p.closedAt)
+      byHour[k] = (byHour[k] ?? 0) + 1
+    }
+    return Object.keys(byHour).sort().map((k) => ({ label: hLabel(k), trades: byHour[k] }))
+  }, [filteredClosedPositions, isHourlyMode])
+
+  const hourlyCumPnlPoints = useMemo(() => {
+    if (!isHourlyMode) return []
+    const byHour: Record<string, number> = {}
+    for (const p of filteredClosedPositions) {
+      if (!p.closedAt || p.realizedPnl == null) continue
+      const k = hKey(p.closedAt)
+      byHour[k] = (byHour[k] ?? 0) + p.realizedPnl
+    }
+    let cum = 0
+    return Object.keys(byHour).sort().map((k) => {
+      cum += byHour[k]
+      return { label: hLabel(k), cumPnl: Number(cum.toFixed(2)) }
+    })
+  }, [filteredClosedPositions, isHourlyMode])
 
   const portfolioPoints = useMemo(
-    () => sliceDays(snapshots, days).map((s) => ({ label: dateLabel(s.date), value: s.value })),
-    [snapshots, days]
+    () => snapshots.filter((s) => inWindowDate(s.date)).map((s) => ({ label: dateLabel(s.date), value: s.value })),
+    [snapshots, pickedDate, range]
   )
 
-  const dailyPnlPoints = useMemo(
-    () =>
-      sliceDays(dailyStats, days)
-        .filter((s) => s.pnl != null)
-        .map((s) => ({ label: dateLabel(s.date), pnl: s.pnl! })),
-    [dailyStats, days]
-  )
+  const dailyPnlPoints = useMemo(() => {
+    if (isHourlyMode) return []
+    const byDate: Record<string, number> = {}
+    for (const p of filteredClosedPositions) {
+      if (!p.closedAt || p.realizedPnl == null) continue
+      const date = p.closedAt.slice(0, 10)
+      byDate[date] = (byDate[date] ?? 0) + p.realizedPnl
+    }
+    return Object.keys(byDate).sort().map((date) => ({ label: dateLabel(date), pnl: Number(byDate[date].toFixed(2)) }))
+  }, [filteredClosedPositions, isHourlyMode])
 
-  const tradesPerDayPoints = useMemo(
-    () =>
-      sliceDays(dailyStats, days).map((s) => ({ label: dateLabel(s.date), trades: s.tradesCount })),
-    [dailyStats, days]
-  )
+  const tradesPerDayPoints = useMemo(() => {
+    if (isHourlyMode) return []
+    const byDate: Record<string, number> = {}
+    for (const p of filteredClosedPositions) {
+      if (!p.closedAt) continue
+      const date = p.closedAt.slice(0, 10)
+      byDate[date] = (byDate[date] ?? 0) + 1
+    }
+    return Object.keys(byDate).sort().map((date) => ({ label: dateLabel(date), trades: byDate[date] }))
+  }, [filteredClosedPositions, isHourlyMode])
 
   const aiCostPoints = useMemo(
-    () =>
-      sliceDays(aiCost?.byDay ?? [], days).map((d) => ({
-        label: dateLabel(d.date),
-        cost: Number(d.costUsd.toFixed(5)),
-      })),
-    [aiCost, days]
+    () => filteredAiDays.map((d) => ({ label: dateLabel(d.date), cost: Number(d.costUsd.toFixed(5)) })),
+    [filteredAiDays]
   )
 
   const aiCallsPoints = useMemo(
-    () =>
-      sliceDays(aiCost?.byDay ?? [], days).map((d) => ({
-        label: dateLabel(d.date),
-        calls: d.calls,
-      })),
-    [aiCost, days]
+    () => filteredAiDays.map((d) => ({ label: dateLabel(d.date), calls: d.calls })),
+    [filteredAiDays]
   )
 
   const cumulativePnlPoints = useMemo(() => {
     const pnlByDate: Record<string, number> = {}
-    for (const p of closedPositions) {
+    for (const p of filteredClosedPositions) {
       if (!p.closedAt || p.realizedPnl == null) continue
       const date = p.closedAt.slice(0, 10)
       pnlByDate[date] = (pnlByDate[date] ?? 0) + p.realizedPnl
@@ -215,21 +379,19 @@ export default function Analytics() {
         acc.push({ label: dateLabel(date), cumPnl: Number((prev + pnlByDate[date]).toFixed(2)) })
         return acc
       }, [])
-  }, [closedPositions])
+  }, [filteredClosedPositions])
 
   const tickerPnlBars = useMemo(() => {
     const acc: Record<string, number> = {}
-    for (const p of closedPositions) {
+    for (const p of filteredClosedPositions) {
       acc[p.ticker] = Number(((acc[p.ticker] ?? 0) + (p.realizedPnl ?? 0)).toFixed(2))
     }
-    return Object.entries(acc)
-      .map(([ticker, pnl]) => ({ ticker, pnl }))
-      .sort((a, b) => b.pnl - a.pnl)
-  }, [closedPositions])
+    return Object.entries(acc).map(([ticker, pnl]) => ({ ticker, pnl })).sort((a, b) => b.pnl - a.pnl)
+  }, [filteredClosedPositions])
 
   const holdTimeBars = useMemo(() => {
     const acc: Record<string, { totalHours: number; count: number }> = {}
-    for (const p of closedPositions) {
+    for (const p of filteredClosedPositions) {
       if (!p.closedAt) continue
       const hours = (new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime()) / 3_600_000
       if (!acc[p.ticker]) acc[p.ticker] = { totalHours: 0, count: 0 }
@@ -237,25 +399,20 @@ export default function Analytics() {
       acc[p.ticker].count += 1
     }
     return Object.entries(acc)
-      .map(([ticker, { totalHours, count }]) => ({
-        ticker,
-        avgHours: Number((totalHours / count).toFixed(1)),
-      }))
+      .map(([ticker, { totalHours, count }]) => ({ ticker, avgHours: Number((totalHours / count).toFixed(1)) }))
       .sort((a, b) => b.avgHours - a.avgHours)
-  }, [closedPositions])
+  }, [filteredClosedPositions])
 
   const winLossData = useMemo(() => {
-    if (!performance || performance.wins + performance.losses === 0) return []
+    if (filteredStats.wins + filteredStats.losses === 0) return []
     return [
-      { name: 'Wins', value: performance.wins },
-      { name: 'Losses', value: performance.losses },
+      { name: 'Wins', value: filteredStats.wins },
+      { name: 'Losses', value: filteredStats.losses },
     ].filter((d) => d.value > 0)
-  }, [performance])
+  }, [filteredStats])
 
-  const totalAiCostUsd = aiCost?.summary.totalCostUsd ?? 0
-  const aiCostEur = totalAiCostUsd / 1.1
-  const totalPnl = summary?.realizedPnl ?? null
-  const netPnl = totalPnl != null ? totalPnl - aiCostEur : null
+  const filteredAiCostEur = filteredAiCostUsd / 1.1
+  const filteredNetPnl = filteredStats.realizedPnl - filteredAiCostEur
   const lastCumPnl = cumulativePnlPoints[cumulativePnlPoints.length - 1]?.cumPnl ?? 0
 
   if (loading)
@@ -272,40 +429,45 @@ export default function Analytics() {
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Analytics</h1>
-        <RangeSelector value={range} onChange={setRange} />
+        <RangeSelector value={range} onChange={handleRangeChange} pickedDate={pickedDate} onPickDate={handlePickDate} />
       </div>
 
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: 12,
           marginBottom: 16,
         }}
       >
         <StatCard
           label="Realized P&L"
-          value={fmtEur(totalPnl)}
-          sub="gross trade P&L"
-          positive={(totalPnl ?? 0) > 0}
-          negative={(totalPnl ?? 0) < 0}
+          value={fmtEur(filteredStats.realizedPnl)}
+          sub={periodLabel}
+          positive={filteredStats.realizedPnl > 0}
+          negative={filteredStats.realizedPnl < 0}
+        />
+        <StatCard
+          label="AI cost"
+          value={fmtEur(filteredAiCostEur)}
+          sub={`${filteredAiCalls} calls`}
         />
         <StatCard
           label="Net P&L"
-          value={fmtEur(netPnl)}
-          sub="after AI costs"
-          positive={(netPnl ?? 0) > 0}
-          negative={(netPnl ?? 0) < 0}
+          value={fmtEur(filteredNetPnl)}
+          sub={periodLabel}
+          positive={filteredNetPnl > 0}
+          negative={filteredNetPnl < 0}
         />
         <StatCard
           label="Win rate"
-          value={fmtPct(performance?.winRate)}
-          sub={`${performance?.wins ?? 0}W · ${performance?.losses ?? 0}L`}
+          value={fmtPct(filteredStats.winRate)}
+          sub={`${filteredStats.wins}W · ${filteredStats.losses}L`}
         />
         <StatCard
           label="Total trades"
-          value={summary?.totalTrades ?? '—'}
-          sub={`${summary?.daysTraded ?? 0} days traded`}
+          value={filteredStats.totalTrades}
+          sub={`${filteredStats.daysTraded} days`}
         />
       </div>
 
@@ -318,7 +480,25 @@ export default function Analytics() {
         }}
       >
         <ChartCard title="portfolio value">
-          {portfolioPoints.length > 1 ? (
+          {isHourlyMode ? (
+            <div
+              style={{
+                height: CHART_HEIGHT,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+              }}
+            >
+              <div style={{ fontSize: 22, fontWeight: 500 }}>
+                {portfolioPoints[portfolioPoints.length - 1]?.value != null
+                  ? `€${portfolioPoints[portfolioPoints.length - 1].value.toFixed(2)}`
+                  : '—'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>latest snapshot</div>
+            </div>
+          ) : portfolioPoints.length >= 1 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <LineChart data={portfolioPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
@@ -333,7 +513,7 @@ export default function Analytics() {
                   tick={AXIS_TICK}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v: number) => `€${v}`}
+                  tickFormatter={fmtEurAxis}
                   width={52}
                 />
                 <Tooltip
@@ -345,7 +525,7 @@ export default function Analytics() {
                   dataKey="value"
                   stroke={COLOR_ACCENT}
                   strokeWidth={1.5}
-                  dot={false}
+                  dot={portfolioPoints.length === 1 ? { r: 3 } : false}
                   isAnimationActive={false}
                 />
               </LineChart>
@@ -355,10 +535,10 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="daily P&L">
-          {dailyPnlPoints.length > 0 ? (
+        <ChartCard title={isHourlyMode ? 'P&L by hour' : 'daily P&L'}>
+          {(isHourlyMode ? hourlyPnlPoints : dailyPnlPoints).length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={dailyPnlPoints}>
+              <BarChart data={isHourlyMode ? hourlyPnlPoints : dailyPnlPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
                 <XAxis
                   dataKey="label"
@@ -371,7 +551,7 @@ export default function Analytics() {
                   tick={AXIS_TICK}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v: number) => `€${v}`}
+                  tickFormatter={fmtEurAxis}
                   width={52}
                 />
                 <Tooltip
@@ -379,7 +559,7 @@ export default function Analytics() {
                   formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']}
                 />
                 <Bar dataKey="pnl" isAnimationActive={false} radius={[2, 2, 0, 0]}>
-                  {dailyPnlPoints.map((entry, i) => (
+                  {(isHourlyMode ? hourlyPnlPoints : dailyPnlPoints).map((entry, i) => (
                     <Cell
                       key={i}
                       fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED}
@@ -394,10 +574,10 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="cumulative P&L" sub="all-time">
-          {cumulativePnlPoints.length > 1 ? (
+        <ChartCard title="cumulative P&L" sub={periodLabel}>
+          {(isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length >= 1 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <LineChart data={cumulativePnlPoints}>
+              <LineChart data={isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
                 <XAxis
                   dataKey="label"
@@ -410,7 +590,7 @@ export default function Analytics() {
                   tick={AXIS_TICK}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v: number) => `€${v}`}
+                  tickFormatter={fmtEurAxis}
                   width={52}
                 />
                 <Tooltip
@@ -422,7 +602,7 @@ export default function Analytics() {
                   dataKey="cumPnl"
                   stroke={lastCumPnl >= 0 ? COLOR_GREEN : COLOR_RED}
                   strokeWidth={1.5}
-                  dot={false}
+                  dot={(isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length === 1 ? { r: 3 } : false}
                   isAnimationActive={false}
                 />
               </LineChart>
@@ -432,10 +612,10 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="trades per day">
-          {tradesPerDayPoints.some((p) => p.trades > 0) ? (
+        <ChartCard title={isHourlyMode ? 'trades by hour' : 'trades per day'}>
+          {(isHourlyMode ? hourlyTradesPoints : tradesPerDayPoints).some((p) => p.trades > 0) ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={tradesPerDayPoints}>
+              <BarChart data={isHourlyMode ? hourlyTradesPoints : tradesPerDayPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
                 <XAxis
                   dataKey="label"
@@ -466,7 +646,7 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="win / loss" sub="all-time">
+        <ChartCard title="win / loss" sub={periodLabel}>
           {winLossData.length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <PieChart>
@@ -493,7 +673,7 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="P&L by ticker" sub="all-time">
+        <ChartCard title="P&L by ticker" sub={periodLabel}>
           {tickerPnlBars.length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={tickerPnlBars} layout="vertical">
@@ -502,7 +682,7 @@ export default function Analytics() {
                   tick={AXIS_TICK}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v: number) => `€${v}`}
+                  tickFormatter={fmtEurAxis}
                 />
                 <YAxis
                   type="category"
@@ -548,7 +728,7 @@ export default function Analytics() {
                   tick={AXIS_TICK}
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(v: number) => `$${v.toFixed(3)}`}
+                  tickFormatter={fmtUsdAxis}
                   width={56}
                 />
                 <Tooltip
@@ -603,7 +783,7 @@ export default function Analytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="avg hold time" sub="hours · all-time">
+        <ChartCard title="avg hold time" sub={`hours · ${periodLabel}`}>
           {holdTimeBars.length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
               <BarChart data={holdTimeBars} layout="vertical">
@@ -641,78 +821,113 @@ export default function Analytics() {
         </ChartCard>
       </div>
 
-      {aiCost && aiCost.summary.callCount > 0 && (
+      {filteredAiCalls > 0 && (
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-          AI cost: ${totalAiCostUsd.toFixed(4)} total · {aiCost.summary.callCount} calls · avg $
-          {aiCost.summary.avgCostPerCallUsd.toFixed(5)}/call · claude-sonnet-4-6 · $3/MTok in ·
-          $15/MTok out
+          AI cost: ${filteredAiCostUsd.toFixed(4)} total · {filteredAiCalls} calls · avg $
+          {filteredAiCalls > 0 ? (filteredAiCostUsd / filteredAiCalls).toFixed(5) : '0.00000'}/call ·
+          claude-sonnet-4-6 · $3/MTok in · $15/MTok out
         </div>
       )}
 
-      {closedPositions.length > 0 && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '16px 16px 12px' }}>
-            <div className="section-label">closed positions ({closedPositions.length})</div>
-          </div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Ticker</th>
-                <th>Qty</th>
-                <th style={{ textAlign: 'right' }}>Entry</th>
-                <th style={{ textAlign: 'right' }}>Exit</th>
-                <th style={{ textAlign: 'right' }}>Realized P&L</th>
-                <th>Opened</th>
-                <th>Closed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {closedPositions.map((p) => (
-                <tr key={p.id}>
-                  <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>{p.ticker}</td>
-                  <td>{p.quantity}</td>
-                  <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                    {p.entryPrice != null ? `€${p.entryPrice.toFixed(2)}` : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                    {p.exitPrice != null ? `€${p.exitPrice.toFixed(2)}` : '—'}
-                  </td>
-                  <td
-                    style={{
-                      textAlign: 'right',
-                      fontFamily: 'var(--font-code)',
-                      color: (p.realizedPnl ?? 0) >= 0 ? COLOR_GREEN : COLOR_RED,
-                      fontWeight: 500,
-                    }}
+      {filteredClosedPositions.length > 0 && (() => {
+        const totalPages = Math.ceil(filteredClosedPositions.length / PAGE_SIZE)
+        const page = Math.min(posPage, totalPages)
+        const pageRows = filteredClosedPositions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+        return (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div
+              style={{
+                padding: '16px 16px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div className="section-label">closed positions ({filteredClosedPositions.length})</div>
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                    {page} / {totalPages}
+                  </span>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ height: 24, padding: '0 8px', fontSize: 12 }}
+                    disabled={page <= 1}
+                    onClick={() => setPosPage((p) => p - 1)}
                   >
-                    {p.realizedPnl != null
-                      ? `${p.realizedPnl >= 0 ? '+' : ''}€${p.realizedPnl.toFixed(2)}`
-                      : '—'}
-                  </td>
-                  <td
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--color-text-muted)',
-                      fontFamily: 'var(--font-code)',
-                    }}
+                    ←
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ height: 24, padding: '0 8px', fontSize: 12 }}
+                    disabled={page >= totalPages}
+                    onClick={() => setPosPage((p) => p + 1)}
                   >
-                    {new Date(p.openedAt).toLocaleDateString()}
-                  </td>
-                  <td
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--color-text-muted)',
-                      fontFamily: 'var(--font-code)',
-                    }}
-                  >
-                    {p.closedAt ? new Date(p.closedAt).toLocaleDateString() : '—'}
-                  </td>
+                    →
+                  </button>
+                </div>
+              )}
+            </div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Qty</th>
+                  <th style={{ textAlign: 'right' }}>Entry</th>
+                  <th style={{ textAlign: 'right' }}>Exit</th>
+                  <th style={{ textAlign: 'right' }}>Realized P&L</th>
+                  <th>Opened</th>
+                  <th>Closed</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {pageRows.map((p) => (
+                  <tr key={p.id}>
+                    <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>{p.ticker}</td>
+                    <td>{p.quantity}</td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                      {p.entryPrice != null ? `€${p.entryPrice.toFixed(2)}` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                      {p.exitPrice != null ? `€${p.exitPrice.toFixed(2)}` : '—'}
+                    </td>
+                    <td
+                      style={{
+                        textAlign: 'right',
+                        fontFamily: 'var(--font-code)',
+                        color: (p.realizedPnl ?? 0) >= 0 ? COLOR_GREEN : COLOR_RED,
+                        fontWeight: 500,
+                      }}
+                    >
+                      {p.realizedPnl != null
+                        ? `${p.realizedPnl >= 0 ? '+' : ''}€${p.realizedPnl.toFixed(2)}`
+                        : '—'}
+                    </td>
+                    <td
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--color-text-muted)',
+                        fontFamily: 'var(--font-code)',
+                      }}
+                    >
+                      {new Date(p.openedAt).toLocaleDateString()}
+                    </td>
+                    <td
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--color-text-muted)',
+                        fontFamily: 'var(--font-code)',
+                      }}
+                    >
+                      {p.closedAt ? new Date(p.closedAt).toLocaleDateString() : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      })()}
     </div>
   )
 }

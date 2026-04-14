@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Play, Square, RefreshCw } from 'lucide-react'
-import { api, type EngineStatus, type Portfolio, type Decision } from '../api/client'
+import { api, type EngineStatus, type Portfolio, type Decision, type Summary } from '../api/client'
 import StatCard from '../components/StatCard'
 import MarketClock from '../components/MarketClock'
 
@@ -148,6 +148,7 @@ export default function Dashboard() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
   const [maxBudget, setMaxBudget] = useState<number | null>(null)
+  const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [positionsRefreshing, setPositionsRefreshing] = useState(false)
@@ -199,16 +200,18 @@ export default function Dashboard() {
 
   const loadData = useCallback(async () => {
     try {
-      const [status, port, decs, cfg] = await Promise.all([
+      const [status, port, decs, cfg, sum] = await Promise.all([
         api.engine.status(),
         api.portfolio.get(),
         api.decisions.list(1, 10),
         api.config.get(),
+        api.analytics.summary(),
       ])
       setEngineStatus(status)
       setPortfolio(port)
       setDecisions(decs.data)
       setMaxBudget(cfg.maxBudgetEur)
+      setSummary(sum)
       fetchMissingNames([
         ...port.aiPositions.map((p) => p.ticker),
         ...port.manualPositions.map((p) => p.ticker),
@@ -284,7 +287,7 @@ export default function Dashboard() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           gap: 12,
           marginBottom: 24,
         }}
@@ -297,6 +300,12 @@ export default function Dashboard() {
           value={fmtEur(aiStats?.pnl)}
           positive={aiStats != null && aiStats.pnl > 0}
           negative={aiStats != null && aiStats.pnl < 0}
+        />
+        <StatCard
+          label="Realised P&L"
+          value={fmtEur(summary?.realizedPnl)}
+          positive={summary != null && summary.realizedPnl > 0}
+          negative={summary != null && summary.realizedPnl < 0}
         />
       </div>
 

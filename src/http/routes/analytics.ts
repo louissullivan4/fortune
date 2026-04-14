@@ -27,7 +27,9 @@ router.get('/summary', async (req, res, next) => {
     ])
     const realizedPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0)
     const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0).length
-    const winRate = closed.length > 0 ? (wins / closed.length) * 100 : null
+    const lossCount = closed.filter((p) => (p.realizedPnl ?? 0) < 0).length
+    const decidedTrades = wins + lossCount
+    const winRate = decidedTrades > 0 ? (wins / decidedTrades) * 100 : null
     res.json({
       ...stats,
       realizedPnl,
@@ -115,7 +117,8 @@ router.get('/performance', async (req, res, next) => {
     const realizedPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0)
     const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0)
     const losses = closed.filter((p) => (p.realizedPnl ?? 0) < 0)
-    const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : null
+    const decidedTrades = wins.length + losses.length
+    const winRate = decidedTrades > 0 ? (wins.length / decidedTrades) * 100 : null
     const avgWin =
       wins.length > 0 ? wins.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / wins.length : null
     const avgLoss =
