@@ -105,6 +105,7 @@ export interface EngineStatus {
   marketOpen: boolean
   mode: string
   intervalMs: number
+  pendingSettlement: number
 }
 
 export interface T212Position {

@@ -32,6 +32,7 @@ export interface EngineStatus {
   mode: string
   intervalMs: number
   userId: string
+  pendingSettlement: number
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -113,6 +114,7 @@ export class EngineService {
       mode: this.t212['mode'] as string,
       intervalMs: this.userConfig.tradeIntervalMs,
       userId: this.userId,
+      pendingSettlement: this._sessionCashCommitted,
     }
   }
 

@@ -265,8 +265,9 @@ export default function Dashboard() {
       currentValue += liveValue
     }
     const pnl = currentValue - invested
-    const budgetRemaining = maxBudget != null ? maxBudget - invested : null
-    return { invested, currentValue, pnl, budgetRemaining }
+    const pendingSettlement = engineStatus?.pendingSettlement ?? 0
+    const freeCash = Math.max(0, portfolio.cash.free - pendingSettlement)
+    return { invested, currentValue, pnl, freeCash, pendingSettlement }
   })()
   return (
     <div>
@@ -294,7 +295,15 @@ export default function Dashboard() {
       >
         <StatCard label="AI value" value={fmtEur(aiStats?.currentValue)} />
         <StatCard label="AI invested" value={fmtEur(aiStats?.invested)} />
-        <StatCard label="Budget remaining" value={fmtEur(aiStats?.budgetRemaining)} />
+        <StatCard
+          label="Free cash"
+          value={fmtEur(aiStats?.freeCash)}
+          sub={
+            aiStats != null && aiStats.pendingSettlement > 0
+              ? `€${aiStats.pendingSettlement.toFixed(2)} pending`
+              : undefined
+          }
+        />
         <StatCard
           label="Unrealised P&L"
           value={fmtEur(aiStats?.pnl)}
