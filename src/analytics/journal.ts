@@ -337,6 +337,16 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
     ).rows.map((r) => r.key)
   )
 
+  const alreadyClosed = new Set(
+    (
+      await pool.query<{ key: string }>(
+        `SELECT ticker || '|' || closed_at AS key FROM ai_positions
+         WHERE status = 'closed' AND user_id = $1`,
+        [userId]
+      )
+    ).rows.map((r) => r.key)
+  )
+
   let inserted = 0
   for (const t of trades) {
     if (t.action === 'buy') {
@@ -346,7 +356,10 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
       existing.add(key)
       inserted++
     } else {
+      const closeKey = `${t.ticker}|${t.timestamp}`
+      if (alreadyClosed.has(closeKey)) continue
       await closeAiPosition(t.ticker, t.estimated_price, t.timestamp, userId)
+      alreadyClosed.add(closeKey)
       inserted++
     }
   }
