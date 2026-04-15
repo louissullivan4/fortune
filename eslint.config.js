@@ -35,6 +35,8 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // Date.now() in memoised range cutoffs is intentional — purity rule is too strict here
+      'react-hooks/purity': 'warn',
     },
   }
 )

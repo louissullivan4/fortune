@@ -239,6 +239,42 @@ export interface AiPosition {
   status: 'open' | 'closed'
 }
 
+export interface PnlPosition {
+  id: number
+  ticker: string
+  openedAt: string
+  closedAt: string | null
+  quantity: number
+  entryPrice: number | null
+  exitPrice: number | null
+  grossPnl: number | null
+  fxCost: number
+  netPnl: number | null
+  hasActualFill: boolean
+}
+
+export interface PnlSummary {
+  totalGrossPnl: number
+  totalFxCost: number
+  totalNetPnl: number
+  wins: number
+  losses: number
+  winRate: number | null
+  totalTrades: number
+}
+
+export interface PnlByDay {
+  date: string
+  grossPnl: number
+  netPnl: number
+}
+
+export interface PnlResponse {
+  positions: PnlPosition[]
+  byDay: PnlByDay[]
+  summary: PnlSummary
+}
+
 export interface Summary {
   totalDecisions: number
   totalTrades: number
@@ -427,6 +463,13 @@ export const api = {
     performance: () => req<Performance>('/analytics/performance'),
     dailyStats: (limit = 365) =>
       req<{ data: DailyStatsPoint[] }>(`/analytics/daily-stats?limit=${limit}`),
+    pnl: (from?: string, to?: string) => {
+      const params = new URLSearchParams()
+      if (from) params.set('from', from)
+      if (to) params.set('to', to)
+      const qs = params.toString()
+      return req<PnlResponse>(`/analytics/pnl${qs ? `?${qs}` : ''}`)
+    },
   },
 
   config: {

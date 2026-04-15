@@ -115,6 +115,15 @@ export async function getDailyOpenValue(date: string, userId: string): Promise<n
   return res.rows[0]?.open_value ?? null
 }
 
+export async function getDailyAiOpenValue(date: string, userId: string): Promise<number | null> {
+  const pool = getPool()
+  const res = await pool.query<{ ai_open_value: number }>(
+    'SELECT ai_open_value FROM daily_snapshots WHERE date = $1 AND user_id = $2',
+    [date, userId]
+  )
+  return res.rows[0]?.ai_open_value ?? null
+}
+
 export interface RecentDecision {
   timestamp: string
   action: string
@@ -303,6 +312,71 @@ export async function getClosedAiPositions(userId: string): Promise<AiPosition[]
     [userId]
   )
   return res.rows.map(mapAiPosition)
+}
+
+export interface AiPositionWithOrders extends AiPosition {
+  buyT212OrderId: string | null
+  sellT212OrderId: string | null
+}
+
+export async function getClosedAiPositionsWithOrders(
+  userId: string,
+  from?: string,
+  to?: string
+): Promise<AiPositionWithOrders[]> {
+  const pool = getPool()
+  const conditions = ["ap.status = 'closed'", 'ap.user_id = $1']
+  const params: unknown[] = [userId]
+
+  if (from) {
+    params.push(from)
+    conditions.push(`ap.closed_at >= $${params.length}`)
+  }
+  if (to) {
+    params.push(`${to}T23:59:59.999`)
+    conditions.push(`ap.closed_at <= $${params.length}`)
+  }
+
+  const res = await pool.query(
+    `SELECT
+       ap.id, ap.ticker, ap.opened_at, ap.closed_at, ap.quantity,
+       ap.entry_price, ap.high_water_mark, ap.exit_price, ap.realized_pnl, ap.status,
+       buy_o.t212_order_id  AS buy_t212_id,
+       sell_o.t212_order_id AS sell_t212_id
+     FROM ai_positions ap
+     LEFT JOIN decisions buy_d
+       ON  buy_d.ticker    = ap.ticker
+       AND buy_d.action    = 'buy'
+       AND buy_d.timestamp = ap.opened_at
+       AND buy_d.user_id   = ap.user_id
+     LEFT JOIN orders buy_o ON buy_o.decision_id = buy_d.id
+     LEFT JOIN decisions sell_d
+       ON  sell_d.ticker    = ap.ticker
+       AND sell_d.action    = 'sell'
+       AND sell_d.timestamp = ap.closed_at
+       AND sell_d.user_id   = ap.user_id
+     LEFT JOIN orders sell_o ON sell_o.decision_id = sell_d.id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY ap.closed_at DESC`,
+    params
+  )
+
+  return res.rows.map((r) => ({
+    ...mapAiPosition({
+      id: r.id,
+      ticker: r.ticker,
+      opened_at: r.opened_at,
+      quantity: r.quantity,
+      entry_price: r.entry_price,
+      high_water_mark: r.high_water_mark,
+      closed_at: r.closed_at,
+      exit_price: r.exit_price,
+      realized_pnl: r.realized_pnl,
+      status: r.status,
+    }),
+    buyT212OrderId: r.buy_t212_id ?? null,
+    sellT212OrderId: r.sell_t212_id ?? null,
+  }))
 }
 
 export async function reconcileAiPositions(userId: string): Promise<{ inserted: number }> {

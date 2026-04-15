@@ -7,10 +7,13 @@ import {
   getIntradayValues,
   getOpenAiPositions,
   getClosedAiPositions,
+  getClosedAiPositionsWithOrders,
   getAiPortfolioConfig,
   getAiUsageSummary,
   getAiUsageByDay,
 } from '../../analytics/journal.js'
+import { getUserApiKeys } from './users.js'
+import { getOrCreateT212Client } from '../../api/trading212.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -135,6 +138,132 @@ router.get('/performance', async (req, res, next) => {
       losses: losses.length,
       openPositions: open.length,
       closedPositions: closed.length,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// T212 charges 0.15% FX conversion on both the buy and sell legs for any position
+// traded in a foreign currency (i.e. USD-denominated stocks from a EUR account).
+// Tickers matching _US_ are USD stocks; all others are assumed EUR-denominated.
+const T212_FX_FEE_RATE = 0.0015
+
+function isUsdTicker(ticker: string): boolean {
+  return ticker.includes('_US_')
+}
+
+function estimateFxCost(
+  entryPrice: number | null,
+  exitPrice: number | null,
+  quantity: number,
+  ticker: string
+): number {
+  if (!isUsdTicker(ticker)) return 0
+  const buyValue = (entryPrice ?? 0) * quantity
+  const sellValue = (exitPrice ?? 0) * quantity
+  return (buyValue + sellValue) * T212_FX_FEE_RATE
+}
+
+// GET /api/analytics/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Returns AI-only closed positions enriched with T212 actual fill prices where
+// available, FX cost estimates, and net P&L. Excludes personal portfolio positions.
+router.get('/pnl', async (req, res, next) => {
+  try {
+    const userId = req.user!.userId
+    const from = req.query.from as string | undefined
+    const to = req.query.to as string | undefined
+
+    const positions = await getClosedAiPositionsWithOrders(userId, from, to)
+
+    const t212FillMap = new Map<string, number>()
+    try {
+      const keys = await getUserApiKeys(userId)
+      if (keys?.t212KeyId && keys?.t212KeySecret) {
+        const t212 = getOrCreateT212Client(
+          userId,
+          keys.t212KeyId,
+          keys.t212KeySecret,
+          keys.t212Mode
+        )
+        const history = await t212.getOrderHistory()
+        for (const order of history) {
+          if (order.filledPrice != null) {
+            t212FillMap.set(order.id, order.filledPrice)
+          }
+        }
+      }
+    } catch {
+      // T212 unavailable — proceed with estimated prices only
+    }
+
+    const enriched = positions.map((p) => {
+      const actualEntry =
+        (p.buyT212OrderId ? t212FillMap.get(p.buyT212OrderId) : undefined) ?? p.entryPrice
+      const actualExit =
+        (p.sellT212OrderId ? t212FillMap.get(p.sellT212OrderId) : undefined) ?? p.exitPrice
+
+      const grossPnl =
+        actualEntry != null && actualExit != null
+          ? Number(((actualExit - actualEntry) * p.quantity).toFixed(4))
+          : p.realizedPnl
+
+      const fxCost = Number(
+        estimateFxCost(actualEntry, actualExit, p.quantity, p.ticker).toFixed(4)
+      )
+      const netPnl = grossPnl != null ? Number((grossPnl - fxCost).toFixed(4)) : null
+
+      return {
+        id: p.id,
+        ticker: p.ticker,
+        openedAt: p.openedAt,
+        closedAt: p.closedAt,
+        quantity: p.quantity,
+        entryPrice: actualEntry,
+        exitPrice: actualExit,
+        grossPnl,
+        fxCost,
+        netPnl,
+        hasActualFill:
+          (p.buyT212OrderId != null && t212FillMap.has(p.buyT212OrderId)) ||
+          (p.sellT212OrderId != null && t212FillMap.has(p.sellT212OrderId)),
+      }
+    })
+
+    const byDayGross = new Map<string, number>()
+    const byDayNet = new Map<string, number>()
+    for (const p of enriched) {
+      if (!p.closedAt) continue
+      const day = p.closedAt.slice(0, 10)
+      if (p.grossPnl != null) byDayGross.set(day, (byDayGross.get(day) ?? 0) + p.grossPnl)
+      if (p.netPnl != null) byDayNet.set(day, (byDayNet.get(day) ?? 0) + p.netPnl)
+    }
+    const allDays = Array.from(new Set([...byDayGross.keys(), ...byDayNet.keys()])).sort()
+    const byDay = allDays.map((date) => ({
+      date,
+      grossPnl: Number((byDayGross.get(date) ?? 0).toFixed(4)),
+      netPnl: Number((byDayNet.get(date) ?? 0).toFixed(4)),
+    }))
+
+    const totalGross = enriched.reduce((s, p) => s + (p.grossPnl ?? 0), 0)
+    const totalFxCost = enriched.reduce((s, p) => s + p.fxCost, 0)
+    const totalNet = enriched.reduce((s, p) => s + (p.netPnl ?? 0), 0)
+    const wins = enriched.filter((p) => (p.netPnl ?? 0) > 0)
+    const losses = enriched.filter((p) => (p.netPnl ?? 0) < 0)
+    const decided = wins.length + losses.length
+
+    res.json({
+      positions: enriched,
+      byDay,
+      summary: {
+        totalGrossPnl: Number(totalGross.toFixed(4)),
+        totalFxCost: Number(totalFxCost.toFixed(4)),
+        totalNetPnl: Number(totalNet.toFixed(4)),
+        wins: wins.length,
+        losses: losses.length,
+        winRate: decided > 0 ? (wins.length / decided) * 100 : null,
+        totalTrades: enriched.length,
+      },
     })
   } catch (err) {
     next(err)

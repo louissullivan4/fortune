@@ -13,15 +13,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts'
-import {
-  api,
-  type Summary,
-  type Performance,
-  type DailySnapshot,
-  type DailyStatsPoint,
-  type AiPosition,
-  type AiCostResponse,
-} from '../api/client'
+import { api, type DailySnapshot, type PnlResponse, type AiCostResponse } from '../api/client'
 import StatCard from '../components/StatCard'
 
 const CHART_HEIGHT = 160
@@ -38,13 +30,8 @@ const COLOR_RED = '#dc2626'
 const COLOR_ACCENT = '#2563eb'
 
 type Range = 'Today' | '1W' | '1M' | '3M' | 'All'
-const RANGE_DAYS: Record<Range, number | null> = { Today: 1, '1W': 7, '1M': 30, '3M': 90, All: null }
 function localDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function sliceDays<T>(arr: T[], days: number | null): T[] {
-  return days == null ? arr : arr.slice(-days)
 }
 
 function fmtEur(v: number | null | undefined) {
@@ -97,14 +84,21 @@ function RangeSelector({
         {options.map((r, i) => (
           <button
             key={r}
-            onClick={() => { onChange(r); onPickDate(null) }}
+            onClick={() => {
+              onChange(r)
+              onPickDate(null)
+            }}
             style={{
               height: 28,
               padding: '0 12px',
               border: 'none',
               borderRight: i < options.length - 1 ? '0.5px solid var(--color-border)' : 'none',
-              background: value === r && pickedDate === null ? 'var(--color-bg-raised)' : 'transparent',
-              color: value === r && pickedDate === null ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+              background:
+                value === r && pickedDate === null ? 'var(--color-bg-raised)' : 'transparent',
+              color:
+                value === r && pickedDate === null
+                  ? 'var(--color-text-primary)'
+                  : 'var(--color-text-muted)',
               fontSize: 12,
               fontWeight: value === r && pickedDate === null ? 500 : 400,
               cursor: 'pointer',
@@ -113,7 +107,7 @@ function RangeSelector({
           >
             {r}
           </button>
-      ))}
+        ))}
       </div>
       <input
         type="date"
@@ -176,56 +170,55 @@ function Empty() {
 const PAGE_SIZE = 10
 
 export default function Analytics() {
-  const [summary, setSummary] = useState<Summary | null>(null)
   const [posPage, setPosPage] = useState(1)
-  const [performance, setPerformance] = useState<Performance | null>(null)
   const [snapshots, setSnapshots] = useState<DailySnapshot[]>([])
-  const [dailyStats, setDailyStats] = useState<DailyStatsPoint[]>([])
-  const [positions, setPositions] = useState<{ open: AiPosition[]; closed: AiPosition[] } | null>(
-    null
-  )
+  const [pnlData, setPnlData] = useState<PnlResponse | null>(null)
   const [aiCost, setAiCost] = useState<AiCostResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<Range>('Today')
   const [pickedDate, setPickedDate] = useState<string | null>(null)
 
-  function handleRangeChange(r: Range) { setRange(r); setPosPage(1) }
-  function handlePickDate(d: string | null) { setPickedDate(d); setPosPage(1) }
+  function handleRangeChange(r: Range) {
+    setRange(r)
+    setPosPage(1)
+  }
+  function handlePickDate(d: string | null) {
+    setPickedDate(d)
+    setPosPage(1)
+  }
 
   useEffect(() => {
-    Promise.all([
-      api.analytics.summary(),
-      api.analytics.performance(),
-      api.analytics.snapshots(365),
-      api.analytics.dailyStats(365),
-      api.analytics.positions(),
-      api.analytics.aiCost(),
-    ])
-      .then(([s, p, snaps, stats, pos, ai]) => {
-        setSummary(s)
-        setPerformance(p)
+    Promise.all([api.analytics.snapshots(365), api.analytics.pnl(), api.analytics.aiCost()])
+      .then(([snaps, pnl, ai]) => {
         setSnapshots(snaps.data)
-        setDailyStats(stats.data)
-        setPositions(pos)
+        setPnlData(pnl)
         setAiCost(ai)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [])
 
-  const closedPositions = useMemo(() => positions?.closed ?? [], [positions])
+  const closedPositions = useMemo(() => pnlData?.positions ?? [], [pnlData])
   const isHourlyMode = range === 'Today' || pickedDate !== null
 
-  const rangeCutoff: number | null = (() => {
+  const rangeCutoff = useMemo<number | null>(() => {
     if (pickedDate !== null) return null
     switch (range) {
-      case 'Today': { const t = new Date(); t.setHours(0, 0, 0, 0); return t.getTime() }
-      case '1W': return Date.now() - 7 * 24 * 3600 * 1000
-      case '1M': return Date.now() - 30 * 24 * 3600 * 1000
-      case '3M': return Date.now() - 90 * 24 * 3600 * 1000
-      case 'All': return null
+      case 'Today': {
+        const t = new Date()
+        t.setHours(0, 0, 0, 0)
+        return t.getTime()
+      }
+      case '1W':
+        return Date.now() - 7 * 24 * 3600 * 1000
+      case '1M':
+        return Date.now() - 30 * 24 * 3600 * 1000
+      case '3M':
+        return Date.now() - 90 * 24 * 3600 * 1000
+      case 'All':
+        return null
     }
-  })()
+  }, [range, pickedDate])
 
   function inWindow(dateStr: string): boolean {
     const d = new Date(dateStr)
@@ -251,8 +244,15 @@ export default function Analytics() {
   }
 
   const periodLabel = pickedDate
-    ? new Date(`${pickedDate}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-    : range === 'All' ? 'all-time' : range === 'Today' ? 'today' : range
+    ? new Date(`${pickedDate}T12:00:00`).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+      })
+    : range === 'All'
+      ? 'all-time'
+      : range === 'Today'
+        ? 'today'
+        : range
 
   const filteredClosedPositions = useMemo(
     () => closedPositions.filter((p) => p.closedAt && inWindow(p.closedAt)),
@@ -265,14 +265,16 @@ export default function Analytics() {
   )
 
   const filteredStats = useMemo(() => {
-    const wins = filteredClosedPositions.filter((p) => (p.realizedPnl ?? 0) > 0)
-    const losses = filteredClosedPositions.filter((p) => (p.realizedPnl ?? 0) < 0)
+    const wins = filteredClosedPositions.filter((p) => (p.netPnl ?? 0) > 0)
+    const losses = filteredClosedPositions.filter((p) => (p.netPnl ?? 0) < 0)
     const decided = wins.length + losses.length
     const daysTraded = new Set(
       filteredClosedPositions.map((p) => p.closedAt?.slice(0, 10)).filter(Boolean)
     ).size
     return {
-      realizedPnl: filteredClosedPositions.reduce((s, p) => s + (p.realizedPnl ?? 0), 0),
+      grossPnl: filteredClosedPositions.reduce((s, p) => s + (p.grossPnl ?? 0), 0),
+      totalFxCost: filteredClosedPositions.reduce((s, p) => s + p.fxCost, 0),
+      netPnl: filteredClosedPositions.reduce((s, p) => s + (p.netPnl ?? 0), 0),
       wins: wins.length,
       losses: losses.length,
       winRate: decided > 0 ? (wins.length / decided) * 100 : null,
@@ -295,11 +297,13 @@ export default function Analytics() {
     if (!isHourlyMode) return []
     const byHour: Record<string, number> = {}
     for (const p of filteredClosedPositions) {
-      if (!p.closedAt || p.realizedPnl == null) continue
+      if (!p.closedAt || p.netPnl == null) continue
       const k = hKey(p.closedAt)
-      byHour[k] = (byHour[k] ?? 0) + p.realizedPnl
+      byHour[k] = (byHour[k] ?? 0) + p.netPnl
     }
-    return Object.keys(byHour).sort().map((k) => ({ label: hLabel(k), pnl: Number(byHour[k].toFixed(2)) }))
+    return Object.keys(byHour)
+      .sort()
+      .map((k) => ({ label: hLabel(k), pnl: Number(byHour[k].toFixed(2)) }))
   }, [filteredClosedPositions, isHourlyMode])
 
   const hourlyTradesPoints = useMemo(() => {
@@ -310,26 +314,33 @@ export default function Analytics() {
       const k = hKey(p.closedAt)
       byHour[k] = (byHour[k] ?? 0) + 1
     }
-    return Object.keys(byHour).sort().map((k) => ({ label: hLabel(k), trades: byHour[k] }))
+    return Object.keys(byHour)
+      .sort()
+      .map((k) => ({ label: hLabel(k), trades: byHour[k] }))
   }, [filteredClosedPositions, isHourlyMode])
 
   const hourlyCumPnlPoints = useMemo(() => {
     if (!isHourlyMode) return []
     const byHour: Record<string, number> = {}
     for (const p of filteredClosedPositions) {
-      if (!p.closedAt || p.realizedPnl == null) continue
+      if (!p.closedAt || p.netPnl == null) continue
       const k = hKey(p.closedAt)
-      byHour[k] = (byHour[k] ?? 0) + p.realizedPnl
+      byHour[k] = (byHour[k] ?? 0) + p.netPnl
     }
     let cum = 0
-    return Object.keys(byHour).sort().map((k) => {
-      cum += byHour[k]
-      return { label: hLabel(k), cumPnl: Number(cum.toFixed(2)) }
-    })
+    return Object.keys(byHour)
+      .sort()
+      .map((k) => {
+        cum += byHour[k]
+        return { label: hLabel(k), cumPnl: Number(cum.toFixed(2)) }
+      })
   }, [filteredClosedPositions, isHourlyMode])
 
   const portfolioPoints = useMemo(
-    () => snapshots.filter((s) => inWindowDate(s.date)).map((s) => ({ label: dateLabel(s.date), value: s.value })),
+    () =>
+      snapshots
+        .filter((s) => inWindowDate(s.date))
+        .map((s) => ({ label: dateLabel(s.date), value: s.value })),
     [snapshots, pickedDate, range]
   )
 
@@ -337,11 +348,13 @@ export default function Analytics() {
     if (isHourlyMode) return []
     const byDate: Record<string, number> = {}
     for (const p of filteredClosedPositions) {
-      if (!p.closedAt || p.realizedPnl == null) continue
+      if (!p.closedAt || p.netPnl == null) continue
       const date = p.closedAt.slice(0, 10)
-      byDate[date] = (byDate[date] ?? 0) + p.realizedPnl
+      byDate[date] = (byDate[date] ?? 0) + p.netPnl
     }
-    return Object.keys(byDate).sort().map((date) => ({ label: dateLabel(date), pnl: Number(byDate[date].toFixed(2)) }))
+    return Object.keys(byDate)
+      .sort()
+      .map((date) => ({ label: dateLabel(date), pnl: Number(byDate[date].toFixed(2)) }))
   }, [filteredClosedPositions, isHourlyMode])
 
   const tradesPerDayPoints = useMemo(() => {
@@ -352,11 +365,14 @@ export default function Analytics() {
       const date = p.closedAt.slice(0, 10)
       byDate[date] = (byDate[date] ?? 0) + 1
     }
-    return Object.keys(byDate).sort().map((date) => ({ label: dateLabel(date), trades: byDate[date] }))
+    return Object.keys(byDate)
+      .sort()
+      .map((date) => ({ label: dateLabel(date), trades: byDate[date] }))
   }, [filteredClosedPositions, isHourlyMode])
 
   const aiCostPoints = useMemo(
-    () => filteredAiDays.map((d) => ({ label: dateLabel(d.date), cost: Number(d.costUsd.toFixed(5)) })),
+    () =>
+      filteredAiDays.map((d) => ({ label: dateLabel(d.date), cost: Number(d.costUsd.toFixed(5)) })),
     [filteredAiDays]
   )
 
@@ -368,9 +384,9 @@ export default function Analytics() {
   const cumulativePnlPoints = useMemo(() => {
     const pnlByDate: Record<string, number> = {}
     for (const p of filteredClosedPositions) {
-      if (!p.closedAt || p.realizedPnl == null) continue
+      if (!p.closedAt || p.netPnl == null) continue
       const date = p.closedAt.slice(0, 10)
-      pnlByDate[date] = (pnlByDate[date] ?? 0) + p.realizedPnl
+      pnlByDate[date] = (pnlByDate[date] ?? 0) + p.netPnl
     }
     return Object.keys(pnlByDate)
       .sort()
@@ -384,9 +400,11 @@ export default function Analytics() {
   const tickerPnlBars = useMemo(() => {
     const acc: Record<string, number> = {}
     for (const p of filteredClosedPositions) {
-      acc[p.ticker] = Number(((acc[p.ticker] ?? 0) + (p.realizedPnl ?? 0)).toFixed(2))
+      acc[p.ticker] = Number(((acc[p.ticker] ?? 0) + (p.netPnl ?? 0)).toFixed(2))
     }
-    return Object.entries(acc).map(([ticker, pnl]) => ({ ticker, pnl })).sort((a, b) => b.pnl - a.pnl)
+    return Object.entries(acc)
+      .map(([ticker, pnl]) => ({ ticker, pnl }))
+      .sort((a, b) => b.pnl - a.pnl)
   }, [filteredClosedPositions])
 
   const holdTimeBars = useMemo(() => {
@@ -399,20 +417,23 @@ export default function Analytics() {
       acc[p.ticker].count += 1
     }
     return Object.entries(acc)
-      .map(([ticker, { totalHours, count }]) => ({ ticker, avgHours: Number((totalHours / count).toFixed(1)) }))
+      .map(([ticker, { totalHours, count }]) => ({
+        ticker,
+        avgHours: Number((totalHours / count).toFixed(1)),
+      }))
       .sort((a, b) => b.avgHours - a.avgHours)
   }, [filteredClosedPositions])
 
   const winLossData = useMemo(() => {
     if (filteredStats.wins + filteredStats.losses === 0) return []
     return [
-      { name: 'Wins', value: filteredStats.wins },
-      { name: 'Losses', value: filteredStats.losses },
+      { name: 'Wins (net)', value: filteredStats.wins },
+      { name: 'Losses (net)', value: filteredStats.losses },
     ].filter((d) => d.value > 0)
   }, [filteredStats])
 
   const filteredAiCostEur = filteredAiCostUsd / 1.1
-  const filteredNetPnl = filteredStats.realizedPnl - filteredAiCostEur
+  const filteredNetPnl = filteredStats.netPnl - filteredAiCostEur
   const lastCumPnl = cumulativePnlPoints[cumulativePnlPoints.length - 1]?.cumPnl ?? 0
 
   if (loading)
@@ -429,7 +450,12 @@ export default function Analytics() {
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Analytics</h1>
-        <RangeSelector value={range} onChange={handleRangeChange} pickedDate={pickedDate} onPickDate={handlePickDate} />
+        <RangeSelector
+          value={range}
+          onChange={handleRangeChange}
+          pickedDate={pickedDate}
+          onPickDate={handlePickDate}
+        />
       </div>
 
       <div
@@ -441,33 +467,35 @@ export default function Analytics() {
         }}
       >
         <StatCard
-          label="Realized P&L"
-          value={fmtEur(filteredStats.realizedPnl)}
-          sub={periodLabel}
-          positive={filteredStats.realizedPnl > 0}
-          negative={filteredStats.realizedPnl < 0}
+          label="Gross P&L"
+          value={fmtEur(filteredStats.grossPnl)}
+          sub={`${periodLabel} · AI only`}
+          positive={filteredStats.grossPnl > 0}
+          negative={filteredStats.grossPnl < 0}
+        />
+        <StatCard
+          label="Est. FX fees"
+          value={fmtEur(-filteredStats.totalFxCost)}
+          sub="T212 0.15% per leg"
+          negative={filteredStats.totalFxCost > 0}
         />
         <StatCard
           label="AI cost"
-          value={fmtEur(filteredAiCostEur)}
+          value={fmtEur(-filteredAiCostEur)}
           sub={`${filteredAiCalls} calls`}
+          negative={filteredAiCostEur > 0}
         />
         <StatCard
           label="Net P&L"
           value={fmtEur(filteredNetPnl)}
-          sub={periodLabel}
+          sub="after FX + AI cost"
           positive={filteredNetPnl > 0}
           negative={filteredNetPnl < 0}
         />
         <StatCard
           label="Win rate"
           value={fmtPct(filteredStats.winRate)}
-          sub={`${filteredStats.wins}W · ${filteredStats.losses}L`}
-        />
-        <StatCard
-          label="Total trades"
-          value={filteredStats.totalTrades}
-          sub={`${filteredStats.daysTraded} days`}
+          sub={`${filteredStats.wins}W · ${filteredStats.losses}L · ${filteredStats.totalTrades} trades`}
         />
       </div>
 
@@ -602,7 +630,11 @@ export default function Analytics() {
                   dataKey="cumPnl"
                   stroke={lastCumPnl >= 0 ? COLOR_GREEN : COLOR_RED}
                   strokeWidth={1.5}
-                  dot={(isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length === 1 ? { r: 3 } : false}
+                  dot={
+                    (isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length === 1
+                      ? { r: 3 }
+                      : false
+                  }
                   isAnimationActive={false}
                 />
               </LineChart>
@@ -824,110 +856,148 @@ export default function Analytics() {
       {filteredAiCalls > 0 && (
         <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 16 }}>
           AI cost: ${filteredAiCostUsd.toFixed(4)} total · {filteredAiCalls} calls · avg $
-          {filteredAiCalls > 0 ? (filteredAiCostUsd / filteredAiCalls).toFixed(5) : '0.00000'}/call ·
-          claude-sonnet-4-6 · $3/MTok in · $15/MTok out
+          {filteredAiCalls > 0 ? (filteredAiCostUsd / filteredAiCalls).toFixed(5) : '0.00000'}/call
+          · claude-sonnet-4-6 · $3/MTok in · $15/MTok out
         </div>
       )}
 
-      {filteredClosedPositions.length > 0 && (() => {
-        const totalPages = Math.ceil(filteredClosedPositions.length / PAGE_SIZE)
-        const page = Math.min(posPage, totalPages)
-        const pageRows = filteredClosedPositions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-        return (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div
-              style={{
-                padding: '16px 16px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div className="section-label">closed positions ({filteredClosedPositions.length})</div>
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    {page} / {totalPages}
-                  </span>
-                  <button
-                    className="btn btn-ghost"
-                    style={{ height: 24, padding: '0 8px', fontSize: 12 }}
-                    disabled={page <= 1}
-                    onClick={() => setPosPage((p) => p - 1)}
-                  >
-                    ←
-                  </button>
-                  <button
-                    className="btn btn-ghost"
-                    style={{ height: 24, padding: '0 8px', fontSize: 12 }}
-                    disabled={page >= totalPages}
-                    onClick={() => setPosPage((p) => p + 1)}
-                  >
-                    →
-                  </button>
+      {filteredClosedPositions.length > 0 &&
+        (() => {
+          const totalPages = Math.ceil(filteredClosedPositions.length / PAGE_SIZE)
+          const page = Math.min(posPage, totalPages)
+          const pageRows = filteredClosedPositions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+          return (
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div
+                style={{
+                  padding: '16px 16px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div className="section-label">
+                  closed positions ({filteredClosedPositions.length})
                 </div>
-              )}
-            </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Qty</th>
-                  <th style={{ textAlign: 'right' }}>Entry</th>
-                  <th style={{ textAlign: 'right' }}>Exit</th>
-                  <th style={{ textAlign: 'right' }}>Realized P&L</th>
-                  <th>Opened</th>
-                  <th>Closed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((p) => (
-                  <tr key={p.id}>
-                    <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>{p.ticker}</td>
-                    <td>{p.quantity}</td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                      {p.entryPrice != null ? `€${p.entryPrice.toFixed(2)}` : '—'}
-                    </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
-                      {p.exitPrice != null ? `€${p.exitPrice.toFixed(2)}` : '—'}
-                    </td>
-                    <td
-                      style={{
-                        textAlign: 'right',
-                        fontFamily: 'var(--font-code)',
-                        color: (p.realizedPnl ?? 0) >= 0 ? COLOR_GREEN : COLOR_RED,
-                        fontWeight: 500,
-                      }}
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                      {page} / {totalPages}
+                    </span>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ height: 24, padding: '0 8px', fontSize: 12 }}
+                      disabled={page <= 1}
+                      onClick={() => setPosPage((p) => p - 1)}
                     >
-                      {p.realizedPnl != null
-                        ? `${p.realizedPnl >= 0 ? '+' : ''}€${p.realizedPnl.toFixed(2)}`
-                        : '—'}
-                    </td>
-                    <td
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--color-text-muted)',
-                        fontFamily: 'var(--font-code)',
-                      }}
+                      ←
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ height: 24, padding: '0 8px', fontSize: 12 }}
+                      disabled={page >= totalPages}
+                      onClick={() => setPosPage((p) => p + 1)}
                     >
-                      {new Date(p.openedAt).toLocaleDateString()}
-                    </td>
-                    <td
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--color-text-muted)',
-                        fontFamily: 'var(--font-code)',
-                      }}
-                    >
-                      {p.closedAt ? new Date(p.closedAt).toLocaleDateString() : '—'}
-                    </td>
+                      →
+                    </button>
+                  </div>
+                )}
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Qty</th>
+                    <th style={{ textAlign: 'right' }}>Entry</th>
+                    <th style={{ textAlign: 'right' }}>Exit</th>
+                    <th style={{ textAlign: 'right' }}>Gross P&L</th>
+                    <th style={{ textAlign: 'right' }}>FX fee</th>
+                    <th style={{ textAlign: 'right' }}>Net P&L</th>
+                    <th>Closed</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      })()}
+                </thead>
+                <tbody>
+                  {pageRows.map((p) => (
+                    <tr key={p.id}>
+                      <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
+                        {p.ticker}
+                      </td>
+                      <td>{p.quantity}</td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                        {p.entryPrice != null ? `€${p.entryPrice.toFixed(2)}` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                        {p.exitPrice != null ? `€${p.exitPrice.toFixed(2)}` : '—'}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-code)',
+                          color: 'var(--color-text-secondary)',
+                        }}
+                      >
+                        {p.grossPnl != null ? (
+                          <span>
+                            {p.grossPnl >= 0 ? '+' : ''}€{p.grossPnl.toFixed(2)}
+                            {!p.hasActualFill && (
+                              <span
+                                style={{
+                                  color: 'var(--color-text-muted)',
+                                  fontSize: 10,
+                                  marginLeft: 4,
+                                }}
+                              >
+                                est
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-code)',
+                          color: 'var(--color-text-muted)',
+                          fontSize: 12,
+                        }}
+                      >
+                        {p.fxCost > 0 ? `-€${p.fxCost.toFixed(2)}` : '—'}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-code)',
+                          color: (p.netPnl ?? 0) >= 0 ? COLOR_GREEN : COLOR_RED,
+                          fontWeight: 500,
+                        }}
+                      >
+                        {p.netPnl != null
+                          ? `${p.netPnl >= 0 ? '+' : ''}€${p.netPnl.toFixed(2)}`
+                          : '—'}
+                      </td>
+                      <td
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--color-text-muted)',
+                          fontFamily: 'var(--font-code)',
+                        }}
+                      >
+                        {p.closedAt ? new Date(p.closedAt).toLocaleDateString() : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ padding: '8px 16px', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                AI positions only · net P&L deducts T212 FX fee (0.15% per leg on USD stocks) ·
+                bid/ask spread not included · <span style={{ opacity: 0.7 }}>est</span> = estimated
+                market price (no T212 fill record)
+              </div>
+            </div>
+          )
+        })()}
     </div>
   )
 }

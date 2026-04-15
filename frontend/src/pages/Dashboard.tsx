@@ -147,7 +147,7 @@ export default function Dashboard() {
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
-  const [maxBudget, setMaxBudget] = useState<number | null>(null)
+  const [_maxBudget, setMaxBudget] = useState<number | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

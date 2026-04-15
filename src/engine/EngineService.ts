@@ -9,6 +9,7 @@ import {
   openAiPosition,
   updateHighWaterMark,
   getDailyOpenValue,
+  getDailyAiOpenValue,
   upsertDailySnapshot,
   logDecision,
   logOrder,
@@ -450,12 +451,24 @@ export class EngineService {
       console.log(`[engine:${this.userId}] No hard exits triggered`)
     }
 
-    const dailyOpenValue = (await getDailyOpenValue(dateStr, this.userId)) ?? snapshot.totalValue
+    // Compute bot-scoped values before any halts so the daily snapshot is always written
+    const botTickers = new Set((await getOpenAiPositions(this.userId)).map((p) => p.ticker))
+    const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
+    const aiPositionsValue = botPositions.reduce((sum, p) => sum + p.currentPrice * p.quantity, 0)
+    // Cap the bot's visible cash to its remaining budget — never touch personal cash
+    const botBudgetRemaining = Math.max(0, this.userConfig.maxBudgetEur - aiPositionsValue)
+    const botCash = Math.min(botBudgetRemaining, snapshot.cash.free)
+    const aiValue = botCash + aiPositionsValue
 
-    const drawdown = (dailyOpenValue - snapshot.totalValue) / dailyOpenValue
-    if (drawdown > this.userConfig.dailyLossLimitPct) {
+    await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
+
+    const dailyOpenValue = (await getDailyOpenValue(dateStr, this.userId)) ?? snapshot.totalValue
+    const dailyAiOpenValue = (await getDailyAiOpenValue(dateStr, this.userId)) ?? aiValue
+
+    const aiDrawdown = (dailyAiOpenValue - aiValue) / dailyAiOpenValue
+    if (aiDrawdown > this.userConfig.dailyLossLimitPct) {
       console.log(
-        `[engine:${this.userId}] Daily loss limit hit (${(drawdown * 100).toFixed(1)}%) — halting for today`
+        `[engine:${this.userId}] Bot daily loss limit hit (${(aiDrawdown * 100).toFixed(1)}% of bot budget) — halting for today`
       )
       return
     }
@@ -465,8 +478,6 @@ export class EngineService {
     )
     const histories = await getAllHistories(this.userConfig.tradeUniverse, 90)
 
-    const botTickers = new Set((await getOpenAiPositions(this.userId)).map((p) => p.ticker))
-    const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
     const manualTickers = new Set(
       snapshot.positions.map((p) => p.ticker).filter((t) => !botTickers.has(t))
     )
@@ -499,11 +510,6 @@ export class EngineService {
       `[engine:${this.userId}] Signals: ${signals.length} tickers, ${actionable} actionable`
     )
 
-    const aiPositionsValue = botPositions.reduce((sum, p) => sum + p.currentPrice * p.quantity, 0)
-    const aiValue = snapshot.cash.free + aiPositionsValue
-
-    await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
-
     console.log(`[engine:${this.userId}] Checking stagnant exits...`)
     const stagnantExits = await this._checkStagnantExits(snapshot, signals, timestamp)
     if (stagnantExits > 0) {
@@ -517,7 +523,7 @@ export class EngineService {
       console.log(`[engine:${this.userId}] No stagnant exits triggered`)
     }
 
-    const currentFingerprint = computeSignalFingerprint(signals, snapshot.cash.free)
+    const currentFingerprint = computeSignalFingerprint(signals, botCash)
     const lastState = this._lastSignalState
     const shouldSkipAi =
       lastState !== null &&
@@ -531,9 +537,9 @@ export class EngineService {
       return
     }
 
-    const deployable = snapshot.cash.free - CASH_BUFFER_EUR
+    const deployable = botCash - CASH_BUFFER_EUR
     if (deployable < MIN_DEPLOYABLE_EUR) {
-      const reason = `Cash-constrained hold: €${snapshot.cash.free.toFixed(2)} free, €${deployable.toFixed(2)} deployable after €${CASH_BUFFER_EUR} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
+      const reason = `Cash-constrained hold: €${botCash.toFixed(2)} bot cash (budget €${this.userConfig.maxBudgetEur} − €${aiPositionsValue.toFixed(2)} in positions), €${deployable.toFixed(2)} deployable after €${CASH_BUFFER_EUR} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
       console.log(`[engine:${this.userId}] ${reason}`)
       await logDecision({
         timestamp,
@@ -558,7 +564,11 @@ export class EngineService {
 
     const recentDecisions = await getRecentDecisions(this.userId, 5)
     console.log(`[engine:${this.userId}] Asking Claude for decision...`)
-    const botSnapshot = { ...snapshot, positions: botPositions }
+    const botSnapshot = {
+      ...snapshot,
+      positions: botPositions,
+      cash: { ...snapshot.cash, free: botCash },
+    }
     const { decision, usage } = await decide(
       signals,
       botSnapshot,
