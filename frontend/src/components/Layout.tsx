@@ -22,9 +22,9 @@ import { setAccessToken, api } from '../api/client'
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/analytics', label: 'Analytics', icon: BarChart2 },
   { to: '/signals', label: 'Signals', icon: Zap },
   { to: '/history', label: 'History', icon: Clock },
-  { to: '/analytics', label: 'Analytics', icon: BarChart2 },
   { to: '/config', label: 'Config', icon: Settings },
 ]
 

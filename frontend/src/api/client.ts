@@ -253,6 +253,24 @@ export interface PnlPosition {
   hasActualFill: boolean
 }
 
+export interface SignalEntry {
+  ticker: string
+  signal: SignalType
+  reasons: string[]
+}
+
+export interface DecisionDetail {
+  timestamp: string
+  reasoning: string
+  signals: SignalEntry[]
+  orderStatus: string | null
+}
+
+export interface PositionDetails {
+  buyDecision: DecisionDetail | null
+  sellDecision: DecisionDetail | null
+}
+
 export interface PnlSummary {
   totalGrossPnl: number
   totalFxCost: number
@@ -470,6 +488,7 @@ export const api = {
       const qs = params.toString()
       return req<PnlResponse>(`/analytics/pnl${qs ? `?${qs}` : ''}`)
     },
+    positionDetails: (id: number) => req<PositionDetails>(`/analytics/positions/${id}/details`),
   },
 
   config: {

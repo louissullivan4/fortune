@@ -8,6 +8,7 @@ import {
   getOpenAiPositions,
   getClosedAiPositions,
   getClosedAiPositionsWithOrders,
+  getAiPositionDetails,
   getAiPortfolioConfig,
   getAiUsageSummary,
   getAiUsageByDay,
@@ -264,6 +265,45 @@ router.get('/pnl', async (req, res, next) => {
         winRate: decided > 0 ? (wins.length / decided) * 100 : null,
         totalTrades: enriched.length,
       },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/analytics/positions/:id/details
+router.get('/positions/:id/details', async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id)
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid position id' })
+    const raw = await getAiPositionDetails(id, req.user!.userId)
+    if (!raw) return res.status(404).json({ error: 'Position not found' })
+
+    const parseSignals = (json: string) => {
+      try {
+        return JSON.parse(json) as Array<{ ticker: string; signal: string; reasons: string[] }>
+      } catch {
+        return []
+      }
+    }
+
+    res.json({
+      buyDecision: raw.buyDecision
+        ? {
+            timestamp: raw.buyDecision.timestamp,
+            reasoning: raw.buyDecision.reasoning,
+            signals: parseSignals(raw.buyDecision.signalsJson),
+            orderStatus: raw.buyDecision.orderStatus,
+          }
+        : null,
+      sellDecision: raw.sellDecision
+        ? {
+            timestamp: raw.sellDecision.timestamp,
+            reasoning: raw.sellDecision.reasoning,
+            signals: parseSignals(raw.sellDecision.signalsJson),
+            orderStatus: raw.sellDecision.orderStatus,
+          }
+        : null,
     })
   } catch (err) {
     next(err)

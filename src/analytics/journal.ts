@@ -319,6 +319,81 @@ export interface AiPositionWithOrders extends AiPosition {
   sellT212OrderId: string | null
 }
 
+export interface PositionDecisionDetail {
+  timestamp: string
+  reasoning: string
+  signalsJson: string
+  orderStatus: string | null
+}
+
+export interface AiPositionDetails {
+  buyDecision: PositionDecisionDetail | null
+  sellDecision: PositionDecisionDetail | null
+}
+
+export async function getAiPositionDetails(
+  id: number,
+  userId: string
+): Promise<AiPositionDetails | null> {
+  const pool = getPool()
+  const res = await pool.query<{
+    opened_at: string
+    closed_at: string | null
+    buy_reasoning: string | null
+    buy_signals_json: string | null
+    buy_order_status: string | null
+    sell_reasoning: string | null
+    sell_signals_json: string | null
+    sell_order_status: string | null
+  }>(
+    `SELECT
+       ap.opened_at, ap.closed_at,
+       buy_d.reasoning     AS buy_reasoning,
+       buy_d.signals_json  AS buy_signals_json,
+       buy_o.status        AS buy_order_status,
+       sell_d.reasoning    AS sell_reasoning,
+       sell_d.signals_json AS sell_signals_json,
+       sell_o.status       AS sell_order_status
+     FROM ai_positions ap
+     LEFT JOIN decisions buy_d
+       ON  buy_d.ticker    = ap.ticker
+       AND buy_d.action    = 'buy'
+       AND buy_d.timestamp = ap.opened_at
+       AND buy_d.user_id   = ap.user_id
+     LEFT JOIN orders buy_o ON buy_o.decision_id = buy_d.id
+     LEFT JOIN decisions sell_d
+       ON  sell_d.ticker    = ap.ticker
+       AND sell_d.action    = 'sell'
+       AND sell_d.timestamp = ap.closed_at
+       AND sell_d.user_id   = ap.user_id
+     LEFT JOIN orders sell_o ON sell_o.decision_id = sell_d.id
+     WHERE ap.id = $1 AND ap.user_id = $2`,
+    [id, userId]
+  )
+  const r = res.rows[0]
+  if (!r) return null
+  return {
+    buyDecision:
+      r.buy_reasoning != null
+        ? {
+            timestamp: r.opened_at,
+            reasoning: r.buy_reasoning,
+            signalsJson: r.buy_signals_json ?? '[]',
+            orderStatus: r.buy_order_status,
+          }
+        : null,
+    sellDecision:
+      r.sell_reasoning != null
+        ? {
+            timestamp: r.closed_at ?? '',
+            reasoning: r.sell_reasoning,
+            signalsJson: r.sell_signals_json ?? '[]',
+            orderStatus: r.sell_order_status,
+          }
+        : null,
+  }
+}
+
 export async function getClosedAiPositionsWithOrders(
   userId: string,
   from?: string,

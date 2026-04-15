@@ -43,6 +43,7 @@ const MIN_DEPLOYABLE_EUR = 6
 const TICKER_COOLDOWN_MS = 20 * 60 * 1_000
 const TRAIL_ACTIVATION_PCT = 0.5
 const TRAIL_STOP_PCT = 0.4
+const CASH_COMMITMENT_TTL_MS = 90_000
 
 // ── Signal fingerprinting ──────────────────────────────────────────────────
 
@@ -87,8 +88,15 @@ export class EngineService {
 
   // Session state per cycle
   private _lastSignalState: SignalFingerprint | null = null
-  private _sessionCashCommitted = 0
+  private _cashCommitments: Array<{ amount: number; expiresAt: number }> = []
   private _lastKnownFreeCash: number | null = null
+
+  private get _sessionCashCommitted(): number {
+    const now = Date.now()
+    return this._cashCommitments
+      .filter((c) => c.expiresAt > now)
+      .reduce((sum, c) => sum + c.amount, 0)
+  }
   private _cycleRunning = false
   private _recentlyClosedTickers = new Map<string, number>()
 
@@ -186,12 +194,39 @@ export class EngineService {
   // ── Adjusted snapshot (session cash accounting) ─────────────────────────
 
   private _adjustedSnapshot(snapshot: PortfolioSnapshot): PortfolioSnapshot {
+    const now = Date.now()
+
+    this._cashCommitments = this._cashCommitments.filter((c) => c.expiresAt > now)
+
     if (this._lastKnownFreeCash !== null && snapshot.cash.free < this._lastKnownFreeCash) {
-      const settled = this._lastKnownFreeCash - snapshot.cash.free
-      this._sessionCashCommitted = Math.max(0, this._sessionCashCommitted - settled)
+      let settled = this._lastKnownFreeCash - snapshot.cash.free
+      const remaining: Array<{ amount: number; expiresAt: number }> = []
+      for (const c of this._cashCommitments) {
+        if (settled >= c.amount) {
+          settled -= c.amount
+        } else if (settled > 0) {
+          remaining.push({ amount: c.amount - settled, expiresAt: c.expiresAt })
+          settled = 0
+        } else {
+          remaining.push(c)
+        }
+      }
+      this._cashCommitments = remaining
     }
+
     this._lastKnownFreeCash = snapshot.cash.free
-    const effectiveFree = Math.max(0, snapshot.cash.free - this._sessionCashCommitted)
+
+    const committed = this._sessionCashCommitted
+    const effectiveFree = Math.max(0, snapshot.cash.free - committed)
+
+    const commitNote =
+      committed > 0
+        ? ` | ${this._cashCommitments.length} pending order(s) =€${committed.toFixed(2)} (expire in ${Math.round((Math.min(...this._cashCommitments.map((c) => c.expiresAt)) - now) / 1_000)}s)`
+        : ''
+    console.log(
+      `[engine:${this.userId}] Cash: raw=€${snapshot.cash.free.toFixed(2)} blocked=€${snapshot.cash.blocked.toFixed(2)}${commitNote} → effective=€${effectiveFree.toFixed(2)}`
+    )
+
     return { ...snapshot, cash: { ...snapshot.cash, free: effectiveFree } }
   }
 
@@ -431,12 +466,8 @@ export class EngineService {
     console.log(`\n[engine:${this.userId}] ${timestamp} — running cycle`)
 
     const snapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
-    const pendingNote =
-      this._sessionCashCommitted > 0
-        ? ` (€${this._sessionCashCommitted.toFixed(2)} pending settlement)`
-        : ''
     console.log(
-      `[engine:${this.userId}] Portfolio: €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} free cash${pendingNote}`
+      `[engine:${this.userId}] Portfolio: €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} effective free cash`
     )
 
     console.log(`[engine:${this.userId}] Checking hard exits...`)
@@ -459,6 +490,9 @@ export class EngineService {
     const botBudgetRemaining = Math.max(0, this.userConfig.maxBudgetEur - aiPositionsValue)
     const botCash = Math.min(botBudgetRemaining, snapshot.cash.free)
     const aiValue = botCash + aiPositionsValue
+    console.log(
+      `[engine:${this.userId}] Budget: max=€${this.userConfig.maxBudgetEur.toFixed(2)} inPositions=€${aiPositionsValue.toFixed(2)} remaining=€${botBudgetRemaining.toFixed(2)} freeCash=€${snapshot.cash.free.toFixed(2)} → botCash=€${botCash.toFixed(2)}${botBudgetRemaining < snapshot.cash.free ? ' [budget cap]' : ' [cash cap]'}`
+    )
 
     await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
 
@@ -656,7 +690,10 @@ export class EngineService {
           decision.action
         )
         if (decision.action === 'buy') {
-          this._sessionCashCommitted += decision.quantity * estimatedPrice
+          this._cashCommitments.push({
+            amount: decision.quantity * estimatedPrice,
+            expiresAt: Date.now() + CASH_COMMITMENT_TTL_MS,
+          })
           await openAiPosition(
             decision.ticker,
             decision.quantity,

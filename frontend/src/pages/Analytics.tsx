@@ -13,8 +13,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts'
-import { api, type DailySnapshot, type PnlResponse, type AiCostResponse } from '../api/client'
+import { api, type DailySnapshot, type PnlResponse, type AiCostResponse, type PnlPosition } from '../api/client'
 import StatCard from '../components/StatCard'
+import PositionDrawer from '../components/PositionDrawer'
 
 const CHART_HEIGHT = 160
 const TOOLTIP_STYLE = {
@@ -40,6 +41,15 @@ function fmtEur(v: number | null | undefined) {
 
 function fmtPct(v: number | null | undefined) {
   return v == null ? '—' : `${v.toFixed(1)}%`
+}
+
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso)
+  const day = d.getDate()
+  const month = d.toLocaleDateString('en-GB', { month: 'short' })
+  const hrs = String(d.getHours()).padStart(2, '0')
+  const mins = String(d.getMinutes()).padStart(2, '0')
+  return `${day} ${month} ${hrs}:${mins}`
 }
 
 function dateLabel(date: string) {
@@ -177,6 +187,7 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<Range>('Today')
   const [pickedDate, setPickedDate] = useState<string | null>(null)
+  const [selectedPosition, setSelectedPosition] = useState<PnlPosition | null>(null)
 
   function handleRangeChange(r: Range) {
     setRange(r)
@@ -461,7 +472,7 @@ export default function Analytics() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, 1fr)',
+          gridTemplateColumns: 'repeat(6, 1fr)',
           gap: 12,
           marginBottom: 16,
         }}
@@ -478,6 +489,13 @@ export default function Analytics() {
           value={fmtEur(-filteredStats.totalFxCost)}
           sub="T212 0.15% per leg"
           negative={filteredStats.totalFxCost > 0}
+        />
+        <StatCard
+          label="P&L after FX"
+          value={fmtEur(filteredStats.grossPnl - filteredStats.totalFxCost)}
+          sub="gross minus FX fees"
+          positive={filteredStats.grossPnl - filteredStats.totalFxCost > 0}
+          negative={filteredStats.grossPnl - filteredStats.totalFxCost < 0}
         />
         <StatCard
           label="AI cost"
@@ -861,6 +879,11 @@ export default function Analytics() {
         </div>
       )}
 
+      <PositionDrawer
+        position={selectedPosition}
+        onClose={() => setSelectedPosition(null)}
+      />
+
       {filteredClosedPositions.length > 0 &&
         (() => {
           const totalPages = Math.ceil(filteredClosedPositions.length / PAGE_SIZE)
@@ -913,12 +936,17 @@ export default function Analytics() {
                     <th style={{ textAlign: 'right' }}>Gross P&L</th>
                     <th style={{ textAlign: 'right' }}>FX fee</th>
                     <th style={{ textAlign: 'right' }}>Net P&L</th>
+                    <th>Opened</th>
                     <th>Closed</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.map((p) => (
-                    <tr key={p.id}>
+                    <tr
+                      key={p.id}
+                      onClick={() => setSelectedPosition(p)}
+                      style={{ cursor: 'pointer' }}
+                    >
                       <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
                         {p.ticker}
                       </td>
@@ -982,9 +1010,20 @@ export default function Analytics() {
                           fontSize: 12,
                           color: 'var(--color-text-muted)',
                           fontFamily: 'var(--font-code)',
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        {p.closedAt ? new Date(p.closedAt).toLocaleDateString() : '—'}
+                        {fmtDateTime(p.openedAt)}
+                      </td>
+                      <td
+                        style={{
+                          fontSize: 12,
+                          color: 'var(--color-text-muted)',
+                          fontFamily: 'var(--font-code)',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.closedAt ? fmtDateTime(p.closedAt) : '—'}
                       </td>
                     </tr>
                   ))}
@@ -992,8 +1031,9 @@ export default function Analytics() {
               </table>
               <div style={{ padding: '8px 16px', fontSize: 11, color: 'var(--color-text-muted)' }}>
                 AI positions only · net P&L deducts T212 FX fee (0.15% per leg on USD stocks) ·
-                bid/ask spread not included · <span style={{ opacity: 0.7 }}>est</span> = estimated
-                market price (no T212 fill record)
+                bid/ask spread not included · entry/exit uses actual T212 fill price where
+                available · <span style={{ opacity: 0.7 }}>est</span> = no fill record found,
+                using last known market price
               </div>
             </div>
           )

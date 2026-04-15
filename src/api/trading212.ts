@@ -263,8 +263,16 @@ export class Trading212Client {
   }
 
   async getOrderHistory(): Promise<T212Order[]> {
-    const response = await this.apiFetch<{ items: T212Order[] }>('/equity/history/orders?limit=50')
-    return response.items
+    const MAX_PAGES = 20
+    const all: T212Order[] = []
+    let path = '/equity/history/orders?limit=50'
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const response = await this.apiFetch<{ items: T212Order[]; nextPagePath?: string }>(path)
+      all.push(...response.items)
+      if (!response.nextPagePath || response.items.length === 0) break
+      path = response.nextPagePath
+    }
+    return all
   }
 
   // ── Portfolio snapshot (with short-lived cache) ───────────────────────────
@@ -292,7 +300,7 @@ export class Trading212Client {
             const data: PortfolioSnapshot = {
               cash,
               positions,
-              totalValue: cash.free + cash.invested + cash.ppl,
+              totalValue: cash.free + cash.blocked + cash.invested + cash.ppl,
               totalPpl: cash.ppl,
             }
             this._snapshotCache = { data, expiresAt: Date.now() + SNAPSHOT_TTL_MS }
@@ -313,7 +321,7 @@ export class Trading212Client {
         const data: PortfolioSnapshot = {
           cash,
           positions,
-          totalValue: cash.free + cash.invested + cash.ppl,
+          totalValue: cash.free + cash.blocked + cash.invested + cash.ppl,
           totalPpl: cash.ppl,
         }
         this._snapshotCache = { data, expiresAt: Date.now() + SNAPSHOT_TTL_MS }
