@@ -219,7 +219,7 @@ export default function Analytics() {
   const rangeCutoff: number | null = (() => {
     if (pickedDate !== null) return null
     switch (range) {
-      case 'Today': return Date.now() - 24 * 3600 * 1000
+      case 'Today': { const t = new Date(); t.setHours(0, 0, 0, 0); return t.getTime() }
       case '1W': return Date.now() - 7 * 24 * 3600 * 1000
       case '1M': return Date.now() - 30 * 24 * 3600 * 1000
       case '3M': return Date.now() - 90 * 24 * 3600 * 1000
@@ -252,7 +252,7 @@ export default function Analytics() {
 
   const periodLabel = pickedDate
     ? new Date(`${pickedDate}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-    : range === 'All' ? 'all-time' : range === 'Today' ? 'last 24h' : range
+    : range === 'All' ? 'all-time' : range === 'Today' ? 'today' : range
 
   const filteredClosedPositions = useMemo(
     () => closedPositions.filter((p) => p.closedAt && inWindow(p.closedAt)),
