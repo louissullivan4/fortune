@@ -10,6 +10,7 @@ import {
   updateHighWaterMark,
   getDailyOpenValue,
   getDailyAiOpenValue,
+  getPreviousDayAiOpenValue,
   upsertDailySnapshot,
   logDecision,
   logOrder,
@@ -498,11 +499,13 @@ export class EngineService {
 
     const dailyOpenValue = (await getDailyOpenValue(dateStr, this.userId)) ?? snapshot.totalValue
     const dailyAiOpenValue = (await getDailyAiOpenValue(dateStr, this.userId)) ?? aiValue
+    const previousDayAiValue =
+      (await getPreviousDayAiOpenValue(dateStr, this.userId)) ?? dailyAiOpenValue
 
-    const aiDrawdown = (dailyAiOpenValue - aiValue) / dailyAiOpenValue
+    const aiDrawdown = (previousDayAiValue - aiValue) / previousDayAiValue
     if (aiDrawdown > this.userConfig.dailyLossLimitPct) {
       console.log(
-        `[engine:${this.userId}] Bot daily loss limit hit (${(aiDrawdown * 100).toFixed(1)}% of bot budget) — halting for today`
+        `[engine:${this.userId}] Bot daily loss limit hit (${(aiDrawdown * 100).toFixed(1)}% vs yesterday) — halting for today`
       )
       return
     }

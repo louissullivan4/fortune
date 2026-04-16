@@ -124,6 +124,20 @@ export async function getDailyAiOpenValue(date: string, userId: string): Promise
   return res.rows[0]?.ai_open_value ?? null
 }
 
+export async function getPreviousDayAiOpenValue(
+  date: string,
+  userId: string
+): Promise<number | null> {
+  const pool = getPool()
+  const res = await pool.query<{ ai_open_value: number }>(
+    `SELECT ai_open_value FROM daily_snapshots
+     WHERE date < $1 AND user_id = $2 AND ai_open_value IS NOT NULL
+     ORDER BY date DESC LIMIT 1`,
+    [date, userId]
+  )
+  return res.rows[0]?.ai_open_value ?? null
+}
+
 export interface RecentDecision {
   timestamp: string
   action: string
