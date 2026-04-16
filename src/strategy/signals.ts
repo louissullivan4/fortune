@@ -174,11 +174,15 @@ function classifySignal(
     }
   }
 
-  if (ind.bollingerPctB !== null && signal === 'strong_buy' && ind.bollingerPctB > 0.8) {
-    reasons.push(
-      `%B cap: ${ind.bollingerPctB.toFixed(2)} > 0.80 — strong_buy downgraded to buy (price near upper band, insufficient room to reach +2% target)`
-    )
-    signal = 'buy'
+  const STRONG_BUY_UPSIDE_THRESHOLD = 0.02
+  if (signal === 'strong_buy' && ind.bollingerUpper !== null && ind.currentPrice !== null) {
+    const upsideToBand = (ind.bollingerUpper - ind.currentPrice) / ind.currentPrice
+    if (upsideToBand < STRONG_BUY_UPSIDE_THRESHOLD) {
+      reasons.push(
+        `Upside cap: ${(upsideToBand * 100).toFixed(1)}% to upper Bollinger Band — strong_buy downgraded to buy (below ${(STRONG_BUY_UPSIDE_THRESHOLD * 100).toFixed(0)}% threshold)`
+      )
+      signal = 'buy'
+    }
   }
 
   return { signal, reasons }

@@ -72,6 +72,9 @@ router.put('/', async (req, res, next) => {
     ) {
       updates.stagnant_range_pct = body.stagnantRangePct
     }
+    if (typeof body.autoStartOnRestart === 'boolean') {
+      updates.auto_start_on_restart = body.autoStartOnRestart
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' })

@@ -9,6 +9,7 @@ export interface UserConfig {
   stagnantExitEnabled: boolean
   stagnantTimeMinutes: number
   stagnantRangePct: number
+  autoStartOnRestart: boolean
 }
 
 export interface JwtPayload {
@@ -28,4 +29,5 @@ export const DEFAULT_USER_CONFIG: UserConfig = {
   stagnantExitEnabled: true,
   stagnantTimeMinutes: 120,
   stagnantRangePct: 0.012,
+  autoStartOnRestart: false,
 }

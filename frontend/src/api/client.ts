@@ -350,6 +350,7 @@ export interface Config {
   stagnantExitEnabled: boolean
   stagnantTimeMinutes: number
   stagnantRangePct: number
+  autoStartOnRestart: boolean
 }
 
 export interface Instrument {

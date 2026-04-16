@@ -472,6 +472,23 @@ export default function ConfigPage() {
               min={10}
             />
           </Field>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span
+                style={{ fontSize: 12, color: 'var(--color-text-muted)', letterSpacing: '0.03em' }}
+              >
+                Auto-start on restart
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                Engine starts automatically when the server restarts
+              </span>
+            </div>
+            <Toggle
+              value={draft.autoStartOnRestart}
+              onChange={(v) => setDraft({ ...draft, autoStartOnRestart: v })}
+            />
+          </div>
         </div>
       </div>
 
