@@ -65,6 +65,7 @@ interface StagnantCandidate {
   pctFromEntry: number
 }
 
+
 function pplBucket(pctChange: number): string {
   if (pctChange <= -5) return 'stop'
   if (pctChange <= -1) return 'down'
@@ -264,7 +265,10 @@ export class EngineService {
 
   // ── Hard exit check ─────────────────────────────────────────────────────
 
-  private async _checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): Promise<number> {
+  private async _checkHardExits(
+    snapshot: PortfolioSnapshot,
+    timestamp: string
+  ): Promise<number> {
     const openPositions = await getOpenAiPositions(this.userId)
     if (openPositions.length === 0) return 0
 
@@ -279,11 +283,12 @@ export class EngineService {
       const live = snapshot.positions.find((p) => p.ticker === pos.ticker)
       if (!live) continue
 
-      await updateHighWaterMark(pos.ticker, live.currentPrice, this.userId)
-      const hwm = Math.max(pos.highWaterMark ?? pos.entryPrice, live.currentPrice)
+      const currentPriceEur = live.currentPrice
+      await updateHighWaterMark(pos.ticker, currentPriceEur, this.userId)
+      const hwm = Math.max(pos.highWaterMark ?? pos.entryPrice, currentPriceEur)
 
-      const pctFromEntry = ((live.currentPrice - pos.entryPrice) / pos.entryPrice) * 100
-      const pctFromPeak = ((live.currentPrice - hwm) / hwm) * 100
+      const pctFromEntry = ((currentPriceEur - pos.entryPrice) / pos.entryPrice) * 100
+      const pctFromPeak = ((currentPriceEur - hwm) / hwm) * 100
 
       const stopLossPct = this.userConfig.stopLossPct * 100
       const takeProfitPct = this.userConfig.takeProfitPct * 100
@@ -310,7 +315,7 @@ export class EngineService {
           action: 'sell',
           ticker: pos.ticker,
           quantity: sellQty,
-          estimatedPrice: live.currentPrice,
+          estimatedPrice: currentPriceEur,
         },
         snapshot,
         dailyOpen ?? snapshot.totalValue,
@@ -324,7 +329,7 @@ export class EngineService {
         action: 'sell',
         ticker: pos.ticker,
         quantity: sellQty,
-        estimatedPrice: live.currentPrice,
+        estimatedPrice: currentPriceEur,
         reasoning: reason,
         signalsJson: '[]',
         portfolioJson: JSON.stringify({
@@ -336,14 +341,14 @@ export class EngineService {
 
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
-        await closeAllAiPositions(pos.ticker, live.currentPrice, timestamp, this.userId)
+        await closeAllAiPositions(pos.ticker, currentPriceEur, timestamp, this.userId)
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         await logOrder({
           decisionId,
           t212OrderId: order.id,
           status: order.status,
-          fillPrice: live.currentPrice,
+          fillPrice: currentPriceEur,
           fillQuantity: sellQty,
           timestamp,
           userId: this.userId,
@@ -414,7 +419,15 @@ export class EngineService {
         `${direction}${Math.abs(pctFromEntry).toFixed(2)}% movement from entry €${pos.entryPrice.toFixed(2)}. ` +
         `Rotating capital to better opportunities.`
 
-      candidates.push({ pos, live, currentPrice, sellQty: live.quantity, reason, minutesHeld, pctFromEntry })
+      candidates.push({
+        pos,
+        live,
+        currentPrice,
+        sellQty: live.quantity,
+        reason,
+        minutesHeld,
+        pctFromEntry,
+      })
     }
 
     return candidates
@@ -433,7 +446,9 @@ export class EngineService {
 
     for (const { pos, currentPrice, sellQty, reason } of candidates) {
       if (pos.ticker === aiSoldTicker) {
-        console.log(`[engine:${this.userId}] Stagnant exit for ${pos.ticker} deferred — AI already sold`)
+        console.log(
+          `[engine:${this.userId}] Stagnant exit for ${pos.ticker} deferred — AI already sold`
+        )
         continue
       }
 
@@ -454,7 +469,10 @@ export class EngineService {
         estimatedPrice: currentPrice,
         reasoning: reason,
         signalsJson: '[]',
-        portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, cash: snapshot.cash.free }),
+        portfolioJson: JSON.stringify({
+          totalValue: snapshot.totalValue,
+          cash: snapshot.cash.free,
+        }),
         userId: this.userId,
       })
 
@@ -627,9 +645,10 @@ export class EngineService {
       this._consecutiveFingerprintSkips = 0
     }
 
-    const deployable = botCash - CASH_BUFFER_EUR
+    const cashBuffer = CASH_BUFFER_EUR
+    const deployable = botCash - cashBuffer
     if (deployable < MIN_DEPLOYABLE_EUR && stagnantCandidates.length === 0) {
-      const reason = `Cash-constrained hold: €${botCash.toFixed(2)} bot cash (budget €${this.userConfig.maxBudgetEur} − €${aiPositionsValue.toFixed(2)} in positions), €${deployable.toFixed(2)} deployable after €${CASH_BUFFER_EUR} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
+      const reason = `Cash-constrained hold: €${botCash.toFixed(2)} bot cash (budget €${this.userConfig.maxBudgetEur} − €${aiPositionsValue.toFixed(2)} in positions), €${deployable.toFixed(2)} deployable after €${cashBuffer} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
       console.log(`[engine:${this.userId}] ${reason}`)
       await logDecision({
         timestamp,
@@ -711,8 +730,7 @@ export class EngineService {
     }
 
     // Execute stagnant exits now that the AI has had its say — skip any ticker the AI sold
-    const aiSoldTicker =
-      decision.action === 'sell' && decision.ticker ? decision.ticker : null
+    const aiSoldTicker = decision.action === 'sell' && decision.ticker ? decision.ticker : null
     if (stagnantCandidates.length > 0) {
       const stagnantExits = await this._executeStagnantExits(
         stagnantCandidates,
@@ -734,14 +752,14 @@ export class EngineService {
 
     if (decision.action !== 'hold' && decision.ticker && decision.quantity) {
       const signal = signals.find((s) => s.ticker === decision.ticker)
-      const estimatedPrice = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
+      const estimatedPriceEur = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
 
       const risk = await validateOrder(
         {
           action: decision.action,
           ticker: decision.ticker,
           quantity: decision.quantity,
-          estimatedPrice,
+          estimatedPrice: estimatedPriceEur,
         },
         botSnapshot,
         dailyOpenValue,
@@ -768,25 +786,23 @@ export class EngineService {
         console.log(
           `[engine:${this.userId}] Placing ${decision.action} order: ${decision.quantity} × ${decision.ticker}`
         )
-        const orderResult = await this.t212.placeMarketOrder(
-          decision.ticker,
-          decision.quantity,
-          decision.action
-        )
+
+        const orderResult = await this.t212.placeMarketOrder(decision.ticker, decision.quantity, decision.action)
+
         if (decision.action === 'buy') {
           this._cashCommitments.push({
-            amount: decision.quantity * estimatedPrice,
+            amount: decision.quantity * estimatedPriceEur,
             expiresAt: Date.now() + CASH_COMMITMENT_TTL_MS,
           })
           await openAiPosition(
             decision.ticker,
             decision.quantity,
-            estimatedPrice,
+            estimatedPriceEur,
             timestamp,
             this.userId
           )
         } else if (decision.action === 'sell') {
-          await closeAllAiPositions(decision.ticker, estimatedPrice, timestamp, this.userId)
+          await closeAllAiPositions(decision.ticker, estimatedPriceEur, timestamp, this.userId)
           this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
@@ -806,7 +822,7 @@ export class EngineService {
         const msg = (err as Error).message
         console.error(`[engine:${this.userId}] Order failed: ${msg}`)
         if (decision.action === 'sell' && msg.includes('selling-equity-not-owned')) {
-          await closeAllAiPositions(decision.ticker, estimatedPrice, timestamp, this.userId)
+          await closeAllAiPositions(decision.ticker, estimatedPriceEur, timestamp, this.userId)
         }
         await logOrder({
           decisionId,

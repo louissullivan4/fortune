@@ -13,14 +13,14 @@ Stagnant exits are firing far too frequently because of three compounding proble
 
 ## Current Configuration
 
-| Parameter | Value | Location |
-|---|---|---|
-| `takeProfitPct` | 1.5% | `DEFAULT_USER_CONFIG` |
-| `stopLossPct` | 5.0% | `DEFAULT_USER_CONFIG` |
-| `stagnantTimeMinutes` | 120 min | `DEFAULT_USER_CONFIG` |
-| `stagnantRangePct` | 0.5% | `DEFAULT_USER_CONFIG` |
-| `TRAIL_ACTIVATION_PCT` | 0.5% | `EngineService.ts:45` |
-| `TRAIL_STOP_PCT` | 0.4% | `EngineService.ts:46` |
+| Parameter              | Value   | Location              |
+| ---------------------- | ------- | --------------------- |
+| `takeProfitPct`        | 1.5%    | `DEFAULT_USER_CONFIG` |
+| `stopLossPct`          | 5.0%    | `DEFAULT_USER_CONFIG` |
+| `stagnantTimeMinutes`  | 120 min | `DEFAULT_USER_CONFIG` |
+| `stagnantRangePct`     | 0.5%    | `DEFAULT_USER_CONFIG` |
+| `TRAIL_ACTIVATION_PCT` | 0.5%    | `EngineService.ts:45` |
+| `TRAIL_STOP_PCT`       | 0.4%    | `EngineService.ts:46` |
 
 ---
 
@@ -83,13 +83,13 @@ A position trending toward take-profit is exited stagnantly before Claude has th
 
 ## Root Cause Summary
 
-| Root Cause | Impact |
-|---|---|
-| Take-profit (1.5%) is 3× the stagnant range (0.5%) — too wide a gap | Positions consolidating before a breakout are exited stagnantly |
-| `hasBetterOpportunity` gate accepts any weak `buy` signal | Gate almost never blocks stagnant exits in practice |
-| Trailing stop and stagnant range both at 0.5% — shared ceiling | Neither mechanism lets positions reach take-profit |
-| Stagnant exit runs before AI call | AI hold judgment never applied to stagnant candidates |
-| No momentum awareness in stagnant check | Rising positions within the range are treated the same as truly flat ones |
+| Root Cause                                                          | Impact                                                                    |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Take-profit (1.5%) is 3× the stagnant range (0.5%) — too wide a gap | Positions consolidating before a breakout are exited stagnantly           |
+| `hasBetterOpportunity` gate accepts any weak `buy` signal           | Gate almost never blocks stagnant exits in practice                       |
+| Trailing stop and stagnant range both at 0.5% — shared ceiling      | Neither mechanism lets positions reach take-profit                        |
+| Stagnant exit runs before AI call                                   | AI hold judgment never applied to stagnant candidates                     |
+| No momentum awareness in stagnant check                             | Rising positions within the range are treated the same as truly flat ones |
 
 ---
 
@@ -102,6 +102,7 @@ Changing from 0.5% to 1.2% gives positions room to consolidate within a reasonab
 This also fixes the shared threshold with the trailing stop — at 1.2%, stagnant range is well above the 0.5% trailing activation, so the two exit mechanisms no longer compete for the same price territory.
 
 **In `src/types/user.ts`:**
+
 ```typescript
 stagnantRangePct: 0.012,  // was 0.005
 ```
@@ -113,6 +114,7 @@ stagnantRangePct: 0.012,  // was 0.005
 Change the gate from accepting `buy` or `strong_buy` to only `strong_buy`. This means the engine only rotates out of a stagnant position when the alternative is genuinely compelling, not merely marginally bullish.
 
 **In `EngineService.ts:366`:**
+
 ```typescript
 const hasBetterOpportunity = signals.some(
   (s) => s.signal === 'strong_buy' && !heldTickers.has(s.ticker)

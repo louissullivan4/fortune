@@ -340,7 +340,6 @@ router.put('/me/config', async (req, res, next) => {
     ) {
       updates.stagnant_range_pct = body.stagnantRangePct
     }
-
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' })
     }

@@ -42,6 +42,7 @@ The engine uses Claude AI to make trading decisions. You need an Anthropic API k
 4. Click **+ Create Key**, give it a name, and copy it immediately
 
 Add credits to your account:
+
 1. Go to **Billing** in the console
 2. Select the **Build plan** (pay-as-you-go)
 3. Add a payment method and purchase credits - $10–25 is plenty to start
@@ -63,7 +64,7 @@ this key does have access to your entire trading 212 account. Be aware of the ri
 
 In Config, paste the Key and Secret into the **Trading 212** fields. Set the mode to **Demo** for paper trading or **Live** for real money.
 
-All keys are encrypted at rest with AES-256-GCM and never returned in plaintext. 
+All keys are encrypted at rest with AES-256-GCM and never returned in plaintext.
 
 ---
 
@@ -77,23 +78,23 @@ The list of tickers the AI can trade. The default is a set of US large-caps. Add
 
 ### Budget & exposure
 
-| Setting | Default | What it controls |
-|---|---|---|
-| Max budget per order | €100 | Hard ceiling on any single order |
-| Max position size | 25% | Largest share of the budget in one position |
+| Setting              | Default | What it controls                            |
+| -------------------- | ------- | ------------------------------------------- |
+| Max budget per order | €100    | Hard ceiling on any single order            |
+| Max position size    | 25%     | Largest share of the budget in one position |
 
 ### Engine interval
 
 - How often the engine runs a full analysis cycle. Default is 15 minutes. Shorter intervals use more Anthropic tokens.
--  Set auto start to do if you want the bot to continue when new updates are pushed (RECOMMENDED to be set to true).
+- Set auto start to do if you want the bot to continue when new updates are pushed (RECOMMENDED to be set to true).
 
 ### Exit rules
 
-| Rule | Default | Trigger |
-|---|---|---|
-| Stop-loss | 5% | Sell if position drops this much |
-| Take-profit | 1.5% | Sell if position gains this much |
-| Daily loss limit | 10% | Halt all trading for the day |
+| Rule             | Default | Trigger                          |
+| ---------------- | ------- | -------------------------------- |
+| Stop-loss        | 5%      | Sell if position drops this much |
+| Take-profit      | 1.5%    | Sell if position gains this much |
+| Daily loss limit | 10%     | Halt all trading for the day     |
 
 ### Stagnant exit (optional)
 
@@ -110,6 +111,7 @@ Go to the **Dashboard**. The engine status shows **○ stopped**.
 Click **Start**. The status changes to **● running** and shows your configured interval.
 
 The engine will:
+
 1. Fetch your current portfolio and free cash from Trading 212
 2. Pull recent price history for all tickers in your trade universe
 3. Compute technical indicators (RSI, EMA, MACD, Bollinger Bands)
@@ -125,12 +127,12 @@ You can also click **Cycle** to trigger a single analysis run without starting t
 
 The dashboard updates in real time via WebSocket.
 
-| Section | What you'll see |
-|---|---|
-| Stats row | Portfolio value, cost basis, free cash, unrealised P&L, realised P&L |
-| AI positions | Open positions opened by the engine |
-| Manual positions | Positions you hold outside the engine |
-| Recent decisions | Last 10 AI decisions with reasoning and status |
+| Section          | What you'll see                                                      |
+| ---------------- | -------------------------------------------------------------------- |
+| Stats row        | Portfolio value, cost basis, free cash, unrealised P&L, realised P&L |
+| AI positions     | Open positions opened by the engine                                  |
+| Manual positions | Positions you hold outside the engine                                |
+| Recent decisions | Last 10 AI decisions with reasoning and status                       |
 
 Use the **Signals** page to inspect indicator strength per ticker, **Analytics** for historical performance, and **History** for a full log of past trades.
 

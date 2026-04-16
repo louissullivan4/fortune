@@ -13,7 +13,13 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts'
-import { api, type DailySnapshot, type PnlResponse, type AiCostResponse, type PnlPosition } from '../api/client'
+import {
+  api,
+  type DailySnapshot,
+  type PnlResponse,
+  type AiCostResponse,
+  type PnlPosition,
+} from '../api/client'
 import StatCard from '../components/StatCard'
 import PositionDrawer from '../components/PositionDrawer'
 
@@ -879,10 +885,7 @@ export default function Analytics() {
         </div>
       )}
 
-      <PositionDrawer
-        position={selectedPosition}
-        onClose={() => setSelectedPosition(null)}
-      />
+      <PositionDrawer position={selectedPosition} onClose={() => setSelectedPosition(null)} />
 
       {filteredClosedPositions.length > 0 &&
         (() => {
@@ -1031,9 +1034,9 @@ export default function Analytics() {
               </table>
               <div style={{ padding: '8px 16px', fontSize: 11, color: 'var(--color-text-muted)' }}>
                 AI positions only · net P&L deducts T212 FX fee (0.15% per leg on USD stocks) ·
-                bid/ask spread not included · entry/exit uses actual T212 fill price where
-                available · <span style={{ opacity: 0.7 }}>est</span> = no fill record found,
-                using last known market price
+                bid/ask spread not included · entry/exit uses actual T212 fill price where available
+                · <span style={{ opacity: 0.7 }}>est</span> = no fill record found, using last known
+                market price
               </div>
             </div>
           )

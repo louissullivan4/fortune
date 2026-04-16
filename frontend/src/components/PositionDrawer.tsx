@@ -45,14 +45,23 @@ function DecisionSection({
   highlightTicker,
 }: {
   label: string
-  decision: { timestamp: string; reasoning: string; signals: Array<{ ticker: string; signal: SignalType; reasons: string[] }>; orderStatus: string | null }
+  decision: {
+    timestamp: string
+    reasoning: string
+    signals: Array<{ ticker: string; signal: SignalType; reasons: string[] }>
+    orderStatus: string | null
+  }
   highlightTicker: string
 }) {
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}
+      >
         <div className="section-label">{label}</div>
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: 'var(--font-code)' }}>
+        <div
+          style={{ fontSize: 11, color: 'var(--color-text-muted)', fontFamily: 'var(--font-code)' }}
+        >
           {fmtDateTime(decision.timestamp)}
         </div>
         {decision.orderStatus && <OrderStatusBadge status={decision.orderStatus} />}
@@ -87,8 +96,7 @@ function DecisionSection({
               <tr
                 key={s.ticker}
                 style={{
-                  background:
-                    s.ticker === highlightTicker ? 'var(--color-bg-surface)' : undefined,
+                  background: s.ticker === highlightTicker ? 'var(--color-bg-surface)' : undefined,
                 }}
               >
                 <td
@@ -253,10 +261,7 @@ export default function PositionDrawer({ position, onClose }: Props) {
                   ] as [string, string][]
                 ).map(([label, value]) => (
                   <div key={label}>
-                    <div
-                      className="section-label"
-                      style={{ fontSize: 10, marginBottom: 2 }}
-                    >
+                    <div className="section-label" style={{ fontSize: 10, marginBottom: 2 }}>
                       {label}
                     </div>
                     <div
@@ -264,8 +269,7 @@ export default function PositionDrawer({ position, onClose }: Props) {
                         fontSize: 13,
                         fontFamily: 'var(--font-code)',
                         fontWeight: label === 'net P&L' ? 500 : 400,
-                        color:
-                          label === 'net P&L' ? netPnlColor : 'var(--color-text-primary)',
+                        color: label === 'net P&L' ? netPnlColor : 'var(--color-text-primary)',
                       }}
                     >
                       {value}

@@ -18,7 +18,7 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10)
 async function autoStartEngines(): Promise<void> {
   const pool = getPool()
   const result = await pool.query<{ user_id: string }>(
-    "SELECT user_id FROM user_configs WHERE auto_start_on_restart = true"
+    'SELECT user_id FROM user_configs WHERE auto_start_on_restart = true'
   )
   if (result.rows.length === 0) return
 
