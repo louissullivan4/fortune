@@ -32,6 +32,12 @@ export interface DecideResult {
   usage: UsageSummary
 }
 
+export interface StagnantInfo {
+  ticker: string
+  minutesHeld: number
+  pctFromEntry: number
+}
+
 function formatSignals(signals: TickerSignal[]): string {
   return signals
     .map((s) => {
@@ -73,6 +79,15 @@ function formatPortfolio(snapshot: PortfolioSnapshot, userConfig: UserConfig): s
   return lines.join('\n')
 }
 
+function formatStagnantCandidates(candidates: StagnantInfo[]): string {
+  return candidates
+    .map((c) => {
+      const direction = c.pctFromEntry >= 0 ? '+' : ''
+      return `  ${c.ticker}: held ${c.minutesHeld} min, currently ${direction}${c.pctFromEntry.toFixed(2)}% from entry`
+    })
+    .join('\n')
+}
+
 function formatRecentDecisions(decisions: RecentDecision[]): string {
   if (decisions.length === 0) return '(none yet)'
   return decisions
@@ -91,23 +106,24 @@ HARD RULES — you must never violate these:
 - Never invest more than €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)} in a single stock — always use fractional shares to stay within this limit (e.g. if a stock costs €150 and your cap is €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)}, buy ${((userConfig.maxBudgetEur * userConfig.maxPositionPct) / 150).toFixed(2)} shares)
 - Never buy a stock you already hold a position in — one position per ticker maximum
 - Always keep at least €5 in cash as a buffer
-- Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop 3% from peak once +1.5% up) are handled automatically before you run — you do NOT need to issue these sells yourself
-- Stagnant exits (position held >${userConfig.stagnantTimeMinutes} minutes with <${(userConfig.stagnantRangePct * 100).toFixed(1)}% movement at break-even or better, when a stronger opportunity exists) are also handled automatically — you do NOT need to manage these
+- Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop) are handled automatically before you run — you do NOT need to issue these sells yourself
+- Stagnant positions (held >${userConfig.stagnantTimeMinutes} minutes with <${(userConfig.stagnantRangePct * 100).toFixed(1)}% movement) will be listed for your review. You may SELL them to free capital for a better opportunity, or HOLD them if you see momentum building — your judgment takes precedence
 - You may SELL a held position if technical signals have turned bearish, even if the automatic stop hasn't triggered yet
 - Only BUY stocks in the signal universe
 - NOTE: Portfolio position prices may be in their local currency (USD/GBP), not EUR — ignore total portfolio value when deciding; focus on available EUR cash
 
 STRATEGY:
-- Be aggressive with the small budget — it exists to be deployed, not sit idle
-- Buy candidates: any BUY or STRONG_BUY signal. Strongest confluences:
-    • MACD bullish crossover (MACD line crosses above signal line)
-    • Stochastic %K crossing above %D from oversold zone (<20–30)
-    • Price at or below lower Bollinger Band (%B ≤ 0.2) indicating mean-reversion opportunity
-    • EMA9 > EMA21 confirming short-term momentum, especially when SMA20 > SMA50
-    • RSI < 45 showing room to run without being overbought
-- Sell candidates (early/signal-based): overbought RSI >75, MACD bearish crossover with bearish Stochastic, or price above upper Bollinger Band — the automatic trailing stop handles exits when price reverses from peak
-- HOLD only when all signals are genuinely bearish or there is truly nothing actionable
-- Prefer buying something over sitting on cash — the budget is €${userConfig.maxBudgetEur}, use it
+- The budget exists to be deployed — prefer buying over sitting on idle cash
+- Buy candidates: any STRONG_BUY signal, or a BUY signal with strong trend confirmation. Acceptable entries:
+    • RSI 40–65 with SMA20 > SMA50 and EMA9 > EMA21 — do not refuse just because RSI is not deeply oversold
+    • MACD bullish crossover (MACD line crosses above signal line) — high conviction momentum signal
+    • Stochastic %K crossing above %D, especially from oversold zone (<30)
+    • Price near lower Bollinger Band (%B ≤ 0.35) — mean-reversion opportunity with room to run
+    • Multiple confluences (any 3 of the above) override a mildly elevated RSI
+- Do NOT refuse a STRONG_BUY just because RSI is above 50 — the signal system already penalises overbought conditions. Trust the classification
+- Sell candidates (early/signal-based): RSI >75 with price above upper Bollinger Band AND bearish Stochastic crossover — all three must align, not just one
+- HOLD only when the majority of the universe is genuinely bearish and no BUY/STRONG_BUY has reasonable technicals
+- If you have cash and at least one STRONG_BUY or two BUY signals, buy the best candidate
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown, no explanation outside the JSON:
 {
@@ -125,7 +141,8 @@ export async function decide(
   recentDecisions: RecentDecision[],
   anthropicApiKey: string,
   t212: Trading212Client,
-  userConfig: UserConfig
+  userConfig: UserConfig,
+  stagnantCandidates: StagnantInfo[] = []
 ): Promise<DecideResult> {
   const client = new Anthropic({ apiKey: anthropicApiKey })
 
@@ -138,17 +155,22 @@ export async function decide(
       s.heldPosition
   )
 
+  const stagnantSection =
+    stagnantCandidates.length > 0
+      ? `\n## Stagnant Positions Awaiting Your Decision\nThese positions have moved less than ${(userConfig.stagnantRangePct * 100).toFixed(1)}% in over ${userConfig.stagnantTimeMinutes} minutes. SELL one to rotate capital, or HOLD if you see momentum building:\n${formatStagnantCandidates(stagnantCandidates)}\n`
+      : ''
+
   const prompt = `## Current Portfolio
 ${formatPortfolio(snapshot, userConfig)}
 
 ## Market Signals (${signals.length} tickers analysed)
 ${formatSignals(actionableSignals.length > 0 ? actionableSignals : signals.slice(0, 10))}
-
+${stagnantSection}
 ## Recent Decisions (last ${recentDecisions.length})
 ${formatRecentDecisions(recentDecisions)}
 
 ## Your Task
-Analyse the above and decide on ONE action for this cycle. Be conservative — protecting capital matters more than maximising gains. Reply with JSON only.`
+Analyse the above and decide on ONE action for this cycle. Prefer deploying cash over holding idle — the stop-loss and trailing stop protect capital automatically. Reply with JSON only.`
 
   const MODEL = 'claude-sonnet-4-6'
   const message = await client.messages.create({

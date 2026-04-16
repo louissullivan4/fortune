@@ -164,6 +164,23 @@ function classifySignal(
   else if (bearishCount > bullishCount) signal = 'sell'
   else signal = 'hold'
 
+  if (ind.rsi14 !== null) {
+    if (ind.rsi14 > 80 && (signal === 'strong_buy' || signal === 'buy')) {
+      reasons.push(`RSI cap: ${ind.rsi14.toFixed(1)} > 80 — buy signal suppressed`)
+      signal = 'hold'
+    } else if (ind.rsi14 > 70 && signal === 'strong_buy') {
+      reasons.push(`RSI cap: ${ind.rsi14.toFixed(1)} > 70 — strong_buy downgraded to buy`)
+      signal = 'buy'
+    }
+  }
+
+  if (ind.bollingerPctB !== null && signal === 'strong_buy' && ind.bollingerPctB > 0.8) {
+    reasons.push(
+      `%B cap: ${ind.bollingerPctB.toFixed(2)} > 0.80 — strong_buy downgraded to buy (price near upper band, insufficient room to reach +2% target)`
+    )
+    signal = 'buy'
+  }
+
   return { signal, reasons }
 }
 

@@ -16,8 +16,9 @@ import {
   logOrder,
   logAiUsage,
   getRecentDecisions,
+  type AiPosition,
 } from '../analytics/journal.js'
-import { Trading212Client, type PortfolioSnapshot } from '../api/trading212.js'
+import { Trading212Client, type PortfolioSnapshot, type T212Position } from '../api/trading212.js'
 import { getAllHistories } from '../api/marketdata.js'
 import { generateSignals } from '../strategy/signals.js'
 import type { TickerSignal } from '../strategy/signals.js'
@@ -45,12 +46,23 @@ const TICKER_COOLDOWN_MS = 20 * 60 * 1_000
 const TRAIL_ACTIVATION_PCT = 0.5
 const TRAIL_STOP_PCT = 0.4
 const CASH_COMMITMENT_TTL_MS = 90_000
+const MAX_FINGERPRINT_SKIPS = 4
 
 // ── Signal fingerprinting ──────────────────────────────────────────────────
 
 interface SignalFingerprint {
   fingerprint: string
   lastDecisionAction: 'buy' | 'sell' | 'hold'
+}
+
+interface StagnantCandidate {
+  pos: AiPosition
+  live: T212Position
+  currentPrice: number
+  sellQty: number
+  reason: string
+  minutesHeld: number
+  pctFromEntry: number
 }
 
 function pplBucket(pctChange: number): string {
@@ -100,6 +112,8 @@ export class EngineService {
   }
   private _cycleRunning = false
   private _recentlyClosedTickers = new Map<string, number>()
+  private _lastSeenPrices = new Map<string, number>()
+  private _consecutiveFingerprintSkips = 0
 
   constructor(
     public readonly userId: string,
@@ -178,10 +192,14 @@ export class EngineService {
 
     const openPositions = await getOpenAiPositions(this.userId)
     if (openPositions.length > 0) {
-      const liveSnapshot = await this.t212.getPortfolioSnapshot()
+      const [liveSnapshot, openOrders] = await Promise.all([
+        this.t212.getPortfolioSnapshot(),
+        this.t212.getOpenOrders(),
+      ])
       const liveTickers = new Set(liveSnapshot.positions.map((p) => p.ticker))
+      const pendingOrderTickers = new Set(openOrders.map((o) => o.ticker))
       for (const pos of openPositions) {
-        if (!liveTickers.has(pos.ticker)) {
+        if (!liveTickers.has(pos.ticker) && !pendingOrderTickers.has(pos.ticker)) {
           await closeAiPosition(pos.ticker, null, new Date().toISOString(), this.userId)
           console.log(`[engine:${this.userId}] ${pos.ticker} not in T212 — marked closed`)
         }
@@ -346,26 +364,24 @@ export class EngineService {
     return exitsPlaced
   }
 
-  // ── Stagnant exit check ─────────────────────────────────────────────────
+  // ── Stagnant exit — identification ─────────────────────────────────────────
 
-  private async _checkStagnantExits(
+  private async _identifyStagnantCandidates(
     snapshot: PortfolioSnapshot,
-    signals: TickerSignal[],
-    timestamp: string
-  ): Promise<number> {
-    if (!this.userConfig.stagnantExitEnabled) return 0
+    signals: TickerSignal[]
+  ): Promise<StagnantCandidate[]> {
+    if (!this.userConfig.stagnantExitEnabled) return []
 
     const openPositions = await getOpenAiPositions(this.userId)
-    if (openPositions.length === 0) return 0
+    if (openPositions.length === 0) return []
 
     const heldTickers = new Set(openPositions.map((p) => p.ticker))
     const hasBetterOpportunity = signals.some(
-      (s) => (s.signal === 'buy' || s.signal === 'strong_buy') && !heldTickers.has(s.ticker)
+      (s) => s.signal === 'strong_buy' && !heldTickers.has(s.ticker)
     )
-    if (!hasBetterOpportunity) return 0
+    if (!hasBetterOpportunity) return []
 
-    const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId)
-    let exitsPlaced = 0
+    const candidates: StagnantCandidate[] = []
     const seenTickers = new Set<string>()
 
     for (const pos of openPositions) {
@@ -384,13 +400,43 @@ export class EngineService {
         minutesHeld >= this.userConfig.stagnantTimeMinutes &&
         Math.abs(pctFromEntry) < this.userConfig.stagnantRangePct * 100
       const atBreakEven = currentPrice >= pos.entryPrice
-
       const hwm = pos.highWaterMark ?? pos.entryPrice
       const positionRanUp = hwm > pos.entryPrice * (1 + this.userConfig.stagnantRangePct)
 
-      if (!isStagnant || !atBreakEven || positionRanUp) continue
+      const lastPrice = this._lastSeenPrices.get(pos.ticker)
+      const isTrendingUp = lastPrice !== undefined && currentPrice > lastPrice
 
-      const sellQty = live.quantity
+      if (!isStagnant || !atBreakEven || positionRanUp || isTrendingUp) continue
+
+      const direction = pctFromEntry >= 0 ? '+' : ''
+      const reason =
+        `Stagnant exit: held ${minutesHeld.toFixed(0)} minutes with only ` +
+        `${direction}${Math.abs(pctFromEntry).toFixed(2)}% movement from entry €${pos.entryPrice.toFixed(2)}. ` +
+        `Rotating capital to better opportunities.`
+
+      candidates.push({ pos, live, currentPrice, sellQty: live.quantity, reason, minutesHeld, pctFromEntry })
+    }
+
+    return candidates
+  }
+
+  // ── Stagnant exit — execution ───────────────────────────────────────────────
+
+  private async _executeStagnantExits(
+    candidates: StagnantCandidate[],
+    aiSoldTicker: string | null,
+    snapshot: PortfolioSnapshot,
+    timestamp: string
+  ): Promise<number> {
+    const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId)
+    let exitsPlaced = 0
+
+    for (const { pos, currentPrice, sellQty, reason } of candidates) {
+      if (pos.ticker === aiSoldTicker) {
+        console.log(`[engine:${this.userId}] Stagnant exit for ${pos.ticker} deferred — AI already sold`)
+        continue
+      }
+
       const risk = await validateOrder(
         { action: 'sell', ticker: pos.ticker, quantity: sellQty, estimatedPrice: currentPrice },
         snapshot,
@@ -400,12 +446,6 @@ export class EngineService {
       )
       if (!risk.allowed) continue
 
-      const direction = pctFromEntry >= 0 ? '+' : ''
-      const reason =
-        `Stagnant exit: held ${minutesHeld.toFixed(0)} minutes with only ` +
-        `${direction}${Math.abs(pctFromEntry).toFixed(2)}% movement from entry €${pos.entryPrice.toFixed(2)}. ` +
-        `Rotating capital to better opportunities.`
-
       const decisionId = await logDecision({
         timestamp,
         action: 'sell',
@@ -414,10 +454,7 @@ export class EngineService {
         estimatedPrice: currentPrice,
         reasoning: reason,
         signalsJson: '[]',
-        portfolioJson: JSON.stringify({
-          totalValue: snapshot.totalValue,
-          cash: snapshot.cash.free,
-        }),
+        portfolioJson: JSON.stringify({ totalValue: snapshot.totalValue, cash: snapshot.cash.free }),
         userId: this.userId,
       })
 
@@ -448,7 +485,16 @@ export class EngineService {
         })
       }
     }
+
     return exitsPlaced
+  }
+
+  // ── Last-seen price tracking (momentum guard) ───────────────────────────────
+
+  private _updateLastSeenPrices(snapshot: PortfolioSnapshot): void {
+    for (const pos of snapshot.positions) {
+      this._lastSeenPrices.set(pos.ticker, pos.currentPrice)
+    }
   }
 
   // ── Main cycle ─────────────────────────────────────────────────────────
@@ -547,17 +593,14 @@ export class EngineService {
       `[engine:${this.userId}] Signals: ${signals.length} tickers, ${actionable} actionable`
     )
 
-    console.log(`[engine:${this.userId}] Checking stagnant exits...`)
-    const stagnantExits = await this._checkStagnantExits(snapshot, signals, timestamp)
-    if (stagnantExits > 0) {
-      const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
-      Object.assign(snapshot, freshSnapshot)
-      this._lastSignalState = null
+    console.log(`[engine:${this.userId}] Identifying stagnant candidates...`)
+    const stagnantCandidates = await this._identifyStagnantCandidates(snapshot, signals)
+    if (stagnantCandidates.length > 0) {
       console.log(
-        `[engine:${this.userId}] ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`
+        `[engine:${this.userId}] ${stagnantCandidates.length} stagnant candidate(s): ${stagnantCandidates.map((c) => c.pos.ticker).join(', ')} — deferring to AI`
       )
     } else {
-      console.log(`[engine:${this.userId}] No stagnant exits triggered`)
+      console.log(`[engine:${this.userId}] No stagnant candidates`)
     }
 
     const currentFingerprint = computeSignalFingerprint(signals, botCash)
@@ -565,17 +608,27 @@ export class EngineService {
     const shouldSkipAi =
       lastState !== null &&
       lastState.lastDecisionAction === 'hold' &&
-      lastState.fingerprint === currentFingerprint
+      lastState.fingerprint === currentFingerprint &&
+      stagnantCandidates.length === 0
 
     if (shouldSkipAi) {
+      this._consecutiveFingerprintSkips++
+      if (this._consecutiveFingerprintSkips < MAX_FINGERPRINT_SKIPS) {
+        console.log(
+          `[engine:${this.userId}] Signals + cash unchanged since last hold — skipping AI call (${this._consecutiveFingerprintSkips}/${MAX_FINGERPRINT_SKIPS})`
+        )
+        return
+      }
       console.log(
-        `[engine:${this.userId}] Signals + cash unchanged since last hold — skipping AI call`
+        `[engine:${this.userId}] Signals unchanged for ${MAX_FINGERPRINT_SKIPS} cycles — forcing AI re-check`
       )
-      return
+      this._consecutiveFingerprintSkips = 0
+    } else {
+      this._consecutiveFingerprintSkips = 0
     }
 
     const deployable = botCash - CASH_BUFFER_EUR
-    if (deployable < MIN_DEPLOYABLE_EUR) {
+    if (deployable < MIN_DEPLOYABLE_EUR && stagnantCandidates.length === 0) {
       const reason = `Cash-constrained hold: €${botCash.toFixed(2)} bot cash (budget €${this.userConfig.maxBudgetEur} − €${aiPositionsValue.toFixed(2)} in positions), €${deployable.toFixed(2)} deployable after €${CASH_BUFFER_EUR} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
       console.log(`[engine:${this.userId}] ${reason}`)
       await logDecision({
@@ -606,13 +659,19 @@ export class EngineService {
       positions: botPositions,
       cash: { ...snapshot.cash, free: botCash },
     }
+    const stagnantInfo = stagnantCandidates.map((c) => ({
+      ticker: c.pos.ticker,
+      minutesHeld: Math.round(c.minutesHeld),
+      pctFromEntry: c.pctFromEntry,
+    }))
     const { decision, usage } = await decide(
       signals,
       botSnapshot,
       recentDecisions,
       this.anthropicApiKey,
       this.t212,
-      this.userConfig
+      this.userConfig,
+      stagnantInfo
     )
     console.log(
       `[engine:${this.userId}] Claude decision: ${decision.action.toUpperCase()} ${decision.ticker ?? ''}`
@@ -650,6 +709,28 @@ export class EngineService {
       fingerprint: currentFingerprint,
       lastDecisionAction: decision.action,
     }
+
+    // Execute stagnant exits now that the AI has had its say — skip any ticker the AI sold
+    const aiSoldTicker =
+      decision.action === 'sell' && decision.ticker ? decision.ticker : null
+    if (stagnantCandidates.length > 0) {
+      const stagnantExits = await this._executeStagnantExits(
+        stagnantCandidates,
+        aiSoldTicker,
+        snapshot,
+        timestamp
+      )
+      if (stagnantExits > 0) {
+        const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
+        Object.assign(snapshot, freshSnapshot)
+        this._lastSignalState = null
+        console.log(
+          `[engine:${this.userId}] ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`
+        )
+      }
+    }
+
+    this._updateLastSeenPrices(snapshot)
 
     if (decision.action !== 'hold' && decision.ticker && decision.quantity) {
       const signal = signals.find((s) => s.ticker === decision.ticker)

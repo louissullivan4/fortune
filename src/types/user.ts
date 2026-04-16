@@ -27,5 +27,5 @@ export const DEFAULT_USER_CONFIG: UserConfig = {
   takeProfitPct: 0.015,
   stagnantExitEnabled: true,
   stagnantTimeMinutes: 120,
-  stagnantRangePct: 0.005,
+  stagnantRangePct: 0.012,
 }
