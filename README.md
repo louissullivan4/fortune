@@ -9,7 +9,7 @@ npm install
 cp .env.example .env
 ```
 
-Fill in `.env` - see `CLAUDE.md` for all variables. At minimum:
+Fill in `.env`:
 
 ```
 DATABASE_URL=
@@ -21,12 +21,6 @@ Run migrations:
 
 ```bash
 npm run migrate
-```
-
-Create an admin user:
-
-```bash
-npm run invite-admin
 ```
 
 ## Running
