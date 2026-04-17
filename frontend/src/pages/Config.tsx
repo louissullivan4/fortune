@@ -489,7 +489,6 @@ export default function ConfigPage() {
               onChange={(v) => setDraft({ ...draft, autoStartOnRestart: v })}
             />
           </div>
-
         </div>
       </div>
 

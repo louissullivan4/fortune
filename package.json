@@ -12,7 +12,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "migrate": "tsx src/migrate.ts",
-    "invite-admin": "tsx src/tools/invite-admin.ts"
+    "invite-admin": "tsx src/tools/invite-admin.ts",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -43,6 +46,7 @@
     "@types/nodemailer": "^8.0.0",
     "@types/pg": "^8.20.0",
     "@types/ws": "^8.18.1",
+    "@vitest/coverage-v8": "^4.1.4",
     "concurrently": "^9.2.1",
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^7.0.1",
@@ -50,6 +54,7 @@
     "prettier": "^3.8.2",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
-    "typescript-eslint": "^8.58.1"
+    "typescript-eslint": "^8.58.1",
+    "vitest": "^4.1.4"
   }
 }

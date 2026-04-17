@@ -1,14 +1,24 @@
-name: CI
+name: CI / Deploy
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs for PRs (new push supersedes); never cancel a main deploy mid-flight.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
 
 jobs:
+  # ── All 5 CI checks run in parallel ───────────────────────────────────────
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -18,9 +28,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
-      # Frontend node_modules needed for type-aware lint rules
-      - run: cd frontend && npm ci
+      - uses: actions/cache@v4
+        id: root-cache
+        with:
+          path: node_modules
+          key: root-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.root-cache.outputs.cache-hit != 'true'
+        run: npm ci
       - run: npm run lint
 
   format-check:
@@ -32,7 +46,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - uses: actions/cache@v4
+        id: root-cache
+        with:
+          path: node_modules
+          key: root-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.root-cache.outputs.cache-hit != 'true'
+        run: npm ci
       - run: npm run format:check
 
   build-backend:
@@ -44,7 +64,13 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - uses: actions/cache@v4
+        id: root-cache
+        with:
+          path: node_modules
+          key: root-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.root-cache.outputs.cache-hit != 'true'
+        run: npm ci
       - run: npm run build
 
   build-frontend:
@@ -57,5 +83,104 @@ jobs:
           node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
-      - run: cd frontend && npm ci
+      - uses: actions/cache@v4
+        id: frontend-cache
+        with:
+          path: frontend/node_modules
+          key: frontend-modules-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+      - if: steps.frontend-cache.outputs.cache-hit != 'true'
+        run: cd frontend && npm ci
       - run: cd frontend && npm run build
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/cache@v4
+        id: root-cache
+        with:
+          path: node_modules
+          key: root-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.root-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - run: npm run test:coverage
+
+  docker-backend:
+    name: Docker — Backend
+    if: github.event_name == 'push'
+    needs: [lint, format-check, build-backend, build-frontend, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+  docker-frontend:
+    name: Docker — Frontend
+    if: github.event_name == 'push'
+    needs: [lint, format-check, build-backend, build-frontend, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+  migrate:
+    name: Run Migrations
+    if: github.event_name == 'push'
+    needs: [docker-backend]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/cache@v4
+        id: root-cache
+        with:
+          path: node_modules
+          key: root-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - if: steps.root-cache.outputs.cache-hit != 'true'
+        run: npm ci
+      - run: npm run migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

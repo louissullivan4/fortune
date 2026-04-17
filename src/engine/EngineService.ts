@@ -65,7 +65,6 @@ interface StagnantCandidate {
   pctFromEntry: number
 }
 
-
 function pplBucket(pctChange: number): string {
   if (pctChange <= -5) return 'stop'
   if (pctChange <= -1) return 'down'
@@ -265,10 +264,7 @@ export class EngineService {
 
   // ── Hard exit check ─────────────────────────────────────────────────────
 
-  private async _checkHardExits(
-    snapshot: PortfolioSnapshot,
-    timestamp: string
-  ): Promise<number> {
+  private async _checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): Promise<number> {
     const openPositions = await getOpenAiPositions(this.userId)
     if (openPositions.length === 0) return 0
 
@@ -787,7 +783,11 @@ export class EngineService {
           `[engine:${this.userId}] Placing ${decision.action} order: ${decision.quantity} × ${decision.ticker}`
         )
 
-        const orderResult = await this.t212.placeMarketOrder(decision.ticker, decision.quantity, decision.action)
+        const orderResult = await this.t212.placeMarketOrder(
+          decision.ticker,
+          decision.quantity,
+          decision.action
+        )
 
         if (decision.action === 'buy') {
           this._cashCommitments.push({

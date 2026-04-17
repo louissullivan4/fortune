@@ -3,9 +3,10 @@ FROM node:22 AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
-RUN npm install && npm run build
+RUN npm run build
 
 # ---- Production stage ----
 FROM nginx:alpine AS production
