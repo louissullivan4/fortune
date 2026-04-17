@@ -4,6 +4,7 @@ export interface AuthUser {
   userId: string
   email: string
   role: 'admin' | 'client'
+  firstName: string
 }
 
 interface AuthContextValue {

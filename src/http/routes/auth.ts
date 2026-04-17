@@ -46,8 +46,9 @@ router.post('/login', async (req, res, next) => {
       password_hash: string
       user_role: string
       is_active: boolean
+      first_name: string
     }>(
-      'SELECT user_id, email, password_hash, user_role, is_active FROM users WHERE email = LOWER($1) OR LOWER(username) = LOWER($1)',
+      'SELECT user_id, email, password_hash, user_role, is_active, first_name FROM users WHERE email = LOWER($1) OR LOWER(username) = LOWER($1)',
       [identifier.trim()]
     )
 
@@ -75,7 +76,12 @@ router.post('/login', async (req, res, next) => {
 
     res.json({
       accessToken,
-      user: { userId: user.user_id, email: user.email, role: user.user_role },
+      user: {
+        userId: user.user_id,
+        email: user.email,
+        role: user.user_role,
+        firstName: user.first_name,
+      },
     })
   } catch (err) {
     next(err)
@@ -273,7 +279,7 @@ router.post('/create-account', async (req, res, next) => {
 
     res.status(201).json({
       accessToken,
-      user: { userId, email: invite.email, role },
+      user: { userId, email: invite.email, role, firstName: firstName.trim() },
     })
   } catch (err) {
     next(err)

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Play, Square, RefreshCw } from 'lucide-react'
 import { api, type EngineStatus, type Portfolio, type Decision, type Summary } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
 import MarketClock from '../components/MarketClock'
 
@@ -144,6 +145,7 @@ function EngineCard({
 }
 
 export default function Dashboard() {
+  const { user } = useAuth()
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [decisions, setDecisions] = useState<Decision[]>([])
@@ -272,7 +274,7 @@ export default function Dashboard() {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Hi Louis</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Hi {user?.firstName}</h1>
         {error && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 4 }}>{error}</div>}
       </div>
 

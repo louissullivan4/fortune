@@ -28,7 +28,12 @@ function useTokenBootstrap() {
           })
           if (meRes.ok) {
             const user = await meRes.json()
-            setAuth(accessToken, { userId: user.user_id, email: user.email, role: user.user_role })
+            setAuth(accessToken, {
+              userId: user.user_id,
+              email: user.email,
+              role: user.user_role,
+              firstName: user.first_name,
+            })
           }
         }
       })
