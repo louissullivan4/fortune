@@ -1,1 +1,1 @@
-npx lint-staged && npm run build && npm run test
+npx lint-staged && npm run build && npm run test && npm run build --prefix frontend

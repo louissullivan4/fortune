@@ -62,6 +62,7 @@ export interface AuthUser {
   userId: string
   email: string
   role: 'admin' | 'client'
+  firstName: string
 }
 
 export interface UserProfile {
