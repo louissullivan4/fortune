@@ -15,7 +15,8 @@
     "invite-admin": "tsx src/tools/invite-admin.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "husky"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -32,6 +33,10 @@
     "pg": "^8.20.0",
     "ws": "^8.20.0",
     "zod": "^3.23.8"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": "eslint --fix",
+    "*.{ts,tsx,js,mjs,json,css,md,yml,yaml}": "prettier --write"
   },
   "devDependencies": {
     "@anthropic-ai/claude-code": "^2.1.97",
@@ -51,6 +56,8 @@
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.8.2",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
