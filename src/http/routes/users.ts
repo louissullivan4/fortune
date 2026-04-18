@@ -465,8 +465,8 @@ router.get('/:userId', requireAdmin, async (req, res, next) => {
 router.put('/:userId/role', requireAdmin, async (req, res, next) => {
   try {
     const { role } = req.body as { role: string }
-    if (!['admin', 'client'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin or client' })
+    if (!['admin', 'client', 'accountant'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be admin, client, or accountant' })
     }
     const pool = getPool()
     await pool.query('UPDATE users SET user_role = $1, updated_at = NOW() WHERE user_id = $2', [

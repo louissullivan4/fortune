@@ -12,6 +12,48 @@ export function getAccessToken(): string | null {
   return _accessToken
 }
 
+// ── Fetch wrapper (binary) — returns Blob for file downloads ──────────────
+
+async function reqBlob(path: string, opts?: RequestInit): Promise<Blob> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(opts?.headers as Record<string, string>),
+  }
+  if (_accessToken) headers['Authorization'] = `Bearer ${_accessToken}`
+
+  let res = await fetch(`${BASE}${path}`, {
+    credentials: 'include',
+    ...opts,
+    headers,
+  })
+
+  if (res.status === 401 && path !== '/auth/login' && path !== '/auth/refresh') {
+    const refreshRes = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (refreshRes.ok) {
+      const { accessToken } = await refreshRes.json()
+      _accessToken = accessToken
+      headers['Authorization'] = `Bearer ${accessToken}`
+      res = await fetch(`${BASE}${path}`, {
+        credentials: 'include',
+        ...opts,
+        headers,
+      })
+    } else {
+      _accessToken = null
+      throw new Error('Session expired — please log in again')
+    }
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error((body as { error?: string }).error ?? res.statusText)
+  }
+  return res.blob()
+}
+
 // ── Fetch wrapper with automatic token refresh ─────────────────────────────
 
 async function req<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -61,7 +103,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 export interface AuthUser {
   userId: string
   email: string
-  role: 'admin' | 'client'
+  role: 'admin' | 'client' | 'accountant'
   firstName: string
 }
 
@@ -325,6 +367,14 @@ export interface AiCostResponse {
   byDay: AiUsageDay[]
 }
 
+export interface ReportUser {
+  user_id: string
+  email: string
+  username: string
+  first_name: string
+  last_name: string
+}
+
 export interface Performance {
   totalDecisions: number
   totalTrades: number
@@ -491,6 +541,12 @@ export const api = {
       return req<PnlResponse>(`/analytics/pnl${qs ? `?${qs}` : ''}`)
     },
     positionDetails: (id: number) => req<PositionDetails>(`/analytics/positions/${id}/details`),
+    reportUsers: () => req<ReportUser[]>('/analytics/report-users'),
+    report: (params: { userId?: string; from: string; to: string }) =>
+      reqBlob('/analytics/report', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
   },
 
   config: {

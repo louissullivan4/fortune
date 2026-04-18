@@ -15,7 +15,7 @@ export interface UserConfig {
 export interface JwtPayload {
   userId: string
   email: string
-  role: 'admin' | 'client'
+  role: 'admin' | 'client' | 'accountant'
 }
 
 export const DEFAULT_USER_CONFIG: UserConfig = {

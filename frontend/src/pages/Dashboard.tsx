@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Play, Square, RefreshCw } from 'lucide-react'
+import { Play, Square, RefreshCw, Download } from 'lucide-react'
 import { api, type EngineStatus, type Portfolio, type Decision, type Summary } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import StatCard from '../components/StatCard'
 import MarketClock from '../components/MarketClock'
+import ExportReportModal from '../components/ExportReportModal'
 
 function fmt(n: number | null | undefined, decimals = 2, prefix = '') {
   if (n == null) return '—'
@@ -21,12 +22,14 @@ function EngineCard({
   onStart,
   onStop,
   onCycle,
+  onExport,
   loading,
 }: {
   status: EngineStatus | null
   onStart: () => void
   onStop: () => void
   onCycle: () => void
+  onExport: () => void
   loading: boolean
 }) {
   return (
@@ -63,6 +66,14 @@ function EngineCard({
         </div>
 
         <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={onExport}
+            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+          >
+            <Download size={13} />
+            Export
+          </button>
           <button
             className="btn btn-ghost"
             onClick={onCycle}
@@ -153,6 +164,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
   const [positionsRefreshing, setPositionsRefreshing] = useState(false)
   const [instrumentNames, setInstrumentNames] = useState<Record<string, string>>({})
   const instrumentNamesRef = useRef(instrumentNames)
@@ -283,8 +295,10 @@ export default function Dashboard() {
         onStart={handleStart}
         onStop={handleStop}
         onCycle={handleCycle}
+        onExport={() => setShowExportModal(true)}
         loading={loading}
       />
+      {showExportModal && <ExportReportModal onClose={() => setShowExportModal(false)} />}
 
       {/* Stats row — AI portfolio only */}
       <div

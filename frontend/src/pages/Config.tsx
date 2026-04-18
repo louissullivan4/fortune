@@ -469,7 +469,7 @@ export default function ConfigPage() {
             <DurationInput
               ms={draft.tradeIntervalMs}
               onChange={(ms) => setDraft({ ...draft, tradeIntervalMs: ms })}
-              min={10}
+              min={1}
             />
           </Field>
 
@@ -562,7 +562,7 @@ export default function ConfigPage() {
                 onChange={(ms) =>
                   setDraft({ ...draft, stagnantTimeMinutes: Math.round(ms / 60_000) })
                 }
-                min={1}
+                min={15}
                 units={['minutes', 'hours']}
               />
             </Field>

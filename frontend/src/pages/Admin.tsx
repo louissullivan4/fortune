@@ -1,7 +1,112 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api, type UserProfile, type Invitation } from '../api/client'
 import { pushToast } from '../components/Toasts'
-import { Users, Mail, CheckCircle, XCircle, Shield, User } from 'lucide-react'
+import { Users, Mail, CheckCircle, XCircle } from 'lucide-react'
+
+type UserRole = 'admin' | 'client' | 'accountant'
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Admin',
+  client: 'Client',
+  accountant: 'Accountant',
+}
+
+function RolePicker({
+  userId,
+  currentRole,
+  onChanged,
+}: {
+  userId: string
+  currentRole: string
+  onChanged: (newRole: UserRole) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  async function pick(role: UserRole) {
+    setOpen(false)
+    if (role === currentRole) return
+    try {
+      await api.users.setRole(userId, role)
+      onChanged(role)
+      pushToast(`Role changed to ${ROLE_LABELS[role]}`, 'info')
+    } catch (err) {
+      pushToast((err as Error).message, 'error')
+    }
+  }
+
+  const roleBadgeClass =
+    currentRole === 'admin'
+      ? 'badge-purple'
+      : currentRole === 'accountant'
+        ? 'badge-yellow'
+        : 'badge-blue'
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        className={`badge ${roleBadgeClass}`}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          cursor: 'pointer',
+          border: '0.5px solid transparent',
+          paddingRight: 10,
+          background: 'none',
+        }}
+        title="Change role"
+      >
+        {currentRole} ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            zIndex: 200,
+            marginTop: 4,
+            background: 'var(--color-bg-page)',
+            border: '0.5px solid var(--color-border)',
+            borderRadius: 6,
+            overflow: 'hidden',
+            minWidth: 120,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+          }}
+        >
+          {(['client', 'accountant', 'admin'] as UserRole[]).map((role) => (
+            <button
+              key={role}
+              onClick={() => pick(role)}
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '7px 12px',
+                textAlign: 'left',
+                background: role === currentRole ? 'var(--color-bg-raised)' : 'transparent',
+                border: 'none',
+                fontSize: 13,
+                fontWeight: role === currentRole ? 500 : 400,
+                color: 'var(--color-text-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              {ROLE_LABELS[role]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function Admin() {
   const [users, setUsers] = useState<UserProfile[]>([])
@@ -54,17 +159,8 @@ export default function Admin() {
     }
   }
 
-  async function toggleRole(u: UserProfile) {
-    const newRole = u.user_role === 'admin' ? 'client' : 'admin'
-    try {
-      await api.users.setRole(u.user_id, newRole)
-      pushToast(`${u.username} is now ${newRole}`, 'info')
-      setUsers((prev) =>
-        prev.map((user) => (user.user_id === u.user_id ? { ...user, user_role: newRole } : user))
-      )
-    } catch (err) {
-      pushToast((err as Error).message, 'error')
-    }
+  function handleRoleChanged(userId: string, newRole: UserRole) {
+    setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, user_role: newRole } : u)))
   }
 
   if (loading)
@@ -154,11 +250,11 @@ export default function Admin() {
                   </td>
                   <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{u.email}</td>
                   <td style={{ padding: '10px 12px' }}>
-                    <span
-                      className={`badge ${u.user_role === 'admin' ? 'badge-purple' : 'badge-blue'}`}
-                    >
-                      {u.user_role}
-                    </span>
+                    <RolePicker
+                      userId={u.user_id}
+                      currentRole={u.user_role}
+                      onChanged={(role) => handleRoleChanged(u.user_id, role)}
+                    />
                   </td>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -184,23 +280,13 @@ export default function Admin() {
                     )}
                   </td>
                   <td style={{ padding: '10px 12px' }}>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                        onClick={() => toggleRole(u)}
-                        title={u.user_role === 'admin' ? 'Make client' : 'Make admin'}
-                      >
-                        {u.user_role === 'admin' ? <User size={12} /> : <Shield size={12} />}
-                      </button>
-                      <button
-                        className={`btn ${u.is_active ? 'btn-danger' : 'btn-primary'}`}
-                        style={{ fontSize: '0.75rem', padding: '4px 8px' }}
-                        onClick={() => toggleActive(u)}
-                      >
-                        {u.is_active ? 'Deactivate' : 'Activate'}
-                      </button>
-                    </div>
+                    <button
+                      className={`btn ${u.is_active ? 'btn-danger' : 'btn-primary'}`}
+                      style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                      onClick={() => toggleActive(u)}
+                    >
+                      {u.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
                   </td>
                 </tr>
               ))}

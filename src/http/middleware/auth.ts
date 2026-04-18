@@ -38,3 +38,15 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   }
   next()
 }
+
+export function requireAdminOrAccountant(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' })
+    return
+  }
+  if (req.user.role !== 'admin' && req.user.role !== 'accountant') {
+    res.status(403).json({ error: 'Admin or accountant access required' })
+    return
+  }
+  next()
+}

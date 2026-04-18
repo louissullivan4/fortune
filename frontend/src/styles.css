@@ -482,6 +482,10 @@ select.auth-input {
   background: rgba(139, 92, 246, 0.15);
   color: #8b5cf6;
 }
+.badge-yellow {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+}
 
 /* ── Additional button variants ──────────────────────────────────────────── */
 .btn-danger {

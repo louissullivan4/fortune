@@ -3,7 +3,7 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 export interface AuthUser {
   userId: string
   email: string
-  role: 'admin' | 'client'
+  role: 'admin' | 'client' | 'accountant'
   firstName: string
 }
 

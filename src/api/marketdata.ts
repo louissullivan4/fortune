@@ -63,6 +63,9 @@ export async function getHistory(t212Ticker: string, days = 90): Promise<TickerH
     }
 
     const timestamps = result.timestamp
+    if (!timestamps?.length) {
+      return { ticker: t212Ticker, bars: [] }
+    }
     const quote = result.indicators.quote[0]
     const bars: OHLCV[] = []
 

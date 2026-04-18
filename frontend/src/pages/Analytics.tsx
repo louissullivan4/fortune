@@ -22,6 +22,8 @@ import {
 } from '../api/client'
 import StatCard from '../components/StatCard'
 import PositionDrawer from '../components/PositionDrawer'
+import { Download } from 'lucide-react'
+import ExportReportModal from '../components/ExportReportModal'
 
 const CHART_HEIGHT = 160
 const TOOLTIP_STYLE = {
@@ -194,6 +196,7 @@ export default function Analytics() {
   const [range, setRange] = useState<Range>('Today')
   const [pickedDate, setPickedDate] = useState<string | null>(null)
   const [selectedPosition, setSelectedPosition] = useState<PnlPosition | null>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
 
   function handleRangeChange(r: Range) {
     setRange(r)
@@ -467,12 +470,30 @@ export default function Analytics() {
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Analytics</h1>
-        <RangeSelector
-          value={range}
-          onChange={handleRangeChange}
-          pickedDate={pickedDate}
-          onPickDate={handlePickDate}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowExportModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              height: 28,
+              padding: '0 10px',
+              fontSize: 12,
+            }}
+            title="Export report"
+          >
+            <Download size={13} />
+            Export
+          </button>
+          <RangeSelector
+            value={range}
+            onChange={handleRangeChange}
+            pickedDate={pickedDate}
+            onPickDate={handlePickDate}
+          />
+        </div>
       </div>
 
       <div
@@ -1041,6 +1062,8 @@ export default function Analytics() {
             </div>
           )
         })()}
+
+      {showExportModal && <ExportReportModal onClose={() => setShowExportModal(false)} />}
     </div>
   )
 }
