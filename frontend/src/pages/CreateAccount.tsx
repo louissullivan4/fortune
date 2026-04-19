@@ -110,8 +110,7 @@ export default function CreateAccount() {
     <div className="auth-page">
       <div className="auth-card" style={{ maxWidth: 560 }}>
         <div className="auth-logo">
-          <span className="sidebar-logo-icon">F</span>
-          <span style={{ fontSize: '1.5rem', fontWeight: 700, marginLeft: 8 }}>Fortune</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700 }}>Fortune</span>
         </div>
         <h1 className="auth-title">Create Account</h1>
         <p style={{ color: 'var(--muted)', marginBottom: 24 }}>
