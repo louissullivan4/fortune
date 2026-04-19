@@ -9,11 +9,14 @@ import apiRouter from './http/routes/index.js'
 import { errorHandler, notFound } from './http/middleware/errors.js'
 import { getPool } from './db.js'
 
+const isDev = process.env.NODE_ENV !== 'production'
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  skip: () => isDev,
 })
 
 const authLimiter = rateLimit({
@@ -21,6 +24,7 @@ const authLimiter = rateLimit({
   max: 30,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  skip: () => isDev,
 })
 
 export function createApp() {

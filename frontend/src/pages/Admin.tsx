@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api, type UserProfile, type Invitation } from '../api/client'
 import { pushToast } from '../components/Toasts'
-import { Users, Mail, CheckCircle, XCircle } from 'lucide-react'
+import { Users, Mail, CheckCircle, XCircle, Trash2 } from 'lucide-react'
 
 type UserRole = 'admin' | 'client' | 'accountant'
 
@@ -115,6 +115,9 @@ export default function Admin() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviting, setInviting] = useState(false)
   const [tab, setTab] = useState<'users' | 'invitations'>('users')
+  const [userPage, setUserPage] = useState(1)
+  const [invitePage, setInvitePage] = useState(1)
+  const PAGE_SIZE = 10
 
   function load() {
     return Promise.all([api.users.list(), api.users.invitations()])
@@ -161,6 +164,16 @@ export default function Admin() {
 
   function handleRoleChanged(userId: string, newRole: UserRole) {
     setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, user_role: newRole } : u)))
+  }
+
+  async function deleteInvitation(id: number) {
+    try {
+      await api.users.deleteInvitation(String(id))
+      setInvitations((prev) => prev.filter((i) => i.id !== id))
+      pushToast('Invitation deleted', 'info')
+    } catch (err) {
+      pushToast((err as Error).message, 'error')
+    }
   }
 
   if (loading)
@@ -240,7 +253,7 @@ export default function Admin() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {users.slice((userPage - 1) * PAGE_SIZE, userPage * PAGE_SIZE).map((u) => (
                 <tr key={u.user_id} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 12px' }}>
                     <div style={{ fontWeight: 500 }}>
@@ -292,6 +305,41 @@ export default function Admin() {
               ))}
             </tbody>
           </table>
+          {users.length > PAGE_SIZE && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                borderTop: '0.5px solid var(--color-border)',
+                fontSize: 13,
+              }}
+            >
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                {(userPage - 1) * PAGE_SIZE + 1}–{Math.min(userPage * PAGE_SIZE, users.length)} of{' '}
+                {users.length}
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: 12 }}
+                  disabled={userPage === 1}
+                  onClick={() => setUserPage((p) => p - 1)}
+                >
+                  Prev
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: 12 }}
+                  disabled={userPage * PAGE_SIZE >= users.length}
+                  onClick={() => setUserPage((p) => p + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -315,36 +363,92 @@ export default function Admin() {
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
                   Status
                 </th>
+                <th style={{ padding: '8px 12px' }} />
               </tr>
             </thead>
             <tbody>
-              {invitations.map((inv) => {
-                const expired = new Date(inv.expires_at) < new Date()
-                const status = inv.is_used ? 'used' : expired ? 'expired' : 'pending'
-                return (
-                  <tr key={inv.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '10px 12px' }}>{inv.email}</td>
-                    <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
-                      {inv.invited_by_username ?? '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
-                      {new Date(inv.created_at).toLocaleDateString()}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
-                      {new Date(inv.expires_at).toLocaleDateString()}
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <span
-                        className={`badge ${status === 'used' ? 'badge-green' : status === 'expired' ? 'badge-red' : 'badge-blue'}`}
-                      >
-                        {status}
-                      </span>
-                    </td>
-                  </tr>
-                )
-              })}
+              {invitations
+                .slice((invitePage - 1) * PAGE_SIZE, invitePage * PAGE_SIZE)
+                .map((inv) => {
+                  const expired = new Date(inv.expires_at) < new Date()
+                  const status = inv.is_used ? 'used' : expired ? 'expired' : 'pending'
+                  return (
+                    <tr key={inv.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '10px 12px' }}>{inv.email}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
+                        {inv.invited_by_username ?? '—'}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
+                        {new Date(inv.created_at).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
+                        {new Date(inv.expires_at).toLocaleDateString()}
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span
+                          className={`badge ${status === 'used' ? 'badge-green' : status === 'expired' ? 'badge-red' : 'badge-blue'}`}
+                        >
+                          {status}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        {(status === 'expired' || status === 'used') && (
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: 12,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Delete"
+                            onClick={() => deleteInvitation(Number(inv.id))}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
             </tbody>
           </table>
+          {invitations.length > PAGE_SIZE && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                borderTop: '0.5px solid var(--color-border)',
+                fontSize: 13,
+              }}
+            >
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                {(invitePage - 1) * PAGE_SIZE + 1}–
+                {Math.min(invitePage * PAGE_SIZE, invitations.length)} of {invitations.length}
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: 12 }}
+                  disabled={invitePage === 1}
+                  onClick={() => setInvitePage((p) => p - 1)}
+                >
+                  Prev
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 10px', fontSize: 12 }}
+                  disabled={invitePage * PAGE_SIZE >= invitations.length}
+                  onClick={() => setInvitePage((p) => p + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -438,6 +438,24 @@ router.get('/invitations', requireAdmin, async (_req, res, next) => {
   }
 })
 
+// ── DELETE /api/users/invitations/:id — delete expired invitation (admin) ───
+router.delete('/invitations/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const pool = getPool()
+    const result = await pool.query(
+      `DELETE FROM user_invitations
+       WHERE id = $1 AND (is_used = true OR expires_at < NOW())
+       RETURNING id`,
+      [req.params.id]
+    )
+    if (result.rowCount === 0)
+      return res.status(400).json({ error: 'Invitation not found or not expired/used' })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ── GET /api/users/:userId — get user (admin) ──────────────────────────────
 router.get('/:userId', requireAdmin, async (req, res, next) => {
   try {

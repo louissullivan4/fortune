@@ -4,7 +4,7 @@
   "description": "Autonomous stock trader — Claude-driven, T212-executed, €100 hard cap",
   "type": "module",
   "scripts": {
-    "start": "concurrently --names api,ui --prefix-colors cyan,yellow \"tsx src/server-entry.ts\" \"cd frontend && npm run dev\"",
+    "start": "concurrently --names api,ui --prefix-colors cyan,yellow \"tsx watch --ignore './frontend' --ignore './node_modules' src/server-entry.ts\" \"cd frontend && npm run dev\"",
     "server": "tsx src/server-entry.ts",
     "dev": "tsx src/main.ts",
     "build": "tsc",

@@ -411,6 +411,8 @@ export interface Instrument {
   currencyCode: string
   type: string
   minTradeQuantity: number
+  maxOpenQuantity?: number
+  isin?: string
 }
 
 // ── API functions ─────────────────────────────────────────────────────────
@@ -480,6 +482,8 @@ export const api = {
         body: JSON.stringify({ email }),
       }),
     invitations: () => req<Invitation[]>('/users/invitations'),
+    deleteInvitation: (id: string) =>
+      req<{ ok: boolean }>(`/users/invitations/${id}`, { method: 'DELETE' }),
     setRole: (userId: string, role: string) =>
       req<{ ok: boolean }>(`/users/${userId}/role`, {
         method: 'PUT',
@@ -564,5 +568,9 @@ export const api = {
       )
       return res.data.find((i) => i.ticker === ticker) ?? null
     },
+    resolve: (tickers: string[]) =>
+      req<Record<string, Instrument>>(
+        `/instruments/resolve?tickers=${encodeURIComponent(tickers.join(','))}`
+      ),
   },
 }

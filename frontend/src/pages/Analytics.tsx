@@ -15,17 +15,18 @@ import {
 } from 'recharts'
 import {
   api,
-  type DailySnapshot,
   type PnlResponse,
   type AiCostResponse,
   type PnlPosition,
+  type Summary,
 } from '../api/client'
 import StatCard from '../components/StatCard'
 import PositionDrawer from '../components/PositionDrawer'
-import { Download } from 'lucide-react'
+import { Download, ChevronDown } from 'lucide-react'
 import ExportReportModal from '../components/ExportReportModal'
 
 const CHART_HEIGHT = 160
+const CHART_HEIGHT_HERO = 220
 const TOOLTIP_STYLE = {
   background: 'var(--color-bg-surface)',
   border: '0.5px solid var(--color-border)',
@@ -107,7 +108,7 @@ function RangeSelector({
               onPickDate(null)
             }}
             style={{
-              height: 28,
+              height: 32,
               padding: '0 12px',
               border: 'none',
               borderRight: i < options.length - 1 ? '0.5px solid var(--color-border)' : 'none',
@@ -117,7 +118,7 @@ function RangeSelector({
                 value === r && pickedDate === null
                   ? 'var(--color-text-primary)'
                   : 'var(--color-text-muted)',
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: value === r && pickedDate === null ? 500 : 400,
               cursor: 'pointer',
               transition: 'background 150ms ease, color 150ms ease',
@@ -133,13 +134,13 @@ function RangeSelector({
         max={localDateStr(new Date())}
         onChange={(e) => onPickDate(e.target.value || null)}
         style={{
-          height: 28,
+          height: 32,
           padding: '0 8px',
           border: `0.5px solid ${pickedDate ? 'var(--color-accent)' : 'var(--color-border)'}`,
           borderRadius: 4,
           background: 'var(--color-bg-surface)',
           color: pickedDate ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-          fontSize: 12,
+          fontSize: 13,
           cursor: 'pointer',
           outline: 'none',
         }}
@@ -187,16 +188,17 @@ function Empty() {
 
 const PAGE_SIZE = 10
 
-export default function Analytics() {
+export default function Performance() {
   const [posPage, setPosPage] = useState(1)
-  const [snapshots, setSnapshots] = useState<DailySnapshot[]>([])
   const [pnlData, setPnlData] = useState<PnlResponse | null>(null)
   const [aiCost, setAiCost] = useState<AiCostResponse | null>(null)
+  const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<Range>('Today')
   const [pickedDate, setPickedDate] = useState<string | null>(null)
   const [selectedPosition, setSelectedPosition] = useState<PnlPosition | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [costSectionOpen, setCostSectionOpen] = useState(false)
 
   function handleRangeChange(r: Range) {
     setRange(r)
@@ -208,11 +210,11 @@ export default function Analytics() {
   }
 
   useEffect(() => {
-    Promise.all([api.analytics.snapshots(365), api.analytics.pnl(), api.analytics.aiCost()])
-      .then(([snaps, pnl, ai]) => {
-        setSnapshots(snaps.data)
+    Promise.all([api.analytics.pnl(), api.analytics.aiCost(), api.analytics.summary()])
+      .then(([pnl, ai, sum]) => {
         setPnlData(pnl)
         setAiCost(ai)
+        setSummary(sum)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -356,14 +358,6 @@ export default function Analytics() {
       })
   }, [filteredClosedPositions, isHourlyMode])
 
-  const portfolioPoints = useMemo(
-    () =>
-      snapshots
-        .filter((s) => inWindowDate(s.date))
-        .map((s) => ({ label: dateLabel(s.date), value: s.value })),
-    [snapshots, pickedDate, range]
-  )
-
   const dailyPnlPoints = useMemo(() => {
     if (isHourlyMode) return []
     const byDate: Record<string, number> = {}
@@ -461,27 +455,26 @@ export default function Analytics() {
 
   return (
     <div>
+      {/* Sticky page header */}
       <div
         style={{
+          position: 'sticky',
+          top: 'var(--header-height)',
+          zIndex: 10,
+          background: 'var(--color-bg-page)',
+          paddingBottom: 12,
+          marginBottom: 12,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: 24,
         }}
       >
-        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Analytics</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Performance</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button
             className="btn btn-secondary"
             onClick={() => setShowExportModal(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              height: 28,
-              padding: '0 10px',
-              fontSize: 12,
-            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
             title="Export report"
           >
             <Download size={13} />
@@ -496,10 +489,11 @@ export default function Analytics() {
         </div>
       </div>
 
+      {/* KPI cards */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(6, 1fr)',
+          gridTemplateColumns: 'repeat(7, 1fr)',
           gap: 12,
           marginBottom: 16,
         }}
@@ -542,38 +536,21 @@ export default function Analytics() {
           value={fmtPct(filteredStats.winRate)}
           sub={`${filteredStats.wins}W · ${filteredStats.losses}L · ${filteredStats.totalTrades} trades`}
         />
+        <StatCard
+          label="Realised P&L"
+          value={fmtEur(summary?.realizedPnl)}
+          sub="all time"
+          positive={(summary?.realizedPnl ?? 0) > 0}
+          negative={(summary?.realizedPnl ?? 0) < 0}
+        />
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
-        <ChartCard title="portfolio value">
-          {isHourlyMode ? (
-            <div
-              style={{
-                height: CHART_HEIGHT,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 4,
-              }}
-            >
-              <div style={{ fontSize: 22, fontWeight: 500 }}>
-                {portfolioPoints[portfolioPoints.length - 1]?.value != null
-                  ? `€${portfolioPoints[portfolioPoints.length - 1].value.toFixed(2)}`
-                  : '—'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>latest snapshot</div>
-            </div>
-          ) : portfolioPoints.length >= 1 ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <LineChart data={portfolioPoints}>
+      {/* Row 3: Cumulative P&L hero (2/3) + Win/Loss donut (1/3) */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
+        <ChartCard title="cumulative P&L" sub={periodLabel}>
+          {(isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length >= 1 ? (
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT_HERO}>
+              <LineChart data={isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
                 <XAxis
                   dataKey="label"
@@ -591,17 +568,90 @@ export default function Analytics() {
                 />
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'Value']}
+                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'Cumulative P&L']}
                 />
                 <Line
                   type="monotone"
-                  dataKey="value"
-                  stroke={COLOR_ACCENT}
+                  dataKey="cumPnl"
+                  stroke={lastCumPnl >= 0 ? COLOR_GREEN : COLOR_RED}
                   strokeWidth={1.5}
-                  dot={portfolioPoints.length === 1 ? { r: 3 } : false}
+                  dot={
+                    (isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length === 1
+                      ? { r: 3 }
+                      : false
+                  }
                   isAnimationActive={false}
                 />
               </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty />
+          )}
+        </ChartCard>
+
+        <ChartCard title="win / loss" sub={periodLabel}>
+          {winLossData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT_HERO}>
+              <PieChart>
+                <Pie
+                  data={winLossData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={52}
+                  outerRadius={76}
+                  dataKey="value"
+                  isAnimationActive={false}
+                >
+                  <Cell fill={COLOR_GREEN} fillOpacity={0.8} />
+                  <Cell fill={COLOR_RED} fillOpacity={0.7} />
+                </Pie>
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number, name: string) => [v, name]}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty />
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Row 4: P&L by Ticker + P&L by Hour side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        <ChartCard title="P&L by ticker" sub={periodLabel}>
+          {tickerPnlBars.length > 0 ? (
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <BarChart data={tickerPnlBars} layout="vertical">
+                <XAxis
+                  type="number"
+                  tick={AXIS_TICK}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={fmtEurAxis}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker"
+                  tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={80}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']}
+                />
+                <Bar dataKey="pnl" isAnimationActive={false} radius={[0, 2, 2, 0]}>
+                  {tickerPnlBars.map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED}
+                      fillOpacity={0.75}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           ) : (
             <Empty />
@@ -646,275 +696,16 @@ export default function Analytics() {
             <Empty />
           )}
         </ChartCard>
-
-        <ChartCard title="cumulative P&L" sub={periodLabel}>
-          {(isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length >= 1 ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <LineChart data={isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints}>
-                <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis
-                  dataKey="label"
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={fmtEurAxis}
-                  width={52}
-                />
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'Cumulative P&L']}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="cumPnl"
-                  stroke={lastCumPnl >= 0 ? COLOR_GREEN : COLOR_RED}
-                  strokeWidth={1.5}
-                  dot={
-                    (isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length === 1
-                      ? { r: 3 }
-                      : false
-                  }
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
-
-        <ChartCard title={isHourlyMode ? 'trades by hour' : 'trades per day'}>
-          {(isHourlyMode ? hourlyTradesPoints : tradesPerDayPoints).some((p) => p.trades > 0) ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={isHourlyMode ? hourlyTradesPoints : tradesPerDayPoints}>
-                <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis
-                  dataKey="label"
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                  width={32}
-                />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [v, 'Trades']} />
-                <Bar
-                  dataKey="trades"
-                  fill={COLOR_ACCENT}
-                  fillOpacity={0.65}
-                  isAnimationActive={false}
-                  radius={[2, 2, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
-
-        <ChartCard title="win / loss" sub={periodLabel}>
-          {winLossData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <PieChart>
-                <Pie
-                  data={winLossData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={42}
-                  outerRadius={62}
-                  dataKey="value"
-                  isAnimationActive={false}
-                >
-                  <Cell fill={COLOR_GREEN} fillOpacity={0.8} />
-                  <Cell fill={COLOR_RED} fillOpacity={0.7} />
-                </Pie>
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number, name: string) => [v, name]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
-
-        <ChartCard title="P&L by ticker" sub={periodLabel}>
-          {tickerPnlBars.length > 0 ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={tickerPnlBars} layout="vertical">
-                <XAxis
-                  type="number"
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={fmtEurAxis}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="ticker"
-                  tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={80}
-                />
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number) => [`€${v.toFixed(2)}`, 'P&L']}
-                />
-                <Bar dataKey="pnl" isAnimationActive={false} radius={[0, 2, 2, 0]}>
-                  {tickerPnlBars.map((entry, i) => (
-                    <Cell
-                      key={i}
-                      fill={entry.pnl >= 0 ? COLOR_GREEN : COLOR_RED}
-                      fillOpacity={0.75}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
-
-        <ChartCard title="AI cost per day">
-          {aiCostPoints.some((p) => p.cost > 0) ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={aiCostPoints}>
-                <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis
-                  dataKey="label"
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={fmtUsdAxis}
-                  width={56}
-                />
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number) => [`$${v.toFixed(5)}`, 'Cost']}
-                />
-                <Bar
-                  dataKey="cost"
-                  fill={COLOR_ACCENT}
-                  fillOpacity={0.65}
-                  isAnimationActive={false}
-                  radius={[2, 2, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
-
-        <ChartCard title="AI calls per day">
-          {aiCallsPoints.some((p) => p.calls > 0) ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={aiCallsPoints}>
-                <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis
-                  dataKey="label"
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                  width={32}
-                />
-                <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => [v, 'Calls']} />
-                <Bar
-                  dataKey="calls"
-                  fill={COLOR_ACCENT}
-                  fillOpacity={0.45}
-                  isAnimationActive={false}
-                  radius={[2, 2, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
-
-        <ChartCard title="avg hold time" sub={`hours · ${periodLabel}`}>
-          {holdTimeBars.length > 0 ? (
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={holdTimeBars} layout="vertical">
-                <XAxis
-                  type="number"
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v: number) => `${v}h`}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="ticker"
-                  tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={80}
-                />
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number) => [`${v}h`, 'Avg hold']}
-                />
-                <Bar
-                  dataKey="avgHours"
-                  fill={COLOR_ACCENT}
-                  fillOpacity={0.45}
-                  isAnimationActive={false}
-                  radius={[0, 2, 2, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty />
-          )}
-        </ChartCard>
       </div>
 
-      {filteredAiCalls > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-          AI cost: ${filteredAiCostUsd.toFixed(4)} total · {filteredAiCalls} calls · avg $
-          {filteredAiCalls > 0 ? (filteredAiCostUsd / filteredAiCalls).toFixed(5) : '0.00000'}/call
-          · claude-sonnet-4-6 · $3/MTok in · $15/MTok out
-        </div>
-      )}
-
-      <PositionDrawer position={selectedPosition} onClose={() => setSelectedPosition(null)} />
-
-      {filteredClosedPositions.length > 0 &&
+      {/* Row 5: Closed positions table */}
+      {filteredClosedPositions.length > 0 ? (
         (() => {
           const totalPages = Math.ceil(filteredClosedPositions.length / PAGE_SIZE)
           const page = Math.min(posPage, totalPages)
           const pageRows = filteredClosedPositions.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
           return (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 12 }}>
               <div
                 style={{
                   padding: '16px 16px 12px',
@@ -1061,8 +852,217 @@ export default function Analytics() {
               </div>
             </div>
           )
-        })()}
+        })()
+      ) : (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="section-label" style={{ marginBottom: 8 }}>
+            closed positions
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+            No closed positions for this period
+          </div>
+        </div>
+      )}
 
+      {/* Row 6: Collapsible Cost & Usage section */}
+      <div className="card" style={{ marginBottom: 12 }}>
+        <button
+          onClick={() => setCostSectionOpen((o) => !o)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            width: '100%',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          <span className="section-label">cost & usage</span>
+          <ChevronDown
+            size={14}
+            style={{
+              color: 'var(--color-text-muted)',
+              transform: costSectionOpen ? 'rotate(180deg)' : 'none',
+              transition: 'transform 150ms ease',
+            }}
+          />
+        </button>
+
+        {costSectionOpen && (
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 12,
+                marginTop: 16,
+              }}
+            >
+              <ChartCard title="AI cost per day">
+                {aiCostPoints.some((p) => p.cost > 0) ? (
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                    <BarChart data={aiCostPoints}>
+                      <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+                      <XAxis
+                        dataKey="label"
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={fmtUsdAxis}
+                        width={56}
+                      />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number) => [`$${v.toFixed(5)}`, 'Cost']}
+                      />
+                      <Bar
+                        dataKey="cost"
+                        fill={COLOR_ACCENT}
+                        fillOpacity={0.65}
+                        isAnimationActive={false}
+                        radius={[2, 2, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Empty />
+                )}
+              </ChartCard>
+
+              <ChartCard title="AI calls per day">
+                {aiCallsPoints.some((p) => p.calls > 0) ? (
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                    <BarChart data={aiCallsPoints}>
+                      <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+                      <XAxis
+                        dataKey="label"
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        allowDecimals={false}
+                        width={32}
+                      />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number) => [v, 'Calls']}
+                      />
+                      <Bar
+                        dataKey="calls"
+                        fill={COLOR_ACCENT}
+                        fillOpacity={0.45}
+                        isAnimationActive={false}
+                        radius={[2, 2, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Empty />
+                )}
+              </ChartCard>
+
+              <ChartCard title="avg hold time" sub={`hours · ${periodLabel}`}>
+                {holdTimeBars.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                    <BarChart data={holdTimeBars} layout="vertical">
+                      <XAxis
+                        type="number"
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(v: number) => `${v}h`}
+                      />
+                      <YAxis
+                        type="category"
+                        dataKey="ticker"
+                        tick={{ ...AXIS_TICK, fontFamily: 'var(--font-code)' }}
+                        tickLine={false}
+                        axisLine={false}
+                        width={80}
+                      />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number) => [`${v}h`, 'Avg hold']}
+                      />
+                      <Bar
+                        dataKey="avgHours"
+                        fill={COLOR_ACCENT}
+                        fillOpacity={0.45}
+                        isAnimationActive={false}
+                        radius={[0, 2, 2, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Empty />
+                )}
+              </ChartCard>
+
+              <ChartCard title={isHourlyMode ? 'trades by hour' : 'trades per day'}>
+                {(isHourlyMode ? hourlyTradesPoints : tradesPerDayPoints).some(
+                  (p) => p.trades > 0
+                ) ? (
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                    <BarChart data={isHourlyMode ? hourlyTradesPoints : tradesPerDayPoints}>
+                      <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+                      <XAxis
+                        dataKey="label"
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
+                      />
+                      <YAxis
+                        tick={AXIS_TICK}
+                        tickLine={false}
+                        axisLine={false}
+                        allowDecimals={false}
+                        width={32}
+                      />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(v: number) => [v, 'Trades']}
+                      />
+                      <Bar
+                        dataKey="trades"
+                        fill={COLOR_ACCENT}
+                        fillOpacity={0.65}
+                        isAnimationActive={false}
+                        radius={[2, 2, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <Empty />
+                )}
+              </ChartCard>
+            </div>
+
+            {filteredAiCalls > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 12 }}>
+                AI cost: ${filteredAiCostUsd.toFixed(4)} total · {filteredAiCalls} calls · avg $
+                {(filteredAiCostUsd / filteredAiCalls).toFixed(5)}/call · claude-sonnet-4-6 ·
+                $3/MTok in · $15/MTok out
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <PositionDrawer position={selectedPosition} onClose={() => setSelectedPosition(null)} />
       {showExportModal && <ExportReportModal onClose={() => setShowExportModal(false)} />}
     </div>
   )

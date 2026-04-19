@@ -31,6 +31,8 @@ export interface T212Instrument {
   currencyCode: string
   type: string
   minTradeQuantity: number
+  maxOpenQuantity?: number
+  isin?: string
 }
 
 export interface T212Order {
@@ -147,6 +149,9 @@ export class Trading212Client {
   private _snapshotCache: { data: PortfolioSnapshot; expiresAt: number } | null = null
   private _snapshotRefreshing = false
   private _snapshotInFlight: Promise<PortfolioSnapshot> | null = null
+  private _orderHistoryCache: { data: T212Order[]; expiresAt: number } | null = null
+  private _orderHistoryRefreshing = false
+  private _orderHistoryInFlight: Promise<T212Order[]> | null = null
 
   constructor(
     private keyId: string,
@@ -262,7 +267,7 @@ export class Trading212Client {
     await this.apiFetch<unknown>(`/equity/orders/${orderId}`, { method: 'DELETE' })
   }
 
-  async getOrderHistory(): Promise<T212Order[]> {
+  private async fetchOrderHistoryPages(): Promise<T212Order[]> {
     const MAX_PAGES = 20
     const all: T212Order[] = []
     let path = '/equity/history/orders?limit=50'
@@ -273,6 +278,50 @@ export class Trading212Client {
       path = response.nextPagePath
     }
     return all
+  }
+
+  async getOrderHistory(): Promise<T212Order[]> {
+    const ORDER_HISTORY_TTL_MS = 5 * 60_000
+
+    if (this._orderHistoryCache && Date.now() < this._orderHistoryCache.expiresAt) {
+      return this._orderHistoryCache.data
+    }
+
+    // Stale-while-revalidate: return expired cache, refresh in background.
+    if (this._orderHistoryCache) {
+      if (!this._orderHistoryRefreshing) {
+        this._orderHistoryRefreshing = true
+        this.fetchOrderHistoryPages()
+          .then((data) => {
+            this._orderHistoryCache = { data, expiresAt: Date.now() + ORDER_HISTORY_TTL_MS }
+          })
+          .catch(() => {})
+          .finally(() => {
+            this._orderHistoryRefreshing = false
+          })
+      }
+      return this._orderHistoryCache.data
+    }
+
+    // Cold start — deduplicate concurrent callers onto a single in-flight fetch.
+    if (this._orderHistoryInFlight) return this._orderHistoryInFlight
+
+    this._orderHistoryInFlight = this.fetchOrderHistoryPages()
+      .then((data) => {
+        this._orderHistoryCache = { data, expiresAt: Date.now() + ORDER_HISTORY_TTL_MS }
+        return data
+      })
+      .finally(() => {
+        this._orderHistoryInFlight = null
+      })
+
+    return this._orderHistoryInFlight
+  }
+
+  invalidateOrderHistoryCache(): void {
+    this._orderHistoryCache = null
+    this._orderHistoryRefreshing = false
+    this._orderHistoryInFlight = null
   }
 
   // ── Portfolio snapshot (with short-lived cache) ───────────────────────────

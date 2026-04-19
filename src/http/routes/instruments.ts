@@ -37,4 +37,35 @@ router.get('/search', async (req, res, next) => {
   }
 })
 
+// GET /api/instruments/resolve?tickers=AAPL,MSFT — bulk lookup by exact ticker
+router.get('/resolve', async (req, res, next) => {
+  try {
+    const raw = (req.query.tickers as string) ?? ''
+    const tickers = raw
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+    if (tickers.length === 0) return res.json({})
+
+    const userId = req.user!.userId
+    const keys = await getUserApiKeys(userId)
+    if (!keys?.t212KeyId || !keys?.t212KeySecret) {
+      throw new Error('T212 API keys not configured')
+    }
+
+    const t212 = getOrCreateT212Client(userId, keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
+    const instruments = await t212.getInstruments()
+
+    const result: Record<string, unknown> = {}
+    for (const ticker of tickers) {
+      const inst = instruments.get(ticker)
+      if (inst) result[ticker] = inst
+    }
+
+    res.json(result)
+  } catch (err) {
+    next(err)
+  }
+})
+
 export default router

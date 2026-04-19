@@ -35,8 +35,8 @@ export default function ResetPassword() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <span className="sidebar-logo-icon">T</span>
-          <span style={{ fontSize: '1.5rem', fontWeight: 700, marginLeft: 8 }}>Trader</span>
+          <span className="sidebar-logo-icon">F</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, marginLeft: 8 }}>Fortune</span>
         </div>
         <h1 className="auth-title">Reset Password</h1>
 

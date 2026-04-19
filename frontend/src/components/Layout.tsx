@@ -2,31 +2,36 @@ import { useEffect, useState } from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import {
   LayoutDashboard,
-  Zap,
-  Clock,
+  History as HistoryIcon,
   BarChart2,
   Settings,
   User,
   Shield,
   LogOut,
 } from 'lucide-react'
-import Dashboard from '../pages/Dashboard'
-import Signals from '../pages/Signals'
-import History from '../pages/History'
-import Analytics from '../pages/Analytics'
+import Overview from '../pages/Dashboard'
+import Performance from '../pages/Analytics'
+import SignalsAndTrades from '../pages/Signals'
 import Config from '../pages/Config'
 import Profile from '../pages/Profile'
 import Admin from '../pages/Admin'
 import { useAuth } from '../context/AuthContext'
-import { setAccessToken, api } from '../api/client'
+import { setAccessToken, api, type EngineStatus } from '../api/client'
 
 const nav = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/analytics', label: 'Analytics', icon: BarChart2 },
-  { to: '/signals', label: 'Signals', icon: Zap },
-  { to: '/history', label: 'History', icon: Clock },
-  { to: '/config', label: 'Config', icon: Settings },
+  { to: '/overview', label: 'Overview', icon: LayoutDashboard },
+  { to: '/performance', label: 'Performance', icon: BarChart2 },
+  { to: '/history', label: 'History', icon: HistoryIcon },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
+
+function isNYSEOpen(): boolean {
+  const now = new Date()
+  const day = now.getUTCDay()
+  if (day === 0 || day === 6) return false
+  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes()
+  return minutes >= 14 * 60 + 30 && minutes < 21 * 60
+}
 
 interface Props {
   wsConnected: boolean
@@ -34,13 +39,17 @@ interface Props {
 
 export default function Layout({ wsConnected: _wsConnected }: Props) {
   const { user, logout } = useAuth()
-  const [username, setUsername] = useState<string | null>(null)
+  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
 
   useEffect(() => {
-    api.users
-      .me()
-      .then((p) => setUsername(p.username || null))
-      .catch(() => {})
+    const load = () =>
+      api.engine
+        .status()
+        .then(setEngineStatus)
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
   }, [])
 
   async function handleLogout() {
@@ -48,28 +57,27 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
     setAccessToken(null)
   }
 
-  const displayName = username ?? user?.email?.split('@')[0] ?? '?'
-  const initials = displayName.slice(0, 2).toUpperCase()
+  const nyseOpen = isNYSEOpen()
 
   return (
-    <div className="layout sidebar-collapsed">
+    <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <span className="sidebar-logo-icon">T</span>
+          <span className="sidebar-wordmark">Fortune</span>
         </div>
 
         <hr className="divider" />
 
         <nav style={{ padding: '8px 0', flex: 1 }}>
-          {nav.map(({ to, label, icon: Icon, end }) => (
+          {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
-              end={end}
               title={label}
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
-              <Icon size={16} />
+              <Icon size={15} style={{ flexShrink: 0 }} />
+              <span className="nav-label">{label}</span>
             </NavLink>
           ))}
 
@@ -78,7 +86,8 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
             title="Profile"
             className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
           >
-            <User size={16} />
+            <User size={15} style={{ flexShrink: 0 }} />
+            <span className="nav-label">Profile</span>
           </NavLink>
 
           {user?.role === 'admin' && (
@@ -87,50 +96,86 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
               title="Admin"
               className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
             >
-              <Shield size={16} />
+              <Shield size={15} style={{ flexShrink: 0 }} />
+              <span className="nav-label">Admin</span>
             </NavLink>
           )}
         </nav>
 
         <hr className="divider" />
 
-        {user && (
-          <div
-            title={username ?? user.email}
-            style={{ display: 'flex', justifyContent: 'center', padding: '10px 0' }}
-          >
-            <div className="nav-avatar">{initials}</div>
+        {/* Status indicators */}
+        <div style={{ padding: '10px 16px 4px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+          {/* NYSE */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                flexShrink: 0,
+                background: nyseOpen ? '#16a34a' : 'var(--color-text-muted)',
+              }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+              NYSE {nyseOpen ? 'open' : 'closed'}
+            </span>
           </div>
-        )}
+
+          {/* Engine */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                flexShrink: 0,
+                background: engineStatus?.running ? '#16a34a' : 'var(--color-text-muted)',
+              }}
+            />
+            <span
+              style={{
+                fontSize: 11,
+                color: engineStatus?.running
+                  ? 'var(--color-text-secondary)'
+                  : 'var(--color-text-muted)',
+              }}
+            >
+              Engine {engineStatus?.running ? 'running' : 'stopped'}
+            </span>
+          </div>
+        </div>
+
+        <hr className="divider" />
 
         <button
           className="nav-item"
           onClick={handleLogout}
           title="Sign out"
-          style={{
-            width: '100%',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--color-text-muted)',
-          }}
+          style={{ color: 'var(--color-text-muted)' }}
         >
-          <LogOut size={16} />
+          <LogOut size={15} style={{ flexShrink: 0 }} />
+          <span className="nav-label">Sign out</span>
         </button>
       </aside>
 
-      <main className="main-content">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/signals" element={<Signals />} />
-          <Route path="/history" element={<History />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/config" element={<Config />} />
-          <Route path="/profile" element={<Profile />} />
-          {user?.role === 'admin' && <Route path="/admin" element={<Admin />} />}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
+      <div className="right-panel">
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={<Navigate to="/overview" replace />} />
+            <Route path="/overview" element={<Overview />} />
+            <Route path="/performance" element={<Performance />} />
+            <Route path="/history" element={<SignalsAndTrades />} />
+            <Route path="/signals-trades" element={<Navigate to="/history" replace />} />
+            <Route path="/signals" element={<Navigate to="/history" replace />} />
+            <Route path="/settings" element={<Config />} />
+            <Route path="/config" element={<Navigate to="/settings" replace />} />
+            <Route path="/profile" element={<Profile />} />
+            {user?.role === 'admin' && <Route path="/admin" element={<Admin />} />}
+            <Route path="*" element={<Navigate to="/overview" replace />} />
+          </Routes>
+        </main>
+      </div>
     </div>
   )
 }

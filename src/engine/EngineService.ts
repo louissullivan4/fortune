@@ -340,6 +340,7 @@ export class EngineService {
         await closeAllAiPositions(pos.ticker, currentPriceEur, timestamp, this.userId)
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
+        this.t212.invalidateOrderHistoryCache()
         await logOrder({
           decisionId,
           t212OrderId: order.id,
@@ -477,6 +478,7 @@ export class EngineService {
         await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId)
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
+        this.t212.invalidateOrderHistoryCache()
         await logOrder({
           decisionId,
           t212OrderId: order.id,
@@ -806,6 +808,7 @@ export class EngineService {
           this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
+        this.t212.invalidateOrderHistoryCache()
         console.log(
           `[engine:${this.userId}] Order placed: ${orderResult.id} (${orderResult.status})`
         )
