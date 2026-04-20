@@ -8,6 +8,7 @@ import {
   closeAllAiPositions,
   openAiPosition,
   updateHighWaterMark,
+  updateEntryPrice,
   getDailyOpenValue,
   getDailyAiOpenValue,
   getPreviousDayAiOpenValue,
@@ -19,7 +20,7 @@ import {
   type AiPosition,
 } from '../analytics/journal.js'
 import { Trading212Client, type PortfolioSnapshot, type T212Position } from '../api/trading212.js'
-import { getAllHistories } from '../api/marketdata.js'
+import { getAllHistories, getLivePrice } from '../api/marketdata.js'
 import { generateSignals } from '../strategy/signals.js'
 import type { TickerSignal } from '../strategy/signals.js'
 import { hub } from '../ws/hub.js'
@@ -47,6 +48,11 @@ const TRAIL_ACTIVATION_PCT = 0.8
 const TRAIL_STOP_PCT = 0.4
 const CASH_COMMITMENT_TTL_MS = 90_000
 const MAX_FINGERPRINT_SKIPS = 4
+// Reject a buy if the live intraday price differs from the signal (daily close)
+// by more than this. Catches gap-ups/gap-downs where the signal is stale.
+const GAP_REJECT_PCT = 0.05
+// Correct a stored entry_price when T212's fill deviates by more than this.
+const ENTRY_PRICE_CORRECTION_THRESHOLD = 0.02
 
 // ── Signal fingerprinting ──────────────────────────────────────────────────
 
@@ -204,10 +210,37 @@ export class EngineService {
           console.log(`[engine:${this.userId}] ${pos.ticker} not in T212 — marked closed`)
         }
       }
+      await this._reconcileEntryPrices(openPositions, liveSnapshot.positions)
     }
     console.log(
       `[engine:${this.userId}] Ready. Universe: ${this.userConfig.tradeUniverse.join(', ')}`
     )
+  }
+
+  // ── Fill-price reconciliation ───────────────────────────────────────────
+  // T212's averagePrice is the authoritative fill price. If our stored
+  // entry_price diverges by more than ENTRY_PRICE_CORRECTION_THRESHOLD (e.g.
+  // because the signal price was stale at buy time), correct it so take-profit
+  // and stop-loss calculations are based on what was actually paid.
+
+  private async _reconcileEntryPrices(
+    openPositions: AiPosition[],
+    t212Positions: PortfolioSnapshot['positions']
+  ): Promise<void> {
+    for (const pos of openPositions) {
+      if (!pos.entryPrice) continue
+      const live = t212Positions.find((p) => p.ticker === pos.ticker)
+      if (!live) continue
+      const deviation = Math.abs(live.averagePrice - pos.entryPrice) / pos.entryPrice
+      if (deviation > ENTRY_PRICE_CORRECTION_THRESHOLD) {
+        console.log(
+          `[engine:${this.userId}] Correcting entry_price for ${pos.ticker}: ` +
+            `${pos.entryPrice.toFixed(4)} → ${live.averagePrice.toFixed(4)} ` +
+            `(${(deviation * 100).toFixed(1)}% deviation from T212 average fill)`
+        )
+        await updateEntryPrice(pos.ticker, live.averagePrice, this.userId)
+      }
+    }
   }
 
   // ── Adjusted snapshot (session cash accounting) ─────────────────────────
@@ -533,6 +566,14 @@ export class EngineService {
       `[engine:${this.userId}] Portfolio: €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} effective free cash`
     )
 
+    // Correct any entry_prices that were recorded from stale signal data rather
+    // than actual T212 fill prices. Runs every cycle so positions opened last
+    // cycle are corrected before the first take-profit/stop-loss check.
+    const openForReconcile = await getOpenAiPositions(this.userId)
+    if (openForReconcile.length > 0) {
+      await this._reconcileEntryPrices(openForReconcile, snapshot.positions)
+    }
+
     console.log(`[engine:${this.userId}] Checking hard exits...`)
     const exitsPlaced = await this._checkHardExits(snapshot, timestamp)
     if (exitsPlaced > 0) {
@@ -760,7 +801,43 @@ export class EngineService {
 
     if (decision.action !== 'hold' && decision.ticker && decision.quantity) {
       const signal = signals.find((s) => s.ticker === decision.ticker)
-      const estimatedPriceNative = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
+      let estimatedPriceNative = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
+
+      // For BUY orders, cross-check the signal price (daily close from Yahoo)
+      // against a fresh intraday quote. If the stock has gapped significantly,
+      // abort: we'd be chasing a move with a stale signal and a wrong entry_price.
+      if (decision.action === 'buy' && estimatedPriceNative > 0) {
+        const liveQuote = await getLivePrice(decision.ticker)
+        if (liveQuote !== null) {
+          const gapPct = Math.abs(liveQuote - estimatedPriceNative) / estimatedPriceNative
+          if (gapPct > GAP_REJECT_PCT) {
+            console.log(
+              `[engine:${this.userId}] GAP GUARD — ${decision.ticker}: signal $${estimatedPriceNative.toFixed(2)} vs live $${liveQuote.toFixed(2)} (${(gapPct * 100).toFixed(1)}% gap > ${GAP_REJECT_PCT * 100}%) — aborting buy`
+            )
+            await logDecision({
+              timestamp,
+              action: 'hold',
+              ticker: null,
+              quantity: null,
+              estimatedPrice: null,
+              reasoning: `Gap guard: ${decision.ticker} signal price $${estimatedPriceNative.toFixed(2)} is ${(gapPct * 100).toFixed(1)}% away from live $${liveQuote.toFixed(2)} — buy aborted to avoid chasing gap`,
+              signalsJson: JSON.stringify(
+                signals.map((s) => ({ ticker: s.ticker, signal: s.signal, reasons: s.reasons }))
+              ),
+              portfolioJson: JSON.stringify({
+                totalValue: snapshot.totalValue,
+                aiValue,
+                cash: snapshot.cash.free,
+              }),
+              userId: this.userId,
+            })
+            return
+          }
+          // Use the live price for entry so stop-loss/take-profit anchor to reality.
+          estimatedPriceNative = liveQuote
+        }
+      }
+
       const livePosition = snapshot.positions.find((p) => p.ticker === decision.ticker)
       const fxRate =
         livePosition?.fxRate ??

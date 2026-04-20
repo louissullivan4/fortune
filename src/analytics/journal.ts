@@ -310,6 +310,21 @@ export async function closeAllAiPositions(
   }
 }
 
+export async function updateEntryPrice(
+  ticker: string,
+  newEntryPrice: number,
+  userId: string
+): Promise<void> {
+  const pool = getPool()
+  await pool.query(
+    `UPDATE ai_positions
+     SET entry_price = $1,
+         high_water_mark = CASE WHEN high_water_mark < $1 THEN $1 ELSE high_water_mark END
+     WHERE ticker = $2 AND status = 'open' AND user_id = $3`,
+    [newEntryPrice, ticker, userId]
+  )
+}
+
 export async function getOpenAiPositions(userId: string): Promise<AiPosition[]> {
   const pool = getPool()
   const res = await pool.query(

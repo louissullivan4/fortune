@@ -98,3 +98,33 @@ export async function getAllHistories(
   )
   return new Map(entries)
 }
+
+// ── Intraday live price ───────────────────────────────────────────────────
+// Returns the most recent 5-minute bar close for the ticker from Yahoo Finance.
+// Used to sanity-check signal prices (daily closes) against the live market
+// before placing a buy order. Cached per ticker for 30 s.
+
+const _liveCache = new Map<string, { price: number; expiresAt: number }>()
+const LIVE_CACHE_TTL_MS = 30_000
+
+export async function getLivePrice(t212Ticker: string): Promise<number | null> {
+  const cached = _liveCache.get(t212Ticker)
+  if (cached && Date.now() < cached.expiresAt) return cached.price
+
+  const symbol = toYahooSymbol(t212Ticker)
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=5m&includePrePost=false`
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    if (!res.ok) return null
+    const json = (await res.json()) as YahooChartResponse
+    const result = json.chart.result?.[0]
+    if (!result) return null
+    const closes = result.indicators.quote[0].close
+    const last = [...closes].reverse().find((c) => c !== null) ?? null
+    if (last === null) return null
+    _liveCache.set(t212Ticker, { price: last, expiresAt: Date.now() + LIVE_CACHE_TTL_MS })
+    return last
+  } catch {
+    return null
+  }
+}
