@@ -25,16 +25,23 @@ export async function validateOrder(
   snapshot: PortfolioSnapshot,
   dailyOpenValue: number,
   t212: Trading212Client,
-  userConfig: UserConfig
+  userConfig: UserConfig,
+  // Bot-scoped values to avoid contamination from manual position changes
+  aiCurrentValue?: number,
+  aiOpenValue?: number
 ): Promise<RiskDecision> {
   const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = userConfig
 
-  // Daily loss halt
-  const drawdown = (dailyOpenValue - snapshot.totalValue) / dailyOpenValue
-  if (drawdown > dailyLossLimitPct) {
-    return {
-      allowed: false,
-      reason: `Daily loss limit hit: portfolio is down ${(drawdown * 100).toFixed(1)}% from day open (limit: ${(dailyLossLimitPct * 100).toFixed(0)}%)`,
+  // Daily loss halt — only applies to buys; exits (sells) must always be allowed
+  if (order.action === 'buy') {
+    const current = aiCurrentValue ?? snapshot.totalValue
+    const open = aiOpenValue ?? dailyOpenValue
+    const drawdown = (open - current) / open
+    if (drawdown > dailyLossLimitPct) {
+      return {
+        allowed: false,
+        reason: `Daily loss limit hit: bot portfolio is down ${(drawdown * 100).toFixed(1)}% from day open (limit: ${(dailyLossLimitPct * 100).toFixed(0)}%)`,
+      }
     }
   }
 

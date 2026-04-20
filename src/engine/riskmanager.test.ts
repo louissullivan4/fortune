@@ -117,6 +117,40 @@ describe('validateOrder', () => {
       )
       expect(result.allowed).toBe(true)
     })
+
+    it('never blocks sell orders — exits must always be allowed', async () => {
+      const snapshot = makeSnapshot({
+        totalValue: 50,
+        positions: [makePosition('AAPL', 5, 10)],
+      })
+      const result = await validateOrder(
+        { action: 'sell', ticker: 'AAPL', quantity: 5, estimatedPrice: 10 },
+        snapshot,
+        100,
+        makeMockT212(),
+        BASE_CONFIG
+      )
+      expect(result.allowed).toBe(true)
+    })
+
+    it('uses AI-scoped values when provided, ignoring total portfolio drawdown', async () => {
+      // Total portfolio looks 43% down (manual position sold, cash unsettled)
+      // but the bot portfolio is actually up — should allow the buy
+      const snapshot = makeSnapshot({
+        totalValue: 57,
+        cash: { free: 50, total: 57, ppl: 0, result: 0, invested: 7, pieCash: 0, blocked: 0 },
+      })
+      const result = await validateOrder(
+        { action: 'buy', ticker: 'AAPL', quantity: 1, estimatedPrice: 10 },
+        snapshot,
+        100,
+        makeMockT212(),
+        BASE_CONFIG,
+        105, // aiCurrentValue: bot is UP 5%
+        100 // aiOpenValue: bot day open
+      )
+      expect(result.allowed).toBe(true)
+    })
   })
 
   describe('minimum trade quantity', () => {

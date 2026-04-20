@@ -858,7 +858,9 @@ export class EngineService {
         botSnapshot,
         dailyOpenValue,
         this.t212,
-        this.userConfig
+        this.userConfig,
+        aiValue,
+        dailyAiOpenValue
       )
 
       if (!risk.allowed) {
