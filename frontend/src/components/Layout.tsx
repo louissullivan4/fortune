@@ -16,7 +16,8 @@ import Config from '../pages/Config'
 import Profile from '../pages/Profile'
 import Admin from '../pages/Admin'
 import { useAuth } from '../context/AuthContext'
-import { setAccessToken, api, type EngineStatus } from '../api/client'
+import { setAccessToken, api, type EngineStatus, type MarketWindow } from '../api/client'
+import { EXCHANGES, isMarketOpen } from '../lib/markets'
 
 const nav = [
   { to: '/overview', label: 'Overview', icon: LayoutDashboard },
@@ -25,14 +26,6 @@ const nav = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
-function isNYSEOpen(): boolean {
-  const now = new Date()
-  const day = now.getUTCDay()
-  if (day === 0 || day === 6) return false
-  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes()
-  return minutes >= 14 * 60 + 30 && minutes < 21 * 60
-}
-
 interface Props {
   wsConnected: boolean
 }
@@ -40,6 +33,8 @@ interface Props {
 export default function Layout({ wsConnected: _wsConnected }: Props) {
   const { user, logout } = useAuth()
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
+  const [markets, setMarkets] = useState<MarketWindow[]>([])
+  const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
     const load = () =>
@@ -52,12 +47,24 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
     return () => clearInterval(id)
   }, [])
 
+  useEffect(() => {
+    api.config
+      .get()
+      .then((c) => setMarkets(c.markets ?? []))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+
   async function handleLogout() {
     await logout()
     setAccessToken(null)
   }
 
-  const nyseOpen = isNYSEOpen()
+  const enabled = markets.filter((m) => m.enabled)
 
   return (
     <div className="layout">
@@ -106,21 +113,47 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
 
         {/* Status indicators */}
         <div style={{ padding: '10px 16px 4px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {/* NYSE */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                flexShrink: 0,
-                background: nyseOpen ? '#16a34a' : 'var(--color-text-muted)',
-              }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-              NYSE {nyseOpen ? 'open' : 'closed'}
-            </span>
-          </div>
+          {enabled.length === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: 'var(--color-text-muted)',
+                }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                No markets enabled
+              </span>
+            </div>
+          ) : (
+            enabled.map((m) => {
+              const open = isMarketOpen(m.exchange, now, m)
+              const meta = EXCHANGES[m.exchange]
+              return (
+                <div
+                  key={m.exchange}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  title={`${meta.name} · ${m.activeFrom}–${m.activeTo} local`}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      background: open ? '#16a34a' : 'var(--color-text-muted)',
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    {meta.shortName} {open ? 'open' : 'closed'}
+                  </span>
+                </div>
+              )
+            })
+          )}
 
           {/* Engine */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

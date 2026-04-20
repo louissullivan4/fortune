@@ -3,7 +3,7 @@ import type { TickerSignal } from '../strategy/signals.js'
 import type { PortfolioSnapshot } from '../api/trading212.js'
 import type { Trading212Client } from '../api/trading212.js'
 import type { RecentDecision } from '../analytics/journal.js'
-import type { UserConfig } from '../types/user.js'
+import type { MarketConfig } from '../types/user.js'
 import { computeBuyQuantity } from './riskmanager.js'
 
 export interface TradeDecision {
@@ -56,15 +56,15 @@ function formatSignals(signals: TickerSignal[]): string {
     .join('\n\n')
 }
 
-function formatPortfolio(snapshot: PortfolioSnapshot, userConfig: UserConfig): string {
+function formatPortfolio(snapshot: PortfolioSnapshot, market: MarketConfig): string {
   const lines = [
-    `Cash: €${snapshot.cash.free.toFixed(2)} free / €${snapshot.cash.total.toFixed(2)} total`,
-    `Total portfolio value: €${snapshot.totalValue.toFixed(2)}`,
-    `All-time P&L: €${snapshot.totalPpl.toFixed(2)}`,
+    `Cash available on ${market.exchange}: €${snapshot.cash.free.toFixed(2)}`,
+    `Total value of ${market.exchange} positions: €${snapshot.totalValue.toFixed(2)}`,
+    `${market.exchange} P&L: €${snapshot.totalPpl.toFixed(2)}`,
     '',
-    'Positions:',
+    `Positions on ${market.exchange}:`,
   ]
-  const maxPositionValue = userConfig.maxBudgetEur * userConfig.maxPositionPct
+  const maxPositionValue = market.maxBudgetEur * market.maxPositionPct
   if (snapshot.positions.length === 0) {
     lines.push('  (none)')
   } else {
@@ -98,32 +98,37 @@ function formatRecentDecisions(decisions: RecentDecision[]): string {
     .join('\n')
 }
 
-function buildSystemPrompt(userConfig: UserConfig): string {
-  return `You are an autonomous stock trading agent managing a small trading budget of €${userConfig.maxBudgetEur}. Your job is to decide ONE trading action per cycle: buy, sell, or hold.
+function buildSystemPrompt(market: MarketConfig): string {
+  const fxNote =
+    market.exchange === 'NYSE'
+      ? 'NYSE equities are USD-denominated — T212 charges ~0.15% FX each way on EUR↔USD conversion'
+      : 'XETRA equities are EUR-native — no FX fee on entry or exit'
+  return `You are an autonomous stock trading agent trading exclusively on ${market.exchange}. Your budget on THIS market is €${market.maxBudgetEur}. You manage this sandbox independently — another engine instance runs any other enabled markets with their own separate budget. Do not consider opportunities outside ${market.exchange}.
+
+Your job is to decide ONE trading action per cycle: buy, sell, or hold.
 
 HARD RULES — you must never violate these:
-- Never spend more than €${userConfig.maxBudgetEur} total cash on a single buy order
-- Never invest more than €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)} in a single stock — always use fractional shares to stay within this limit (e.g. if a stock costs €150 and your cap is €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)}, buy ${((userConfig.maxBudgetEur * userConfig.maxPositionPct) / 150).toFixed(2)} shares)
+- Never spend more than €${market.maxBudgetEur} total cash on a single buy order (this market's budget)
+- Never invest more than €${(market.maxBudgetEur * market.maxPositionPct).toFixed(0)} in a single stock — use fractional shares to stay within the cap
 - Never buy a stock you already hold a position in — one position per ticker maximum
 - Always keep at least €5 in cash as a buffer
-- Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop) are handled automatically before you run — you do NOT need to issue these sells yourself
-- Stagnant positions (held >${userConfig.stagnantTimeMinutes} minutes with <${(userConfig.stagnantRangePct * 100).toFixed(1)}% movement) will be listed for your review. You may SELL them to free capital for a better opportunity, or HOLD them if you see momentum building — your judgment takes precedence
+- Hard exits (stop-loss ≥${(market.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(market.takeProfitPct * 100).toFixed(1)}% up, trailing stop) are handled automatically before you run — do NOT issue these sells yourself
+- Stagnant positions (held >${market.stagnantTimeMinutes} minutes with <${(market.stagnantRangePct * 100).toFixed(1)}% movement) will be listed for your review — SELL them to free capital or HOLD if you see momentum building
 - You may SELL a held position if technical signals have turned bearish, even if the automatic stop hasn't triggered yet
-- Only BUY stocks in the signal universe
-- NOTE: Portfolio position prices may be in their local currency (USD/GBP), not EUR — ignore total portfolio value when deciding; focus on available EUR cash
+- Only BUY stocks in the provided ${market.exchange} signal universe
+- FX: ${fxNote}
 
 STRATEGY:
 - The budget exists to be deployed — prefer buying over sitting on idle cash
-- Buy candidates: any STRONG_BUY signal, or a BUY signal with strong trend confirmation. Acceptable entries:
-    • RSI 40–65 with SMA20 > SMA50 and EMA9 > EMA21 — do not refuse just because RSI is not deeply oversold
-    • MACD bullish crossover (MACD line crosses above signal line) — high conviction momentum signal
-    • Stochastic %K crossing above %D, especially from oversold zone (<30)
-    • Price near lower Bollinger Band (%B ≤ 0.35) — mean-reversion opportunity with room to run
-    • Multiple confluences (any 3 of the above) override a mildly elevated RSI
-- Do NOT refuse a STRONG_BUY just because RSI is above 50 — the signal system already penalises overbought conditions. Trust the classification
-- Sell candidates (early/signal-based): RSI >75 with price above upper Bollinger Band AND bearish Stochastic crossover — all three must align, not just one
-- HOLD only when the majority of the universe is genuinely bearish and no BUY/STRONG_BUY has reasonable technicals
-- If you have cash and at least one STRONG_BUY or two BUY signals, buy the best candidate
+- Buy candidates: any STRONG_BUY, or a BUY with strong trend confirmation. Acceptable entries:
+    • RSI 40–65 with SMA20 > SMA50 and EMA9 > EMA21
+    • MACD bullish crossover
+    • Stochastic %K crossing above %D, especially from oversold
+    • Price near lower Bollinger Band (%B ≤ 0.35) — mean-reversion
+    • Multiple confluences (3+) override mildly elevated RSI
+- Do NOT refuse a STRONG_BUY just because RSI is above 50 — the signal system already penalises overbought conditions
+- Sell candidates (early): RSI >75 with price above upper Bollinger Band AND bearish Stochastic crossover — all three must align
+- HOLD only when the ${market.exchange} universe is genuinely bearish with no reasonable BUY/STRONG_BUY
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown, no explanation outside the JSON:
 {
@@ -131,7 +136,7 @@ OUTPUT FORMAT — respond with ONLY valid JSON, no markdown, no explanation outs
   "ticker": "TICKER_SYMBOL" | null,
   "quantity": number | null,
   "estimatedPrice": number | null,
-  "reasoning": "concise explanation of your decision"
+  "reasoning": "concise explanation"
 }`
 }
 
@@ -141,7 +146,7 @@ export async function decide(
   recentDecisions: RecentDecision[],
   anthropicApiKey: string,
   t212: Trading212Client,
-  userConfig: UserConfig,
+  market: MarketConfig,
   stagnantCandidates: StagnantInfo[] = []
 ): Promise<DecideResult> {
   const client = new Anthropic({ apiKey: anthropicApiKey })
@@ -157,26 +162,26 @@ export async function decide(
 
   const stagnantSection =
     stagnantCandidates.length > 0
-      ? `\n## Stagnant Positions Awaiting Your Decision\nThese positions have moved less than ${(userConfig.stagnantRangePct * 100).toFixed(1)}% in over ${userConfig.stagnantTimeMinutes} minutes. SELL one to rotate capital, or HOLD if you see momentum building:\n${formatStagnantCandidates(stagnantCandidates)}\n`
+      ? `\n## Stagnant Positions Awaiting Your Decision\nThese positions have moved less than ${(market.stagnantRangePct * 100).toFixed(1)}% in over ${market.stagnantTimeMinutes} minutes. SELL to rotate capital on ${market.exchange}, or HOLD if you see momentum:\n${formatStagnantCandidates(stagnantCandidates)}\n`
       : ''
 
-  const prompt = `## Current Portfolio
-${formatPortfolio(snapshot, userConfig)}
+  const prompt = `## Current ${market.exchange} Portfolio
+${formatPortfolio(snapshot, market)}
 
-## Market Signals (${signals.length} tickers analysed)
+## ${market.exchange} Market Signals (${signals.length} tickers analysed)
 ${formatSignals(actionableSignals.length > 0 ? actionableSignals : signals.slice(0, 10))}
 ${stagnantSection}
-## Recent Decisions (last ${recentDecisions.length})
+## Recent Decisions on ${market.exchange} (last ${recentDecisions.length})
 ${formatRecentDecisions(recentDecisions)}
 
 ## Your Task
-Analyse the above and decide on ONE action for this cycle. Prefer deploying cash over holding idle — the stop-loss and trailing stop protect capital automatically. Reply with JSON only.`
+Decide ONE action for this cycle on ${market.exchange}. Prefer deploying cash over holding idle — the stop-loss and trailing stop protect capital automatically. Reply with JSON only.`
 
   const MODEL = 'claude-sonnet-4-6'
   const message = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
-    system: buildSystemPrompt(userConfig),
+    system: buildSystemPrompt(market),
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -227,7 +232,7 @@ Analyse the above and decide on ONE action for this cycle. Prefer deploying cash
       if (price) {
         const instruments = await t212.getInstruments()
         const minQty = instruments.get(parsed.ticker)?.minTradeQuantity ?? 0.01
-        const maxQty = computeBuyQuantity(parsed.ticker, price, snapshot, userConfig, minQty)
+        const maxQty = computeBuyQuantity(parsed.ticker, price, snapshot, market, minQty)
         if (maxQty <= 0) {
           parsed.action = 'hold'
           parsed.ticker = null

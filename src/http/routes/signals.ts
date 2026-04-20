@@ -23,10 +23,11 @@ async function computeSignals(userId: string) {
   const [t212, cfg] = await Promise.all([getT212(userId), getUserConfig(userId)])
   if (!cfg) throw new Error('User config not found')
   const snapshot = await t212.getPortfolioSnapshot()
-  const histories = await getAllHistories(cfg.tradeUniverse, 90)
+  const universeTickers = cfg.tradeUniverse.map((e) => e.ticker)
+  const histories = await getAllHistories(universeTickers, 90)
   const botTickers = new Set((await getOpenAiPositions(userId)).map((p) => p.ticker))
   const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
-  const signals = generateSignals(cfg.tradeUniverse, histories, botPositions)
+  const signals = generateSignals(universeTickers, histories, botPositions)
   setCachedSignals(userId, signals)
   hub.broadcast('signal_refresh', { computedAt: new Date().toISOString(), count: signals.length })
   return signals

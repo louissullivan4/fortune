@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { validateOrder, computeBuyQuantity } from './riskmanager.js'
 import type { PortfolioSnapshot, T212Position } from '../api/trading212.js'
-import type { UserConfig } from '../types/user.js'
+import type { MarketConfig } from '../types/user.js'
 
-const BASE_CONFIG: UserConfig = {
-  tradeUniverse: [],
+const BASE_CONFIG: MarketConfig = {
+  exchange: 'NYSE',
+  enabled: true,
+  activeFrom: '14:30',
+  activeTo: '21:00',
   tradeIntervalMs: 60_000,
   maxBudgetEur: 100,
   maxPositionPct: 0.25,
@@ -14,7 +17,6 @@ const BASE_CONFIG: UserConfig = {
   stagnantExitEnabled: false,
   stagnantTimeMinutes: 120,
   stagnantRangePct: 0.01,
-  autoStartOnRestart: false,
 }
 
 function makeSnapshot(overrides?: Partial<PortfolioSnapshot>): PortfolioSnapshot {

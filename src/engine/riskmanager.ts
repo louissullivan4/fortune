@@ -1,6 +1,6 @@
 import type { PortfolioSnapshot } from '../api/trading212.js'
 import type { Trading212Client } from '../api/trading212.js'
-import type { UserConfig } from '../types/user.js'
+import type { MarketConfig } from '../types/user.js'
 
 export interface OrderRequest {
   action: 'buy' | 'sell'
@@ -14,21 +14,33 @@ export interface RiskDecision {
   reason?: string
 }
 
+/**
+ * Validate an order against the calling market's config.
+ *
+ * `snapshot` should already be scoped to this market — positions on other
+ * exchanges filtered out — so the "already holding" and cash checks only see
+ * the market under evaluation.
+ *
+ * `dailyOpenValue` is this market's AI-value at start of day (from
+ * daily_market_snapshots), used for the market-local daily loss halt.
+ */
 export async function validateOrder(
   order: OrderRequest,
   snapshot: PortfolioSnapshot,
   dailyOpenValue: number,
   t212: Trading212Client,
-  userConfig: UserConfig
+  market: MarketConfig
 ): Promise<RiskDecision> {
-  const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = userConfig
+  const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = market
 
-  // Daily loss halt
-  const drawdown = (dailyOpenValue - snapshot.totalValue) / dailyOpenValue
-  if (drawdown > dailyLossLimitPct) {
-    return {
-      allowed: false,
-      reason: `Daily loss limit hit: portfolio is down ${(drawdown * 100).toFixed(1)}% from day open (limit: ${(dailyLossLimitPct * 100).toFixed(0)}%)`,
+  // Daily loss halt (per market).
+  if (dailyOpenValue > 0) {
+    const drawdown = (dailyOpenValue - snapshot.totalValue) / dailyOpenValue
+    if (drawdown > dailyLossLimitPct) {
+      return {
+        allowed: false,
+        reason: `${market.exchange} daily loss limit hit: down ${(drawdown * 100).toFixed(1)}% from day open (limit: ${(dailyLossLimitPct * 100).toFixed(0)}%)`,
+      }
     }
   }
 
@@ -48,7 +60,7 @@ export async function validateOrder(
     if (orderCost > maxBudgetEur) {
       return {
         allowed: false,
-        reason: `Order cost €${orderCost.toFixed(2)} exceeds hard budget cap of €${maxBudgetEur}`,
+        reason: `Order cost €${orderCost.toFixed(2)} exceeds ${market.exchange} budget cap of €${maxBudgetEur}`,
       }
     }
 
@@ -56,7 +68,7 @@ export async function validateOrder(
     if (snapshot.cash.free - orderCost < minBuffer) {
       return {
         allowed: false,
-        reason: `Insufficient free cash. Available: €${snapshot.cash.free.toFixed(2)}, order cost: €${orderCost.toFixed(2)}, min buffer: €${minBuffer}`,
+        reason: `Insufficient free cash on ${market.exchange}. Available: €${snapshot.cash.free.toFixed(2)}, order cost: €${orderCost.toFixed(2)}, min buffer: €${minBuffer}`,
       }
     }
 
@@ -72,7 +84,7 @@ export async function validateOrder(
     if (orderCost > maxPositionValue) {
       return {
         allowed: false,
-        reason: `Position would exceed max size of €${maxPositionValue.toFixed(2)} (${(maxPositionPct * 100).toFixed(0)}% of budget)`,
+        reason: `Position would exceed ${market.exchange} max size of €${maxPositionValue.toFixed(2)} (${(maxPositionPct * 100).toFixed(0)}% of budget)`,
       }
     }
   }
@@ -97,11 +109,11 @@ export function computeBuyQuantity(
   ticker: string,
   estimatedPrice: number,
   snapshot: PortfolioSnapshot,
-  userConfig: UserConfig,
+  market: MarketConfig,
   minTradeQuantity = 0.01,
   targetFraction = 0.5
 ): number {
-  const maxPositionValue = userConfig.maxBudgetEur * userConfig.maxPositionPct
+  const maxPositionValue = market.maxBudgetEur * market.maxPositionPct
   const existingPosition = snapshot.positions.find((p) => p.ticker === ticker)
   const currentPositionValue = existingPosition
     ? existingPosition.averagePrice * existingPosition.quantity
@@ -109,7 +121,7 @@ export function computeBuyQuantity(
   const remainingPositionRoom = maxPositionValue - currentPositionValue
 
   const targetSpend = Math.min(
-    userConfig.maxBudgetEur * targetFraction,
+    market.maxBudgetEur * targetFraction,
     snapshot.cash.free - 5,
     remainingPositionRoom
   )

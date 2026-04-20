@@ -139,6 +139,32 @@ export interface Invitation {
   invited_by_username: string | null
 }
 
+export type ExchangeCode = 'NYSE' | 'XETR'
+
+export interface MarketConfig {
+  exchange: ExchangeCode
+  enabled: boolean
+  activeFrom: string
+  activeTo: string
+  tradeIntervalMs: number
+  maxBudgetEur: number
+  maxPositionPct: number
+  dailyLossLimitPct: number
+  stopLossPct: number
+  takeProfitPct: number
+  stagnantExitEnabled: boolean
+  stagnantTimeMinutes: number
+  stagnantRangePct: number
+}
+
+/** Backwards-compat alias used by existing UI paths. */
+export type MarketWindow = MarketConfig
+
+export interface UniverseEntry {
+  ticker: string
+  exchange: ExchangeCode
+}
+
 export interface EngineStatus {
   running: boolean
   startedAt: string | null
@@ -146,6 +172,7 @@ export interface EngineStatus {
   nextCycleAt: string | null
   cycleCount: number
   marketOpen: boolean
+  activeMarkets: ExchangeCode[]
   mode: string
   intervalMs: number
   pendingSettlement: number
@@ -390,17 +417,8 @@ export interface Performance {
 }
 
 export interface Config {
-  tradeUniverse: string[]
-  tradeIntervalMs: number
-  tradeIntervalS: number
-  maxBudgetEur: number
-  maxPositionPct: number
-  dailyLossLimitPct: number
-  stopLossPct: number
-  takeProfitPct: number
-  stagnantExitEnabled: boolean
-  stagnantTimeMinutes: number
-  stagnantRangePct: number
+  markets: MarketConfig[]
+  tradeUniverse: UniverseEntry[]
   autoStartOnRestart: boolean
 }
 
@@ -413,6 +431,7 @@ export interface Instrument {
   minTradeQuantity: number
   maxOpenQuantity?: number
   isin?: string
+  exchange: ExchangeCode | 'OTHER'
 }
 
 // ── API functions ─────────────────────────────────────────────────────────
@@ -557,11 +576,23 @@ export const api = {
     get: () => req<Config>('/config'),
     update: (body: Partial<Config>) =>
       req<Config>('/config', { method: 'PUT', body: JSON.stringify(body) }),
+    updateMarket: (exchange: ExchangeCode, patch: Partial<MarketConfig>) =>
+      req<Config>(`/config/markets/${exchange}`, {
+        method: 'PUT',
+        body: JSON.stringify(patch),
+      }),
+    suggestHours: (exchange: ExchangeCode) =>
+      req<{ exchange: ExchangeCode; from: string; to: string }>(
+        `/config/markets/suggest-hours?exchange=${exchange}`
+      ),
   },
 
   instruments: {
-    search: (q: string) =>
-      req<{ data: Instrument[]; total: number }>(`/instruments/search?q=${encodeURIComponent(q)}`),
+    search: (q: string, exchange?: ExchangeCode) => {
+      const qs = new URLSearchParams({ q })
+      if (exchange) qs.set('exchange', exchange)
+      return req<{ data: Instrument[]; total: number }>(`/instruments/search?${qs.toString()}`)
+    },
     lookup: async (ticker: string): Promise<Instrument | null> => {
       const res = await req<{ data: Instrument[]; total: number }>(
         `/instruments/search?q=${encodeURIComponent(ticker)}`

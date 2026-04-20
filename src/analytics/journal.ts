@@ -138,6 +138,52 @@ export async function getPreviousDayAiOpenValue(
   return res.rows[0]?.ai_open_value ?? null
 }
 
+// ── Per-market daily snapshots (daily-loss-halt per market) ─────────────────
+
+export async function upsertDailyMarketSnapshot(
+  userId: string,
+  date: string,
+  exchange: string,
+  aiOpenValue: number
+): Promise<void> {
+  const pool = getPool()
+  await pool.query(
+    `INSERT INTO daily_market_snapshots (user_id, date, exchange_code, ai_open_value)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, date, exchange_code) DO NOTHING`,
+    [userId, date, exchange, aiOpenValue]
+  )
+}
+
+export async function getDailyMarketOpenValue(
+  userId: string,
+  date: string,
+  exchange: string
+): Promise<number | null> {
+  const pool = getPool()
+  const res = await pool.query<{ ai_open_value: number }>(
+    `SELECT ai_open_value FROM daily_market_snapshots
+     WHERE user_id = $1 AND date = $2 AND exchange_code = $3`,
+    [userId, date, exchange]
+  )
+  return res.rows[0]?.ai_open_value ?? null
+}
+
+export async function getPreviousDayMarketOpenValue(
+  userId: string,
+  date: string,
+  exchange: string
+): Promise<number | null> {
+  const pool = getPool()
+  const res = await pool.query<{ ai_open_value: number }>(
+    `SELECT ai_open_value FROM daily_market_snapshots
+     WHERE user_id = $1 AND date < $2 AND exchange_code = $3
+     ORDER BY date DESC LIMIT 1`,
+    [userId, date, exchange]
+  )
+  return res.rows[0]?.ai_open_value ?? null
+}
+
 export interface RecentDecision {
   timestamp: string
   action: string

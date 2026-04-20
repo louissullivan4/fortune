@@ -33,6 +33,24 @@ export interface T212Instrument {
   minTradeQuantity: number
   maxOpenQuantity?: number
   isin?: string
+  /** Resolved from ticker suffix + ISIN heuristics — see `inferExchange`. */
+  exchange: 'NYSE' | 'XETR' | 'OTHER'
+}
+
+/**
+ * Infer the exchange for a T212 instrument using the suffixed ticker and ISIN.
+ * T212 tickers encode market: `AAPL_US_EQ` (NYSE/US), `SAPd_EQ` (XETRA),
+ * `ASML_EQ` (Euronext), etc. ISIN prefix is the country fallback (DE → XETR).
+ */
+function inferExchange(raw: {
+  ticker: string
+  isin?: string
+  currencyCode: string
+}): 'NYSE' | 'XETR' | 'OTHER' {
+  if (/_US_EQ$/.test(raw.ticker)) return 'NYSE'
+  if (/d_EQ$/.test(raw.ticker) && raw.currencyCode === 'EUR') return 'XETR'
+  if (raw.isin?.startsWith('DE') && raw.currencyCode === 'EUR') return 'XETR'
+  return 'OTHER'
 }
 
 export interface T212Order {
@@ -223,9 +241,13 @@ export class Trading212Client {
   async getInstruments(): Promise<Map<string, T212Instrument>> {
     if (this._instrumentCache) return this._instrumentCache
     if (this._instrumentsInFlight) return this._instrumentsInFlight
-    this._instrumentsInFlight = this.apiFetch<T212Instrument[]>('/equity/metadata/instruments')
+    this._instrumentsInFlight = this.apiFetch<Omit<T212Instrument, 'exchange'>[]>(
+      '/equity/metadata/instruments'
+    )
       .then((data) => {
-        this._instrumentCache = new Map(data.map((i) => [i.ticker, i]))
+        this._instrumentCache = new Map(
+          data.map((i) => [i.ticker, { ...i, exchange: inferExchange(i) }])
+        )
         return this._instrumentCache
       })
       .finally(() => {

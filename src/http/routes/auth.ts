@@ -257,13 +257,34 @@ router.post('/create-account', async (req, res, next) => {
     )
     const userId = userResult.rows[0].user_id
 
-    // Seed per-user config and api_keys rows
+    // Seed per-user config, api_keys, default market (NYSE) and default tickers.
     await pool.query(
       `INSERT INTO user_configs (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
       [userId]
     )
     await pool.query(
       `INSERT INTO user_api_keys (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+      [userId]
+    )
+    // Default per-market config for NYSE. Hours in user tz (Europe/Dublin):
+    // 14:30–21:00 Dublin == 09:30–16:00 ET year-round.
+    await pool.query(
+      `INSERT INTO user_markets (
+         user_id, exchange_code, active_from_local, active_to_local, enabled,
+         trade_interval_ms, max_budget_eur, max_position_pct,
+         daily_loss_limit_pct, stop_loss_pct, take_profit_pct,
+         stagnant_exit_enabled, stagnant_time_minutes, stagnant_range_pct
+       )
+       VALUES ($1, 'NYSE', '14:30', '21:00', TRUE,
+               900000, 100, 0.25, 0.1, 0.05, 0.015, TRUE, 120, 0.012)
+       ON CONFLICT (user_id, exchange_code) DO NOTHING`,
+      [userId]
+    )
+    await pool.query(
+      `INSERT INTO user_tickers (user_id, ticker, exchange_code)
+       SELECT $1, t, 'NYSE'
+       FROM UNNEST(ARRAY['AAPL','MSFT','GOOGL','AMZN','TSLA','NVDA']) AS t
+       ON CONFLICT (user_id, ticker) DO NOTHING`,
       [userId]
     )
 

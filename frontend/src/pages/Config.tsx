@@ -1,10 +1,26 @@
-import { useEffect, useRef, useState } from 'react'
-import { X, Plus, Search, AlertTriangle, Eye, EyeOff } from 'lucide-react'
-import { api, type Config, type Instrument } from '../api/client'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  X,
+  Plus,
+  Search,
+  AlertTriangle,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react'
+import {
+  api,
+  type Config,
+  type ExchangeCode,
+  type Instrument,
+  type MarketConfig,
+} from '../api/client'
+import { EXCHANGES, EXCHANGE_CODES } from '../lib/markets'
 import { pushToast } from '../components/Toasts'
 
 type TimeUnit = 'seconds' | 'minutes' | 'hours'
-type Tab = 'universe' | 'settings' | 'credentials'
+type Tab = 'universe' | 'config' | 'credentials'
 
 const POSITION_SIZE_MIN = 0.05
 const POSITION_SIZE_MAX = 0.5
@@ -293,7 +309,7 @@ function SecretInput({
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'universe', label: 'Trade Universe' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'config', label: 'Config' },
   { id: 'credentials', label: 'Credentials' },
 ]
 
@@ -302,6 +318,8 @@ export default function ConfigPage() {
   const [cfg, setCfg] = useState<Config | null>(null)
   const [draft, setDraft] = useState<Config | null>(null)
   const [saving, setSaving] = useState(false)
+  const [browsingMarket, setBrowsingMarket] = useState<ExchangeCode>('NYSE')
+  const [expandedMarket, setExpandedMarket] = useState<ExchangeCode | null>(null)
 
   const [t212Mode, setT212Mode] = useState<'demo' | 'live'>('demo')
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
@@ -334,8 +352,14 @@ export default function ConfigPage() {
         setHasT212Key(keys.hasT212Key)
         setT212Form((f) => ({ ...f, mode: keys.t212Mode as 'demo' | 'live' }))
 
+        const firstWithTickers = c.tradeUniverse[0]?.exchange
+        const firstEnabled = c.markets.find((m) => m.enabled)?.exchange
+        setBrowsingMarket(firstWithTickers ?? firstEnabled ?? 'NYSE')
+
         if (c.tradeUniverse.length > 0) {
-          const resolved = await api.instruments.resolve(c.tradeUniverse).catch(() => ({}))
+          const resolved = await api.instruments
+            .resolve(c.tradeUniverse.map((e) => e.ticker))
+            .catch(() => ({}))
           const meta = new Map<string, Instrument>(
             Object.entries(resolved) as [string, Instrument][]
           )
@@ -344,6 +368,15 @@ export default function ConfigPage() {
       })
       .catch(console.error)
   }, [])
+
+  const enabledMarkets = useMemo(
+    () => (draft?.markets ?? []).filter((m) => m.enabled),
+    [draft?.markets]
+  )
+  const enabledMarketSet = useMemo(
+    () => new Set(enabledMarkets.map((m) => m.exchange)),
+    [enabledMarkets]
+  )
 
   const configChanged = JSON.stringify(cfg) !== JSON.stringify(draft)
   const t212Changed = !!t212Form.keyId || !!t212Form.keySecret || t212Form.mode !== t212Mode
@@ -405,7 +438,7 @@ export default function ConfigPage() {
     }
     setSearching(true)
     try {
-      const res = await api.instruments.search(q)
+      const res = await api.instruments.search(q, browsingMarket)
       setSearchResults(res.data.slice(0, 20))
     } catch {
       /* non-critical */
@@ -415,8 +448,19 @@ export default function ConfigPage() {
   }
 
   async function addTicker(inst: Instrument) {
-    if (!draft || draft.tradeUniverse.includes(inst.ticker)) return
-    const updated = { ...draft, tradeUniverse: [...draft.tradeUniverse, inst.ticker].sort() }
+    if (!draft) return
+    if (draft.tradeUniverse.some((e) => e.ticker === inst.ticker)) return
+    if (inst.exchange === 'OTHER') {
+      pushToast(`Unsupported exchange: ${inst.exchange}`, 'error')
+      return
+    }
+    const updated: Config = {
+      ...draft,
+      tradeUniverse: [
+        ...draft.tradeUniverse,
+        { ticker: inst.ticker, exchange: inst.exchange as ExchangeCode },
+      ].sort((a, b) => a.ticker.localeCompare(b.ticker)),
+    }
     setDraft(updated)
     setInstMeta((prev) => new Map(prev).set(inst.ticker, inst))
     setSearchQ('')
@@ -426,9 +470,59 @@ export default function ConfigPage() {
 
   async function removeTicker(ticker: string) {
     if (!draft) return
-    const updated = { ...draft, tradeUniverse: draft.tradeUniverse.filter((t) => t !== ticker) }
+    const updated: Config = {
+      ...draft,
+      tradeUniverse: draft.tradeUniverse.filter((e) => e.ticker !== ticker),
+    }
     setDraft(updated)
     await saveConfig(updated)
+  }
+
+  function toggleMarket(exchange: ExchangeCode, enabled: boolean) {
+    if (!draft) return
+    const existing = draft.markets.find((m) => m.exchange === exchange)
+    const meta = EXCHANGES[exchange]
+    const next: MarketConfig = existing
+      ? { ...existing, enabled }
+      : {
+          exchange,
+          enabled,
+          activeFrom: meta.defaultOpen,
+          activeTo: meta.defaultClose,
+          tradeIntervalMs: 900_000,
+          maxBudgetEur: 100,
+          maxPositionPct: 0.25,
+          dailyLossLimitPct: 0.1,
+          stopLossPct: 0.05,
+          takeProfitPct: 0.015,
+          stagnantExitEnabled: true,
+          stagnantTimeMinutes: 120,
+          stagnantRangePct: 0.012,
+        }
+    const updated: Config = {
+      ...draft,
+      markets: [...draft.markets.filter((m) => m.exchange !== exchange), next],
+    }
+    if (!enabled) {
+      setExpandedMarket((cur) => (cur === exchange ? null : cur))
+    }
+    setDraft(updated)
+  }
+
+  function updateMarketField(exchange: ExchangeCode, patch: Partial<MarketConfig>) {
+    if (!draft) return
+    setDraft({
+      ...draft,
+      markets: draft.markets.map((m) => (m.exchange === exchange ? { ...m, ...patch } : m)),
+    })
+  }
+
+  function updateMarketHours(
+    exchange: ExchangeCode,
+    key: 'activeFrom' | 'activeTo',
+    value: string
+  ) {
+    updateMarketField(exchange, { [key]: value } as Partial<MarketConfig>)
   }
 
   if (!draft)
@@ -436,17 +530,19 @@ export default function ConfigPage() {
 
   const isLive = t212Form.mode === 'live'
 
-  const filteredUniverse = draft.tradeUniverse.filter((ticker) => {
-    if (!filterQ) return true
-    const meta = instMeta.get(ticker)
-    const q = filterQ.toLowerCase()
-    return (
-      ticker.toLowerCase().includes(q) ||
-      (meta?.name.toLowerCase().includes(q) ?? false) ||
-      (meta?.type.toLowerCase().includes(q) ?? false) ||
-      (meta?.currencyCode.toLowerCase().includes(q) ?? false)
-    )
-  })
+  const filteredUniverse = draft.tradeUniverse
+    .filter((entry) => entry.exchange === browsingMarket)
+    .filter((entry) => {
+      if (!filterQ) return true
+      const meta = instMeta.get(entry.ticker)
+      const q = filterQ.toLowerCase()
+      return (
+        entry.ticker.toLowerCase().includes(q) ||
+        (meta?.name.toLowerCase().includes(q) ?? false) ||
+        (meta?.type.toLowerCase().includes(q) ?? false) ||
+        (meta?.currencyCode.toLowerCase().includes(q) ?? false)
+      )
+    })
   const universeTotalPages = Math.ceil(filteredUniverse.length / UNIVERSE_PAGE_SIZE)
   const pagedUniverse = filteredUniverse.slice(
     (universePage - 1) * UNIVERSE_PAGE_SIZE,
@@ -499,6 +595,72 @@ export default function ConfigPage() {
         {/* ── Trade Universe ─────────────────────────────────────────────── */}
         {tab === 'universe' && (
           <div>
+            {/* Browsing-market selector */}
+            <div
+              className="card"
+              style={{
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
+              <div>
+                <div className="section-label" style={{ marginBottom: 4 }}>
+                  browsing market
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  Search and manage tickers for the selected exchange. Enable more markets in
+                  Config.
+                </div>
+              </div>
+              <div
+                role="tablist"
+                style={{
+                  display: 'flex',
+                  gap: 4,
+                  padding: 3,
+                  background: 'var(--color-bg-raised)',
+                  borderRadius: 8,
+                }}
+              >
+                {EXCHANGE_CODES.map((code) => {
+                  const active = browsingMarket === code
+                  const isEnabled = enabledMarketSet.has(code)
+                  return (
+                    <button
+                      key={code}
+                      title={isEnabled ? '' : `${code} is disabled — tickers are preserved`}
+                      onClick={() => {
+                        setBrowsingMarket(code)
+                        setUniversePage(1)
+                        setSearchQ('')
+                        setSearchResults([])
+                      }}
+                      style={{
+                        padding: '5px 14px',
+                        borderRadius: 5,
+                        border: 'none',
+                        cursor: isEnabled ? 'pointer' : 'not-allowed',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        background: active ? 'var(--color-bg-surface)' : 'transparent',
+                        color: isEnabled
+                          ? active
+                            ? 'var(--color-text-primary)'
+                            : 'var(--color-text-secondary)'
+                          : 'var(--color-text-muted)',
+                        opacity: isEnabled ? 1 : 0.5,
+                      }}
+                    >
+                      {EXCHANGES[code].shortName}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* Search / add card */}
             <div className="card" style={{ marginBottom: 12 }}>
               <div style={{ position: 'relative' }}>
@@ -516,7 +678,7 @@ export default function ConfigPage() {
                 <input
                   className="input"
                   style={{ paddingLeft: 32, width: '100%' }}
-                  placeholder="Search instruments to add — ticker, name, or ISIN…"
+                  placeholder={`Search ${EXCHANGES[browsingMarket].shortName} instruments — ticker, name, or ISIN…`}
                   autoComplete="off"
                   value={searchQ}
                   onChange={(e) => {
@@ -544,7 +706,7 @@ export default function ConfigPage() {
                   }}
                 >
                   {searchResults.map((inst) => {
-                    const added = draft.tradeUniverse.includes(inst.ticker)
+                    const added = draft.tradeUniverse.some((e) => e.ticker === inst.ticker)
                     return (
                       <div
                         key={inst.ticker}
@@ -722,7 +884,8 @@ export default function ConfigPage() {
                       </td>
                     </tr>
                   ) : (
-                    pagedUniverse.map((ticker) => {
+                    pagedUniverse.map((entry) => {
+                      const ticker = entry.ticker
                       const meta = instMeta.get(ticker)
                       return (
                         <tr
@@ -806,167 +969,311 @@ export default function ConfigPage() {
           </div>
         )}
 
-        {/* ── Settings ───────────────────────────────────────────────────── */}
-        {tab === 'settings' && (
+        {/* ── Config ─────────────────────────────────────────────────────── */}
+        {tab === 'config' && (
           <div>
+            {/* Global options */}
             <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 12,
-                marginBottom: 12,
-                alignItems: 'start',
-              }}
+              className="card"
+              style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}
             >
-              {/* Engine */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div className="section-label">engine</div>
-                <Field
-                  label="Cycle interval"
-                  hint="How often the engine runs a full analysis and decision cycle"
-                >
-                  <DurationInput
-                    ms={draft.tradeIntervalMs}
-                    onChange={(ms) => setDraft({ ...draft, tradeIntervalMs: ms })}
-                    min={1}
-                  />
-                </Field>
-                <ToggleRow
-                  label="Auto-start on restart"
-                  hint="Engine starts automatically when the server restarts"
-                  value={draft.autoStartOnRestart}
-                  onChange={(v) => setDraft({ ...draft, autoStartOnRestart: v })}
-                />
-              </div>
-
-              {/* Budget & Exposure */}
-              <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div className="section-label">budget & exposure</div>
-                <Field
-                  label="Budget cap (EUR)"
-                  hint="Hard cap — total AI portfolio value will not exceed this amount"
-                >
-                  <input
-                    type="number"
-                    className="input"
-                    value={draft.maxBudgetEur}
-                    min={10}
-                    step={10}
-                    onChange={(e) => setDraft({ ...draft, maxBudgetEur: Number(e.target.value) })}
-                  />
-                </Field>
-                <SliderField
-                  label="Max position size"
-                  value={draft.maxPositionPct}
-                  displayValue={`${pct(draft.maxPositionPct)} · €${(draft.maxBudgetEur * draft.maxPositionPct).toFixed(0)}`}
-                  min={POSITION_SIZE_MIN}
-                  max={POSITION_SIZE_MAX}
-                  step={POSITION_SIZE_STEP}
-                  minLabel="5%"
-                  maxLabel="50%"
-                  onChange={(v) => setDraft({ ...draft, maxPositionPct: v })}
-                />
-              </div>
+              <div className="section-label">global</div>
+              <ToggleRow
+                label="Auto-start on restart"
+                hint="Engine starts automatically when the server restarts"
+                value={draft.autoStartOnRestart}
+                onChange={(v) => setDraft({ ...draft, autoStartOnRestart: v })}
+              />
             </div>
 
-            {/* Risk Controls */}
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <div className="section-label">risk controls</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
-                <SliderField
-                  label="Stop-loss"
-                  value={draft.stopLossPct}
-                  displayValue={pct(draft.stopLossPct)}
-                  min={STOP_LOSS_MIN}
-                  max={STOP_LOSS_MAX}
-                  step={STOP_LOSS_STEP}
-                  minLabel="0.5%"
-                  maxLabel="20%"
-                  warning={
-                    draft.stopLossPct > STOP_LOSS_AGGRESSIVE_THRESHOLD
-                      ? `${pct(draft.stopLossPct)} stop-loss is aggressive — losses may exceed expectations`
-                      : undefined
-                  }
-                  onChange={(v) => setDraft({ ...draft, stopLossPct: v })}
-                />
-                <SliderField
-                  label="Take-profit"
-                  value={draft.takeProfitPct}
-                  displayValue={pct(draft.takeProfitPct)}
-                  min={TAKE_PROFIT_MIN}
-                  max={TAKE_PROFIT_MAX}
-                  step={TAKE_PROFIT_STEP}
-                  minLabel="1%"
-                  maxLabel="50%"
-                  onChange={(v) => setDraft({ ...draft, takeProfitPct: v })}
-                />
-                <SliderField
-                  label="Daily loss limit"
-                  value={draft.dailyLossLimitPct}
-                  displayValue={pct(draft.dailyLossLimitPct)}
-                  min={DAILY_LOSS_MIN}
-                  max={DAILY_LOSS_MAX}
-                  step={DAILY_LOSS_STEP}
-                  minLabel="2%"
-                  maxLabel="25%"
-                  warning={
-                    draft.dailyLossLimitPct > DAILY_LOSS_AGGRESSIVE_THRESHOLD
-                      ? `${pct(draft.dailyLossLimitPct)} daily loss limit is aggressive — consider lowering it`
-                      : undefined
-                  }
-                  onChange={(v) => setDraft({ ...draft, dailyLossLimitPct: v })}
-                />
+            {/* Markets */}
+            <div
+              className="card"
+              style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}
+            >
+              <div className="section-label">markets</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                Each market is its own sandbox with its own budget, hours, and risk controls.
+                Budgets are isolated — XETR cash can't touch NYSE cash. Hours are in Ireland local
+                time. Expand a market to configure it.
               </div>
+              {EXCHANGE_CODES.map((code) => {
+                const meta = EXCHANGES[code]
+                const mkt =
+                  draft.markets.find((m) => m.exchange === code) ??
+                  ({
+                    exchange: code,
+                    enabled: false,
+                    activeFrom: meta.defaultOpen,
+                    activeTo: meta.defaultClose,
+                    tradeIntervalMs: 900_000,
+                    maxBudgetEur: 100,
+                    maxPositionPct: 0.25,
+                    dailyLossLimitPct: 0.1,
+                    stopLossPct: 0.05,
+                    takeProfitPct: 0.015,
+                    stagnantExitEnabled: true,
+                    stagnantTimeMinutes: 120,
+                    stagnantRangePct: 0.012,
+                  } as MarketConfig)
+                const expanded = expandedMarket === code && mkt.enabled
+                return (
+                  <div
+                    key={code}
+                    style={{
+                      background: 'var(--color-bg-surface)',
+                      border: '0.5px solid var(--color-border)',
+                      borderRadius: 6,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {/* Header row */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'auto 1fr auto auto auto auto',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 12px',
+                      }}
+                      title={`${meta.name} — native session ${
+                        code === 'NYSE'
+                          ? 'NYSE native session: 09:30–16:00 ET = 14:30–21:00 IST'
+                          : 'XETRA native session: 09:00–17:30 CEST = 08:00–16:30 IST'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedMarket(expanded ? null : code)}
+                        disabled={!mkt.enabled}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: mkt.enabled ? 'pointer' : 'default',
+                          color: 'var(--color-text-muted)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 2,
+                          opacity: mkt.enabled ? 1 : 0.3,
+                        }}
+                      >
+                        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </button>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 13, fontWeight: 500 }}>{meta.shortName}</span>
+                        <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                          {meta.name} · {meta.currency} · €{mkt.maxBudgetEur.toFixed(0)} budget
+                        </span>
+                      </div>
+                      <input
+                        type="time"
+                        className="input"
+                        style={{ width: 110, height: 30, fontSize: 12 }}
+                        value={mkt.activeFrom}
+                        disabled={!mkt.enabled}
+                        onChange={(e) => updateMarketHours(code, 'activeFrom', e.target.value)}
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>to</span>
+                      <input
+                        type="time"
+                        className="input"
+                        style={{ width: 110, height: 30, fontSize: 12 }}
+                        value={mkt.activeTo}
+                        disabled={!mkt.enabled}
+                        onChange={(e) => updateMarketHours(code, 'activeTo', e.target.value)}
+                      />
+                      <Toggle value={mkt.enabled} onChange={(v) => toggleMarket(code, v)} />
+                    </div>
 
-              <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 20 }}>
+                    {/* Expanded per-market config */}
+                    {expanded && (
+                      <div
+                        style={{
+                          borderTop: '0.5px solid var(--color-border)',
+                          padding: 16,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 20,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: 16,
+                          }}
+                        >
+                          <Field
+                            label="Cycle interval"
+                            hint="How often the engine runs a cycle on this market"
+                          >
+                            <DurationInput
+                              ms={mkt.tradeIntervalMs}
+                              onChange={(ms) => updateMarketField(code, { tradeIntervalMs: ms })}
+                              min={10_000}
+                            />
+                          </Field>
+                          <Field
+                            label="Budget cap (EUR)"
+                            hint={`Hard cap — this market's AI positions never exceed €${mkt.maxBudgetEur}`}
+                          >
+                            <input
+                              type="number"
+                              className="input"
+                              value={mkt.maxBudgetEur}
+                              min={10}
+                              step={10}
+                              onChange={(e) =>
+                                updateMarketField(code, {
+                                  maxBudgetEur: Number(e.target.value),
+                                })
+                              }
+                            />
+                          </Field>
+                        </div>
+
+                        <SliderField
+                          label="Max position size"
+                          value={mkt.maxPositionPct}
+                          displayValue={`${pct(mkt.maxPositionPct)} · €${(mkt.maxBudgetEur * mkt.maxPositionPct).toFixed(0)}`}
+                          min={POSITION_SIZE_MIN}
+                          max={POSITION_SIZE_MAX}
+                          step={POSITION_SIZE_STEP}
+                          minLabel="5%"
+                          maxLabel="50%"
+                          onChange={(v) => updateMarketField(code, { maxPositionPct: v })}
+                        />
+
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr 1fr',
+                            gap: 24,
+                          }}
+                        >
+                          <SliderField
+                            label="Stop-loss"
+                            value={mkt.stopLossPct}
+                            displayValue={pct(mkt.stopLossPct)}
+                            min={STOP_LOSS_MIN}
+                            max={STOP_LOSS_MAX}
+                            step={STOP_LOSS_STEP}
+                            minLabel="0.5%"
+                            maxLabel="20%"
+                            warning={
+                              mkt.stopLossPct > STOP_LOSS_AGGRESSIVE_THRESHOLD
+                                ? `${pct(mkt.stopLossPct)} stop-loss is aggressive — losses may exceed expectations`
+                                : undefined
+                            }
+                            onChange={(v) => updateMarketField(code, { stopLossPct: v })}
+                          />
+                          <SliderField
+                            label="Take-profit"
+                            value={mkt.takeProfitPct}
+                            displayValue={pct(mkt.takeProfitPct)}
+                            min={TAKE_PROFIT_MIN}
+                            max={TAKE_PROFIT_MAX}
+                            step={TAKE_PROFIT_STEP}
+                            minLabel="1%"
+                            maxLabel="50%"
+                            onChange={(v) => updateMarketField(code, { takeProfitPct: v })}
+                          />
+                          <SliderField
+                            label="Daily loss limit"
+                            value={mkt.dailyLossLimitPct}
+                            displayValue={pct(mkt.dailyLossLimitPct)}
+                            min={DAILY_LOSS_MIN}
+                            max={DAILY_LOSS_MAX}
+                            step={DAILY_LOSS_STEP}
+                            minLabel="2%"
+                            maxLabel="25%"
+                            warning={
+                              mkt.dailyLossLimitPct > DAILY_LOSS_AGGRESSIVE_THRESHOLD
+                                ? `${pct(mkt.dailyLossLimitPct)} daily loss limit is aggressive — consider lowering it`
+                                : undefined
+                            }
+                            onChange={(v) => updateMarketField(code, { dailyLossLimitPct: v })}
+                          />
+                        </div>
+
+                        <div
+                          style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 16 }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: mkt.stagnantExitEnabled ? 16 : 0,
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div className="section-label">stagnant exit</div>
+                              <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                                sell flat positions held past threshold
+                              </span>
+                            </div>
+                            <Toggle
+                              value={mkt.stagnantExitEnabled}
+                              onChange={(v) => updateMarketField(code, { stagnantExitEnabled: v })}
+                            />
+                          </div>
+                          {mkt.stagnantExitEnabled && (
+                            <div
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '1fr 1fr',
+                                gap: 16,
+                              }}
+                            >
+                              <Field
+                                label="Sell if held for longer than"
+                                hint="Position must be near break-even to trigger"
+                              >
+                                <DurationInput
+                                  ms={mkt.stagnantTimeMinutes * 60_000}
+                                  onChange={(ms) =>
+                                    updateMarketField(code, {
+                                      stagnantTimeMinutes: Math.round(ms / 60_000),
+                                    })
+                                  }
+                                  min={15 * 60_000}
+                                  units={['minutes', 'hours']}
+                                />
+                              </Field>
+                              <SliderField
+                                label="Max price movement"
+                                value={mkt.stagnantRangePct}
+                                displayValue={pct(mkt.stagnantRangePct)}
+                                min={STAGNANT_RANGE_MIN}
+                                max={STAGNANT_RANGE_MAX}
+                                step={STAGNANT_RANGE_STEP}
+                                minLabel="0.1%"
+                                maxLabel="5%"
+                                onChange={(v) => updateMarketField(code, { stagnantRangePct: v })}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {enabledMarkets.length === 0 && (
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: draft.stagnantExitEnabled ? 20 : 0,
+                    gap: 6,
+                    fontSize: 11,
+                    color: '#ca8a04',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div className="section-label">stagnant exit</div>
-                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                      sell flat positions held past threshold
-                    </span>
-                  </div>
-                  <Toggle
-                    value={draft.stagnantExitEnabled}
-                    onChange={(v) => setDraft({ ...draft, stagnantExitEnabled: v })}
-                  />
+                  <AlertTriangle size={11} />
+                  At least one market must be enabled for the bot to run.
                 </div>
-                {draft.stagnantExitEnabled && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    <Field
-                      label="Sell if held for longer than"
-                      hint="Position must be near break-even to trigger"
-                    >
-                      <DurationInput
-                        ms={draft.stagnantTimeMinutes * 60_000}
-                        onChange={(ms) =>
-                          setDraft({ ...draft, stagnantTimeMinutes: Math.round(ms / 60_000) })
-                        }
-                        min={15}
-                        units={['minutes', 'hours']}
-                      />
-                    </Field>
-                    <SliderField
-                      label="Max price movement"
-                      value={draft.stagnantRangePct}
-                      displayValue={pct(draft.stagnantRangePct)}
-                      min={STAGNANT_RANGE_MIN}
-                      max={STAGNANT_RANGE_MAX}
-                      step={STAGNANT_RANGE_STEP}
-                      minLabel="0.1%"
-                      maxLabel="5%"
-                      onChange={(v) => setDraft({ ...draft, stagnantRangePct: v })}
-                    />
-                  </div>
-                )}
-              </div>
+              )}
             </div>
 
             {/* Save / Reset row */}

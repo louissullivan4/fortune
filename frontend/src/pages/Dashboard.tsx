@@ -1,6 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Play, Square, RefreshCw, Download, ChevronLeft, ChevronRight } from 'lucide-react'
-import { api, type EngineStatus, type Portfolio, type Summary } from '../api/client'
+import {
+  api,
+  type EngineStatus,
+  type MarketWindow,
+  type Portfolio,
+  type Summary,
+} from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import MarketClock from '../components/MarketClock'
 import ExportReportModal from '../components/ExportReportModal'
@@ -18,6 +24,7 @@ function _fmtPct(n: number | null | undefined) {
 
 function EngineCard({
   status,
+  markets,
   onStart,
   onStop,
   onCycle,
@@ -25,6 +32,7 @@ function EngineCard({
   loading,
 }: {
   status: EngineStatus | null
+  markets: MarketWindow[]
   onStart: () => void
   onStop: () => void
   onCycle: () => void
@@ -97,7 +105,7 @@ function EngineCard({
       </div>
 
       {/* Market clock */}
-      <MarketClock />
+      <MarketClock markets={markets} />
 
       {/* Cycle timestamps */}
       {(status?.lastCycleAt || status?.nextCycleAt) && (
@@ -158,6 +166,7 @@ export default function Overview() {
   const { user } = useAuth()
   const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
+  const [markets, setMarkets] = useState<MarketWindow[]>([])
   const [_maxBudget, setMaxBudget] = useState<number | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -222,7 +231,12 @@ export default function Overview() {
       ])
       setEngineStatus(status)
       setPortfolio(port)
-      setMaxBudget(cfg.maxBudgetEur)
+      // Total budget across all enabled markets — Overview stat is now a sum.
+      const totalBudget = cfg.markets
+        .filter((m) => m.enabled)
+        .reduce((s, m) => s + m.maxBudgetEur, 0)
+      setMaxBudget(totalBudget)
+      setMarkets(cfg.markets ?? [])
       setSummary(sum)
       fetchMissingNames([
         ...port.aiPositions.map((p) => p.ticker),
@@ -295,6 +309,7 @@ export default function Overview() {
 
       <EngineCard
         status={engineStatus}
+        markets={markets}
         onStart={handleStart}
         onStop={handleStop}
         onCycle={handleCycle}

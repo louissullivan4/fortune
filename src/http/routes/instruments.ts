@@ -6,11 +6,13 @@ import { getOrCreateT212Client } from '../../api/trading212.js'
 const router = Router()
 router.use(requireAuth)
 
-// GET /api/instruments/search?q=AAPL
+// GET /api/instruments/search?q=AAPL&exchange=NYSE
 router.get('/search', async (req, res, next) => {
   try {
     const q = ((req.query.q as string) ?? '').toLowerCase().trim()
     if (!q) return res.json({ data: [], total: 0 })
+
+    const exchangeFilter = ((req.query.exchange as string) ?? '').toUpperCase() || null
 
     const userId = req.user!.userId
     const keys = await getUserApiKeys(userId)
@@ -23,6 +25,7 @@ router.get('/search', async (req, res, next) => {
     const instruments = await t212.getInstruments()
 
     const results = [...instruments.values()]
+      .filter((i) => (exchangeFilter ? i.exchange === exchangeFilter : true))
       .filter(
         (i) =>
           i.ticker.toLowerCase().includes(q) ||

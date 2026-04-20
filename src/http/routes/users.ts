@@ -6,6 +6,8 @@ import { encrypt, decrypt } from '../../services/encryption.js'
 import { sendInviteEmail } from '../../services/email.js'
 import { requireAuth, requireAdmin } from '../middleware/auth.js'
 import { evictT212Client } from '../../api/trading212.js'
+import type { UserConfig, MarketConfig, UniverseEntry } from '../../types/user.js'
+import { EXCHANGE_CODES, type ExchangeCode } from '../../engine/markets.js'
 
 const router = Router()
 
@@ -40,38 +42,268 @@ export async function getUserApiKeys(userId: string): Promise<{
   }
 }
 
-export async function getUserConfig(userId: string) {
+export async function getUserConfig(userId: string): Promise<UserConfig | null> {
   const pool = getPool()
-  const result = await pool.query<{
-    trade_universe: string
-    trade_interval_ms: number
-    max_budget_eur: number
-    max_position_pct: number
-    daily_loss_limit_pct: number
-    stop_loss_pct: number
-    take_profit_pct: number
-    stagnant_exit_enabled: boolean
-    stagnant_time_minutes: number
-    stagnant_range_pct: number
-    auto_start_on_restart: boolean
-  }>('SELECT * FROM user_configs WHERE user_id = $1', [userId])
-  const row = result.rows[0]
-  if (!row) return null
+  const [cfgRes, marketsRes, tickersRes] = await Promise.all([
+    pool.query<{ auto_start_on_restart: boolean }>(
+      'SELECT auto_start_on_restart FROM user_configs WHERE user_id = $1',
+      [userId]
+    ),
+    pool.query<{
+      exchange_code: string
+      active_from_local: string
+      active_to_local: string
+      enabled: boolean
+      trade_interval_ms: number
+      max_budget_eur: number
+      max_position_pct: number
+      daily_loss_limit_pct: number
+      stop_loss_pct: number
+      take_profit_pct: number
+      stagnant_exit_enabled: boolean
+      stagnant_time_minutes: number
+      stagnant_range_pct: number
+    }>(
+      `SELECT exchange_code, active_from_local, active_to_local, enabled,
+              trade_interval_ms, max_budget_eur, max_position_pct,
+              daily_loss_limit_pct, stop_loss_pct, take_profit_pct,
+              stagnant_exit_enabled, stagnant_time_minutes, stagnant_range_pct
+         FROM user_markets
+        WHERE user_id = $1
+        ORDER BY exchange_code`,
+      [userId]
+    ),
+    pool.query<{ ticker: string; exchange_code: string }>(
+      'SELECT ticker, exchange_code FROM user_tickers WHERE user_id = $1 ORDER BY ticker',
+      [userId]
+    ),
+  ])
+  const cfgRow = cfgRes.rows[0]
+  if (!cfgRow) return null
+
+  const markets: MarketConfig[] = marketsRes.rows
+    .filter((m) => EXCHANGE_CODES.includes(m.exchange_code as ExchangeCode))
+    .map((m) => ({
+      exchange: m.exchange_code as ExchangeCode,
+      enabled: m.enabled,
+      activeFrom: m.active_from_local,
+      activeTo: m.active_to_local,
+      tradeIntervalMs: Number(m.trade_interval_ms),
+      maxBudgetEur: Number(m.max_budget_eur),
+      maxPositionPct: Number(m.max_position_pct),
+      dailyLossLimitPct: Number(m.daily_loss_limit_pct),
+      stopLossPct: Number(m.stop_loss_pct),
+      takeProfitPct: Number(m.take_profit_pct),
+      stagnantExitEnabled: Boolean(m.stagnant_exit_enabled),
+      stagnantTimeMinutes: Number(m.stagnant_time_minutes),
+      stagnantRangePct: Number(m.stagnant_range_pct),
+    }))
+
+  const tradeUniverse: UniverseEntry[] = tickersRes.rows
+    .filter((t) => EXCHANGE_CODES.includes(t.exchange_code as ExchangeCode))
+    .map((t) => ({ ticker: t.ticker, exchange: t.exchange_code as ExchangeCode }))
+
   return {
-    tradeUniverse: row.trade_universe
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean),
-    tradeIntervalMs: Number(row.trade_interval_ms),
-    maxBudgetEur: Number(row.max_budget_eur),
-    maxPositionPct: Number(row.max_position_pct),
-    dailyLossLimitPct: Number(row.daily_loss_limit_pct),
-    stopLossPct: Number(row.stop_loss_pct),
-    takeProfitPct: Number(row.take_profit_pct),
-    stagnantExitEnabled: Boolean(row.stagnant_exit_enabled),
-    stagnantTimeMinutes: Number(row.stagnant_time_minutes),
-    stagnantRangePct: Number(row.stagnant_range_pct),
-    autoStartOnRestart: Boolean(row.auto_start_on_restart),
+    markets,
+    tradeUniverse,
+    autoStartOnRestart: Boolean(cfgRow.auto_start_on_restart),
+  }
+}
+
+// ── Apply config update (body → user_configs + user_markets + user_tickers) ─
+
+const HHMM_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+
+interface MarketInput {
+  exchange: ExchangeCode
+  enabled: boolean
+  activeFrom?: string
+  activeTo?: string
+  tradeIntervalMs?: number
+  maxBudgetEur?: number
+  maxPositionPct?: number
+  dailyLossLimitPct?: number
+  stopLossPct?: number
+  takeProfitPct?: number
+  stagnantExitEnabled?: boolean
+  stagnantTimeMinutes?: number
+  stagnantRangePct?: number
+}
+
+function parseMarketInput(raw: unknown): MarketInput | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const m = raw as Record<string, unknown>
+  const exchange = m.exchange
+  if (typeof exchange !== 'string' || !EXCHANGE_CODES.includes(exchange as ExchangeCode))
+    return null
+  if (typeof m.enabled !== 'boolean') return null
+
+  const out: MarketInput = { exchange: exchange as ExchangeCode, enabled: m.enabled }
+
+  const maybeHhmm = (v: unknown): string | null =>
+    typeof v === 'string' && HHMM_RE.test(v) ? v : null
+  const from = maybeHhmm(m.activeFrom)
+  const to = maybeHhmm(m.activeTo)
+  if (from) out.activeFrom = from
+  if (to) out.activeTo = to
+  if (out.activeFrom && out.activeTo && out.activeFrom >= out.activeTo) return null
+
+  const maybeNum = (v: unknown, min: number, max: number): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : null
+
+  const tradeIntervalMs = maybeNum(m.tradeIntervalMs, 10_000, 24 * 60 * 60_000)
+  if (tradeIntervalMs !== null) out.tradeIntervalMs = tradeIntervalMs
+
+  const maxBudget = maybeNum(m.maxBudgetEur, 0.01, 1_000_000)
+  if (maxBudget !== null) out.maxBudgetEur = maxBudget
+
+  const maxPosPct = maybeNum(m.maxPositionPct, 0.001, 1)
+  if (maxPosPct !== null) out.maxPositionPct = maxPosPct
+
+  const dailyLoss = maybeNum(m.dailyLossLimitPct, 0.001, 1)
+  if (dailyLoss !== null) out.dailyLossLimitPct = dailyLoss
+
+  const stopLoss = maybeNum(m.stopLossPct, 0.001, 1)
+  if (stopLoss !== null) out.stopLossPct = stopLoss
+
+  const takeProfit = maybeNum(m.takeProfitPct, 0.001, 1)
+  if (takeProfit !== null) out.takeProfitPct = takeProfit
+
+  if (typeof m.stagnantExitEnabled === 'boolean') out.stagnantExitEnabled = m.stagnantExitEnabled
+  const stagnantMin = maybeNum(m.stagnantTimeMinutes, 15, 60 * 24)
+  if (stagnantMin !== null) out.stagnantTimeMinutes = stagnantMin
+  const stagnantRange = maybeNum(m.stagnantRangePct, 0.0001, 0.5)
+  if (stagnantRange !== null) out.stagnantRangePct = stagnantRange
+
+  return out
+}
+
+function isValidUniverseEntry(e: unknown): e is UniverseEntry {
+  if (typeof e !== 'object' || e === null) return false
+  const { ticker, exchange } = e as Partial<UniverseEntry>
+  return (
+    typeof ticker === 'string' &&
+    ticker.length > 0 &&
+    typeof exchange === 'string' &&
+    EXCHANGE_CODES.includes(exchange as ExchangeCode)
+  )
+}
+
+/**
+ * Persist a partial config update covering:
+ *   - global: autoStartOnRestart
+ *   - per-market: any subset of MarketConfig fields, indexed by exchange
+ *   - tradeUniverse: full replace
+ *
+ * Markets can be patched one-at-a-time (UI saves a card at a time) — no need
+ * to send the full markets array to tweak one field.
+ */
+export async function applyConfigUpdate(
+  userId: string,
+  body: Record<string, unknown>
+): Promise<void> {
+  const pool = getPool()
+
+  if (typeof body.autoStartOnRestart === 'boolean') {
+    await pool.query(
+      `UPDATE user_configs SET auto_start_on_restart = $2, updated_at = NOW() WHERE user_id = $1`,
+      [userId, body.autoStartOnRestart]
+    )
+  }
+
+  // Markets. Each entry is a partial patch of that market's config. Upsert on
+  // (user_id, exchange_code); fields left off the body keep their stored value.
+  if (Array.isArray(body.markets)) {
+    const raw = body.markets as unknown[]
+    const parsed = raw.map(parseMarketInput)
+    if (parsed.some((p) => p === null)) throw new Error('Invalid markets payload')
+    for (const m of parsed as MarketInput[]) {
+      const colMap: Record<string, unknown> = {
+        enabled: m.enabled,
+        active_from_local: m.activeFrom,
+        active_to_local: m.activeTo,
+        trade_interval_ms: m.tradeIntervalMs,
+        max_budget_eur: m.maxBudgetEur,
+        max_position_pct: m.maxPositionPct,
+        daily_loss_limit_pct: m.dailyLossLimitPct,
+        stop_loss_pct: m.stopLossPct,
+        take_profit_pct: m.takeProfitPct,
+        stagnant_exit_enabled: m.stagnantExitEnabled,
+        stagnant_time_minutes: m.stagnantTimeMinutes,
+        stagnant_range_pct: m.stagnantRangePct,
+      }
+      const cols = Object.entries(colMap).filter(([, v]) => v !== undefined) as [string, unknown][]
+      if (cols.length === 0) continue
+
+      // Upsert: if the market exists, patch only the supplied fields; otherwise
+      // insert with the supplied fields + defaults for anything missing.
+      const existingRes = await pool.query<{ id: number }>(
+        `SELECT id FROM user_markets WHERE user_id = $1 AND exchange_code = $2`,
+        [userId, m.exchange]
+      )
+      if (existingRes.rows[0]) {
+        const setClauses = cols.map(([c], i) => `${c} = $${i + 3}`).join(', ')
+        await pool.query(
+          `UPDATE user_markets SET ${setClauses}, updated_at = NOW()
+             WHERE user_id = $1 AND exchange_code = $2`,
+          [userId, m.exchange, ...cols.map(([, v]) => v)]
+        )
+      } else {
+        // New market — caller must have supplied enough fields, but we also
+        // backfill any missing ones from sensible defaults so the row is valid.
+        const defaults: Record<string, unknown> = {
+          active_from_local: '09:00',
+          active_to_local: '17:00',
+          trade_interval_ms: 900_000,
+          max_budget_eur: 100,
+          max_position_pct: 0.25,
+          daily_loss_limit_pct: 0.1,
+          stop_loss_pct: 0.05,
+          take_profit_pct: 0.015,
+          stagnant_exit_enabled: true,
+          stagnant_time_minutes: 120,
+          stagnant_range_pct: 0.012,
+        }
+        const merged: Record<string, unknown> = {
+          ...defaults,
+          ...Object.fromEntries(cols),
+          enabled: m.enabled,
+        }
+        const keys = Object.keys(merged)
+        const placeholders = keys.map((_, i) => `$${i + 3}`).join(', ')
+        await pool.query(
+          `INSERT INTO user_markets (user_id, exchange_code, ${keys.join(', ')})
+           VALUES ($1, $2, ${placeholders})`,
+          [userId, m.exchange, ...keys.map((k) => merged[k])]
+        )
+      }
+    }
+  }
+
+  // Trade universe — full replace. Each entry's exchange must be in an
+  // *enabled* user_markets row.
+  if (Array.isArray(body.tradeUniverse)) {
+    const valid = (body.tradeUniverse as unknown[]).filter(isValidUniverseEntry)
+    if (valid.length !== (body.tradeUniverse as unknown[]).length) {
+      throw new Error('Invalid tradeUniverse payload')
+    }
+    const enabledRes = await pool.query<{ exchange_code: string }>(
+      'SELECT exchange_code FROM user_markets WHERE user_id = $1 AND enabled = TRUE',
+      [userId]
+    )
+    const enabledSet = new Set(enabledRes.rows.map((r) => r.exchange_code))
+    const bad = valid.find((e) => !enabledSet.has(e.exchange))
+    if (bad) {
+      throw new Error(`Ticker ${bad.ticker} is on ${bad.exchange} but that market is not enabled`)
+    }
+    await pool.query('DELETE FROM user_tickers WHERE user_id = $1', [userId])
+    for (const e of valid) {
+      await pool.query(
+        `INSERT INTO user_tickers (user_id, ticker, exchange_code) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, ticker) DO UPDATE SET exchange_code = EXCLUDED.exchange_code`,
+        [userId, e.ticker, e.exchange]
+      )
+    }
   }
 }
 
@@ -281,7 +513,7 @@ router.get('/me/config', async (req, res, next) => {
   try {
     const cfg = await getUserConfig(req.user!.userId)
     if (!cfg) return res.status(404).json({ error: 'Config not found — reseed the account' })
-    res.json({ ...cfg, tradeIntervalS: cfg.tradeIntervalMs / 1000 })
+    res.json(cfg)
   } catch (err) {
     next(err)
   }
@@ -290,70 +522,9 @@ router.get('/me/config', async (req, res, next) => {
 // ── PUT /api/users/me/config — update user trading config ─────────────────
 router.put('/me/config', async (req, res, next) => {
   try {
-    const body = req.body as Record<string, unknown>
-    const pool = getPool()
-
-    const updates: Record<string, unknown> = {}
-    if (Array.isArray(body.tradeUniverse)) {
-      updates.trade_universe = (body.tradeUniverse as string[]).map(String).join(',')
-    }
-    if (typeof body.tradeIntervalMs === 'number' && body.tradeIntervalMs >= 10_000) {
-      updates.trade_interval_ms = body.tradeIntervalMs
-    }
-    if (typeof body.maxBudgetEur === 'number' && body.maxBudgetEur > 0) {
-      updates.max_budget_eur = body.maxBudgetEur
-    }
-    if (
-      typeof body.maxPositionPct === 'number' &&
-      body.maxPositionPct > 0 &&
-      body.maxPositionPct <= 1
-    ) {
-      updates.max_position_pct = body.maxPositionPct
-    }
-    if (
-      typeof body.dailyLossLimitPct === 'number' &&
-      body.dailyLossLimitPct > 0 &&
-      body.dailyLossLimitPct <= 1
-    ) {
-      updates.daily_loss_limit_pct = body.dailyLossLimitPct
-    }
-    if (typeof body.stopLossPct === 'number' && body.stopLossPct > 0 && body.stopLossPct <= 1) {
-      updates.stop_loss_pct = body.stopLossPct
-    }
-    if (
-      typeof body.takeProfitPct === 'number' &&
-      body.takeProfitPct > 0 &&
-      body.takeProfitPct <= 1
-    ) {
-      updates.take_profit_pct = body.takeProfitPct
-    }
-    if (typeof body.stagnantExitEnabled === 'boolean') {
-      updates.stagnant_exit_enabled = body.stagnantExitEnabled
-    }
-    if (typeof body.stagnantTimeMinutes === 'number' && body.stagnantTimeMinutes >= 15) {
-      updates.stagnant_time_minutes = body.stagnantTimeMinutes
-    }
-    if (
-      typeof body.stagnantRangePct === 'number' &&
-      body.stagnantRangePct > 0 &&
-      body.stagnantRangePct <= 0.1
-    ) {
-      updates.stagnant_range_pct = body.stagnantRangePct
-    }
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ error: 'No valid fields to update' })
-    }
-
-    const setClauses = Object.keys(updates)
-      .map((k, i) => `${k} = $${i + 2}`)
-      .join(', ')
-    await pool.query(
-      `UPDATE user_configs SET ${setClauses}, updated_at = NOW() WHERE user_id = $1`,
-      [req.user!.userId, ...Object.values(updates)]
-    )
-
+    await applyConfigUpdate(req.user!.userId, req.body as Record<string, unknown>)
     const cfg = await getUserConfig(req.user!.userId)
-    res.json({ ...cfg, tradeIntervalS: cfg!.tradeIntervalMs / 1000 })
+    res.json(cfg)
   } catch (err) {
     next(err)
   }
