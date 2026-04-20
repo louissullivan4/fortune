@@ -159,6 +159,10 @@ export interface T212Position {
   ppl: number
   fxPpl: number | null
   initialFillDate: string
+  currencyCode: string
+  fxRate: number
+  valueEur: number
+  costBasisEur: number
 }
 
 export interface T212Cash {

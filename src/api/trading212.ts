@@ -1,4 +1,5 @@
 import { hub } from '../ws/hub.js'
+import { resolveFxRates } from './fx.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,14 @@ export interface T212Position {
   initialFillDate: string
   maxBuy: number | null
   maxSell: number | null
+  /** Instrument trading currency (e.g. USD, EUR, GBX). */
+  currencyCode: string
+  /** EUR per 1 unit of `currencyCode`. 1.0 for EUR instruments. */
+  fxRate: number
+  /** currentPrice × quantity, converted to EUR. */
+  valueEur: number
+  /** averagePrice × quantity, converted to EUR. */
+  costBasisEur: number
 }
 
 export interface T212Cash {
@@ -237,7 +246,34 @@ export class Trading212Client {
   // ── Portfolio & cash ─────────────────────────────────────────────────────
 
   async getPortfolio(): Promise<T212Position[]> {
-    return this.apiFetch<T212Position[]>('/equity/portfolio')
+    type RawPosition = Omit<T212Position, 'currencyCode' | 'fxRate' | 'valueEur' | 'costBasisEur'>
+    const raw = await this.apiFetch<RawPosition[]>('/equity/portfolio')
+    if (raw.length === 0) return []
+
+    // Instrument lookup can fail (rate limit, transient) — fall back to EUR so
+    // callers still get positions; FX will default to 1.0 which surfaces the
+    // problem in downstream comparisons rather than swallowing it.
+    const instruments = await this.getInstruments().catch((err) => {
+      console.warn(`[t212] getInstruments failed during portfolio enrichment: ${err.message}`)
+      return new Map<string, T212Instrument>()
+    })
+
+    const enriched = raw.map((p) => ({
+      ...p,
+      currencyCode: instruments.get(p.ticker)?.currencyCode ?? 'EUR',
+    }))
+
+    const fxRates = await resolveFxRates(enriched)
+
+    return enriched.map((p) => {
+      const fx = fxRates.get(p.currencyCode) ?? 1
+      return {
+        ...p,
+        fxRate: fx,
+        valueEur: p.currentPrice * p.quantity * fx,
+        costBasisEur: p.averagePrice * p.quantity * fx,
+      }
+    })
   }
 
   async getCash(): Promise<T212Cash> {
@@ -275,7 +311,9 @@ export class Trading212Client {
       const response = await this.apiFetch<{ items: T212Order[]; nextPagePath?: string }>(path)
       all.push(...response.items)
       if (!response.nextPagePath || response.items.length === 0) break
-      path = response.nextPagePath
+      // T212 returns nextPagePath including the `/api/v0` prefix that baseUrl()
+      // already adds. Strip it so we don't end up requesting `/api/v0/api/v0/...`.
+      path = response.nextPagePath.replace(/^\/api\/v0/, '')
     }
     return all
   }

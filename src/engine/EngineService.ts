@@ -545,10 +545,20 @@ export class EngineService {
       console.log(`[engine:${this.userId}] No hard exits triggered`)
     }
 
-    // Compute bot-scoped values before any halts so the daily snapshot is always written
-    const botTickers = new Set((await getOpenAiPositions(this.userId)).map((p) => p.ticker))
-    const botPositions = snapshot.positions.filter((p) => botTickers.has(p.ticker))
-    const aiPositionsValue = botPositions.reduce((sum, p) => sum + p.currentPrice * p.quantity, 0)
+    // Compute bot-scoped values before any halts so the daily snapshot is always written.
+    // T212 aggregates bot + manual shares under one ticker; scale its EUR value by the
+    // bot's tracked share of the position so manual stakes don't consume the bot budget.
+    const openAiPositions = await getOpenAiPositions(this.userId)
+    const botQtyByTicker = new Map<string, number>()
+    for (const pos of openAiPositions) {
+      botQtyByTicker.set(pos.ticker, (botQtyByTicker.get(pos.ticker) ?? 0) + pos.quantity)
+    }
+    const botPositions = snapshot.positions.filter((p) => botQtyByTicker.has(p.ticker))
+    const aiPositionsValue = botPositions.reduce((sum, p) => {
+      const botQty = Math.min(botQtyByTicker.get(p.ticker) ?? 0, p.quantity)
+      const share = p.quantity > 0 ? botQty / p.quantity : 0
+      return sum + p.valueEur * share
+    }, 0)
     // Cap the bot's visible cash to its remaining budget — never touch personal cash
     const botBudgetRemaining = Math.max(0, this.userConfig.maxBudgetEur - aiPositionsValue)
     const botCash = Math.min(botBudgetRemaining, snapshot.cash.free)
@@ -578,7 +588,7 @@ export class EngineService {
     const histories = await getAllHistories(this.userConfig.tradeUniverse, 90)
 
     const manualTickers = new Set(
-      snapshot.positions.map((p) => p.ticker).filter((t) => !botTickers.has(t))
+      snapshot.positions.map((p) => p.ticker).filter((t) => !botQtyByTicker.has(t))
     )
     const coolingTickers = new Set(
       [...this._recentlyClosedTickers.keys()].filter(
@@ -586,11 +596,11 @@ export class EngineService {
       )
     )
     const buyUniverse = this.userConfig.tradeUniverse.filter(
-      (t) => !botTickers.has(t) && !manualTickers.has(t) && !coolingTickers.has(t)
+      (t) => !botQtyByTicker.has(t) && !manualTickers.has(t) && !coolingTickers.has(t)
     )
-    if (botTickers.size > 0) {
+    if (botQtyByTicker.size > 0) {
       console.log(
-        `[engine:${this.userId}] Excluding bot-held tickers from buy universe: ${[...botTickers].join(', ')}`
+        `[engine:${this.userId}] Excluding bot-held tickers from buy universe: ${[...botQtyByTicker.keys()].join(', ')}`
       )
     }
     if (manualTickers.size > 0) {
@@ -750,14 +760,23 @@ export class EngineService {
 
     if (decision.action !== 'hold' && decision.ticker && decision.quantity) {
       const signal = signals.find((s) => s.ticker === decision.ticker)
-      const estimatedPriceEur = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
+      const estimatedPriceNative = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
+      const livePosition = snapshot.positions.find((p) => p.ticker === decision.ticker)
+      const fxRate =
+        livePosition?.fxRate ??
+        (() => {
+          const currency = livePosition?.currencyCode
+          if (!currency || currency === 'EUR') return 1
+          return snapshot.positions.find((p) => p.currencyCode === currency)?.fxRate ?? 1
+        })()
+      const estimatedPriceEur = estimatedPriceNative * fxRate
 
       const risk = await validateOrder(
         {
           action: decision.action,
           ticker: decision.ticker,
           quantity: decision.quantity,
-          estimatedPrice: estimatedPriceEur,
+          estimatedPrice: estimatedPriceNative,
         },
         botSnapshot,
         dailyOpenValue,
@@ -799,12 +818,12 @@ export class EngineService {
           await openAiPosition(
             decision.ticker,
             decision.quantity,
-            estimatedPriceEur,
+            estimatedPriceNative,
             timestamp,
             this.userId
           )
         } else if (decision.action === 'sell') {
-          await closeAllAiPositions(decision.ticker, estimatedPriceEur, timestamp, this.userId)
+          await closeAllAiPositions(decision.ticker, estimatedPriceNative, timestamp, this.userId)
           this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
@@ -825,7 +844,7 @@ export class EngineService {
         const msg = (err as Error).message
         console.error(`[engine:${this.userId}] Order failed: ${msg}`)
         if (decision.action === 'sell' && msg.includes('selling-equity-not-owned')) {
-          await closeAllAiPositions(decision.ticker, estimatedPriceEur, timestamp, this.userId)
+          await closeAllAiPositions(decision.ticker, estimatedPriceNative, timestamp, this.userId)
         }
         await logOrder({
           decisionId,

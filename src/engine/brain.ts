@@ -69,10 +69,13 @@ function formatPortfolio(snapshot: PortfolioSnapshot, userConfig: UserConfig): s
     lines.push('  (none)')
   } else {
     for (const p of snapshot.positions) {
-      const costBasis = p.averagePrice * p.quantity
-      const remaining = Math.max(0, maxPositionValue - costBasis)
+      const remaining = Math.max(0, maxPositionValue - p.costBasisEur)
+      const nativeNote =
+        p.currencyCode === 'EUR'
+          ? `@ current €${p.currentPrice.toFixed(2)}`
+          : `@ current ${p.currencyCode} ${p.currentPrice.toFixed(2)} (≈€${(p.currentPrice * p.fxRate).toFixed(2)})`
       lines.push(
-        `  ${p.ticker}: ${p.quantity} shares @ current €${p.currentPrice.toFixed(2)} | cost basis €${costBasis.toFixed(2)} | P&L: €${p.ppl.toFixed(2)} | remaining room: €${remaining.toFixed(2)} of €${maxPositionValue.toFixed(0)} cap`
+        `  ${p.ticker}: ${p.quantity} shares ${nativeNote} | cost basis €${p.costBasisEur.toFixed(2)} | P&L: €${p.ppl.toFixed(2)} | remaining room: €${remaining.toFixed(2)} of €${maxPositionValue.toFixed(0)} cap`
       )
     }
   }
@@ -227,7 +230,20 @@ Analyse the above and decide on ONE action for this cycle. Prefer deploying cash
       if (price) {
         const instruments = await t212.getInstruments()
         const minQty = instruments.get(parsed.ticker)?.minTradeQuantity ?? 0.01
-        const maxQty = computeBuyQuantity(parsed.ticker, price, snapshot, userConfig, minQty)
+        const currency = instruments.get(parsed.ticker)?.currencyCode ?? 'EUR'
+        const fxRate =
+          currency === 'EUR'
+            ? 1
+            : (snapshot.positions.find((p) => p.currencyCode === currency)?.fxRate ?? 1)
+        const maxQty = computeBuyQuantity(
+          parsed.ticker,
+          price,
+          snapshot,
+          userConfig,
+          minQty,
+          0.5,
+          fxRate
+        )
         if (maxQty <= 0) {
           parsed.action = 'hold'
           parsed.ticker = null

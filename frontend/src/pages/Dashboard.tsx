@@ -263,18 +263,22 @@ export default function Overview() {
     }
   }
 
-  // AI-only portfolio stats derived from open AI positions + live prices
+  // AI-only portfolio stats derived from open AI positions + live prices.
+  // Prices/quantities come from T212 in the instrument's native currency, but
+  // the UI displays EUR — scale by each position's fxRate so US-stock values
+  // don't get shown as euros.
   const aiStats = (() => {
     if (!portfolio) return null
     const positions = portfolio.aiPositions
     let invested = 0
     let currentValue = 0
     for (const ai of positions) {
-      const costBasis = (ai.entryPrice ?? 0) * ai.quantity
       const live = portfolio.positions.find((p) => p.ticker === ai.ticker)
-      const liveValue = live ? live.currentPrice * ai.quantity : costBasis
-      invested += costBasis
-      currentValue += liveValue
+      const fx = live?.fxRate ?? 1
+      const costBasisEur = (ai.entryPrice ?? 0) * ai.quantity * fx
+      const liveValueEur = live ? live.currentPrice * ai.quantity * fx : costBasisEur
+      invested += costBasisEur
+      currentValue += liveValueEur
     }
     const pnl = currentValue - invested
     const pendingSettlement = engineStatus?.pendingSettlement ?? 0

@@ -1,7 +1,28 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { validateOrder, computeBuyQuantity } from './riskmanager.js'
 import type { PortfolioSnapshot, T212Position } from '../api/trading212.js'
 import type { UserConfig } from '../types/user.js'
+
+vi.mock('../api/fx.js', async () => {
+  const actual = await vi.importActual<typeof import('../api/fx.js')>('../api/fx.js')
+  return {
+    ...actual,
+    // Deterministic FX for tests — no network calls. USD→EUR = 0.85.
+    resolveFxRates: vi.fn(async (positions: ReadonlyArray<{ currencyCode: string }>) => {
+      const rates = new Map<string, number>([['EUR', 1]])
+      for (const p of positions) {
+        if (!rates.has(p.currencyCode)) {
+          rates.set(p.currencyCode, p.currencyCode === 'USD' ? 0.85 : 1)
+        }
+      }
+      return rates
+    }),
+  }
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 const BASE_CONFIG: UserConfig = {
   tradeUniverse: [],
@@ -27,21 +48,33 @@ function makeSnapshot(overrides?: Partial<PortfolioSnapshot>): PortfolioSnapshot
   }
 }
 
-function makePosition(ticker: string, qty: number, avgPrice: number): T212Position {
+function makePosition(
+  ticker: string,
+  qty: number,
+  avgPrice: number,
+  opts: { currencyCode?: string; fxRate?: number; currentPrice?: number } = {}
+): T212Position {
+  const currencyCode = opts.currencyCode ?? 'EUR'
+  const fxRate = opts.fxRate ?? 1
+  const currentPrice = opts.currentPrice ?? avgPrice
   return {
     ticker,
     quantity: qty,
     averagePrice: avgPrice,
-    currentPrice: avgPrice,
+    currentPrice,
     ppl: 0,
     fxPpl: null,
     initialFillDate: new Date().toISOString(),
     maxBuy: null,
     maxSell: null,
+    currencyCode,
+    fxRate,
+    valueEur: currentPrice * qty * fxRate,
+    costBasisEur: avgPrice * qty * fxRate,
   }
 }
 
-function makeMockT212(minQtyByTicker: Record<string, number> = {}) {
+function makeMockT212(minQtyByTicker: Record<string, number> = {}, currency = 'EUR') {
   const map = new Map(
     Object.entries(minQtyByTicker).map(([ticker, minTradeQuantity]) => [
       ticker,
@@ -49,7 +82,7 @@ function makeMockT212(minQtyByTicker: Record<string, number> = {}) {
         ticker,
         name: ticker,
         shortName: ticker,
-        currencyCode: 'USD',
+        currencyCode: currency,
         type: 'STOCK',
         minTradeQuantity,
       },
@@ -192,6 +225,41 @@ describe('validateOrder', () => {
       expect(result.allowed).toBe(true)
       expect(result.reason).toBeUndefined()
     })
+
+    it('converts a USD-priced order to EUR before comparing to budget', async () => {
+      // USD→EUR=0.85 per test stub. Order = 10 × $10 = $100 → €85 (within €100 cap).
+      // Without FX conversion this would be "€100" and reject at the max-position cap.
+      const snapshot = makeSnapshot({
+        cash: { free: 200, total: 200, ppl: 0, result: 0, invested: 0, pieCash: 0, blocked: 0 },
+        totalValue: 200,
+      })
+      const highCapConfig: UserConfig = { ...BASE_CONFIG, maxPositionPct: 1 }
+      const result = await validateOrder(
+        { action: 'buy', ticker: 'TSLA', quantity: 10, estimatedPrice: 10 },
+        snapshot,
+        200,
+        makeMockT212({ TSLA: 0.01 }, 'USD'),
+        highCapConfig
+      )
+      expect(result.allowed).toBe(true)
+    })
+
+    it('still rejects a USD order that breaches the budget after EUR conversion', async () => {
+      // 200 × $10 = $2000 → €1700 → exceeds €100 cap.
+      const snapshot = makeSnapshot({
+        cash: { free: 3000, total: 3000, ppl: 0, result: 0, invested: 0, pieCash: 0, blocked: 0 },
+        totalValue: 3000,
+      })
+      const result = await validateOrder(
+        { action: 'buy', ticker: 'TSLA', quantity: 200, estimatedPrice: 10 },
+        snapshot,
+        3000,
+        makeMockT212({ TSLA: 0.01 }, 'USD'),
+        BASE_CONFIG
+      )
+      expect(result.allowed).toBe(false)
+      expect(result.reason).toMatch(/budget cap/i)
+    })
   })
 
   describe('sell validation', () => {
@@ -273,5 +341,12 @@ describe('computeBuyQuantity', () => {
     const qty050 = computeBuyQuantity('AAPL', 10, makeSnapshot(), BASE_CONFIG, 0.01, 0.5)
     // Both yield 25 because maxPositionPct cap = 25 dominates
     expect(qty025).toBe(qty050)
+  })
+
+  it('scales native-currency price to EUR via fxRate when sizing the buy', () => {
+    // USD→EUR fx = 0.85. Target spend EUR = min(100*0.5, 45, 25) = 25.
+    // In native currency: 25 / 0.85 ≈ 29.41 USD. qty = floor(29.41/10 * 100)/100 = 2.94.
+    const qty = computeBuyQuantity('AAPL', 10, makeSnapshot(), BASE_CONFIG, 0.01, 0.5, 0.85)
+    expect(qty).toBe(2.94)
   })
 })

@@ -28,6 +28,10 @@ function makePosition(ticker: string, averagePrice: number, currentPrice: number
     initialFillDate: new Date().toISOString(),
     maxBuy: null,
     maxSell: null,
+    currencyCode: 'EUR',
+    fxRate: 1,
+    valueEur: currentPrice,
+    costBasisEur: averagePrice,
   }
 }
 
