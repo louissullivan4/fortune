@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import jwt from 'jsonwebtoken'
-import { requireAuth, requireAdmin } from './auth.js'
+import { requireAuth, requireAdmin, requireAdminOrAccountant } from './auth.js'
 import type { Request, Response, NextFunction } from 'express'
 import type { JwtPayload } from '../../types/user.js'
 
@@ -120,6 +120,45 @@ describe('requireAdmin', () => {
     const { res } = makeRes()
     const next = vi.fn() as unknown as NextFunction
     requireAdmin(req, res, next)
+    expect(next).toHaveBeenCalledOnce()
+  })
+})
+
+describe('requireAdminOrAccountant', () => {
+  it('returns 401 when req.user is not set', () => {
+    const req = makeReq()
+    const { res, status } = makeRes()
+    const next = vi.fn() as unknown as NextFunction
+    requireAdminOrAccountant(req, res, next)
+    expect(status).toHaveBeenCalledWith(401)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('returns 403 for a client role', () => {
+    const req = makeReq()
+    req.user = clientPayload
+    const { res, status } = makeRes()
+    const next = vi.fn() as unknown as NextFunction
+    requireAdminOrAccountant(req, res, next)
+    expect(status).toHaveBeenCalledWith(403)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  it('calls next for an admin role', () => {
+    const req = makeReq()
+    req.user = adminPayload
+    const { res } = makeRes()
+    const next = vi.fn() as unknown as NextFunction
+    requireAdminOrAccountant(req, res, next)
+    expect(next).toHaveBeenCalledOnce()
+  })
+
+  it('calls next for an accountant role', () => {
+    const req = makeReq()
+    req.user = { userId: 'u3', email: 'acc@example.com', role: 'accountant' }
+    const { res } = makeRes()
+    const next = vi.fn() as unknown as NextFunction
+    requireAdminOrAccountant(req, res, next)
     expect(next).toHaveBeenCalledOnce()
   })
 })

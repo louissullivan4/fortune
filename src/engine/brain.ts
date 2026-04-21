@@ -111,7 +111,9 @@ HARD RULES — you must never violate these:
 - Always keep at least €5 in cash as a buffer
 - Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop) are handled automatically before you run — you do NOT need to issue these sells yourself
 - Stagnant positions (held >${userConfig.stagnantTimeMinutes} minutes with <${(userConfig.stagnantRangePct * 100).toFixed(1)}% movement) will be listed for your review. You may SELL them to free capital for a better opportunity, or HOLD them if you see momentum building — your judgment takes precedence
-- You may SELL a held position if technical signals have turned bearish, even if the automatic stop hasn't triggered yet
+- You may SELL a held position ONLY if there is at least one BUY or STRONG_BUY signal for a ticker you do NOT currently hold — never sell just to sit on cash
+- If no better buy opportunity exists, HOLD the position regardless of how bearish its indicators look (the automatic stop-loss will protect you)
+- Never sell a ticker and then immediately buy the same ticker — that is always a hold
 - Only BUY stocks in the signal universe
 - NOTE: Portfolio position prices may be in their local currency (USD/GBP), not EUR — ignore total portfolio value when deciding; focus on available EUR cash
 
@@ -222,6 +224,20 @@ Analyse the above and decide on ONE action for this cycle. Prefer deploying cash
       quantity: number | null
       estimatedPrice: number | null
       reasoning: string
+    }
+
+    if (parsed.action === 'sell' && parsed.ticker) {
+      const hasBetterOpportunity = signals.some(
+        (s) => (s.signal === 'buy' || s.signal === 'strong_buy') && s.ticker !== parsed.ticker
+      )
+      if (!hasBetterOpportunity) {
+        parsed.action = 'hold'
+        parsed.ticker = null
+        parsed.quantity = null
+        parsed.estimatedPrice = null
+        parsed.reasoning +=
+          ' [overridden to hold: no buy/strong_buy opportunity available for a different ticker — selling to hold cash is not permitted]'
+      }
     }
 
     if (parsed.action === 'buy' && parsed.ticker) {
