@@ -43,7 +43,8 @@ export interface EngineStatus {
 
 const CASH_BUFFER_EUR = 5
 const MIN_DEPLOYABLE_EUR = 6
-const TICKER_COOLDOWN_MS = 20 * 60 * 1_000
+const TICKER_COOLDOWN_MS = 120 * 60 * 1_000
+const GAP_REJECT_COOLDOWN_MS = 30 * 60 * 1_000
 const TRAIL_ACTIVATION_PCT = 0.8
 const TRAIL_STOP_PCT = 0.4
 const CASH_COMMITMENT_TTL_MS = 90_000
@@ -118,6 +119,7 @@ export class EngineService {
   }
   private _cycleRunning = false
   private _recentlyClosedTickers = new Map<string, number>()
+  private _gapRejectedAt = new Map<string, number>()
   private _lastSeenPrices = new Map<string, number>()
   private _consecutiveFingerprintSkips = 0
 
@@ -289,9 +291,13 @@ export class EngineService {
   }
 
   private _purgeStaleCooldowns(): void {
-    const cutoff = Date.now() - TICKER_COOLDOWN_MS
+    const closedCutoff = Date.now() - TICKER_COOLDOWN_MS
     for (const [ticker, closedAt] of this._recentlyClosedTickers) {
-      if (closedAt < cutoff) this._recentlyClosedTickers.delete(ticker)
+      if (closedAt < closedCutoff) this._recentlyClosedTickers.delete(ticker)
+    }
+    const gapCutoff = Date.now() - GAP_REJECT_COOLDOWN_MS
+    for (const [ticker, rejectedAt] of this._gapRejectedAt) {
+      if (rejectedAt < gapCutoff) this._gapRejectedAt.delete(ticker)
     }
   }
 
@@ -636,8 +642,17 @@ export class EngineService {
         (t) => Date.now() - (this._recentlyClosedTickers.get(t) ?? 0) < TICKER_COOLDOWN_MS
       )
     )
+    const gapRejectedTickers = new Set(
+      [...this._gapRejectedAt.keys()].filter(
+        (t) => Date.now() - (this._gapRejectedAt.get(t) ?? 0) < GAP_REJECT_COOLDOWN_MS
+      )
+    )
     const buyUniverse = this.userConfig.tradeUniverse.filter(
-      (t) => !botQtyByTicker.has(t) && !manualTickers.has(t) && !coolingTickers.has(t)
+      (t) =>
+        !botQtyByTicker.has(t) &&
+        !manualTickers.has(t) &&
+        !coolingTickers.has(t) &&
+        !gapRejectedTickers.has(t)
     )
     if (botQtyByTicker.size > 0) {
       console.log(
@@ -652,6 +667,11 @@ export class EngineService {
     if (coolingTickers.size > 0) {
       console.log(
         `[engine:${this.userId}] Cooling down tickers (recently closed): ${[...coolingTickers].join(', ')}`
+      )
+    }
+    if (gapRejectedTickers.size > 0) {
+      console.log(
+        `[engine:${this.userId}] Gap-rejected tickers (stale signal price): ${[...gapRejectedTickers].join(', ')}`
       )
     }
     const signals = generateSignals(buyUniverse, histories, botPositions)
@@ -814,13 +834,14 @@ export class EngineService {
             console.log(
               `[engine:${this.userId}] GAP GUARD — ${decision.ticker}: signal $${estimatedPriceNative.toFixed(2)} vs live $${liveQuote.toFixed(2)} (${(gapPct * 100).toFixed(1)}% gap > ${GAP_REJECT_PCT * 100}%) — aborting buy`
             )
+            this._gapRejectedAt.set(decision.ticker, Date.now())
             await logDecision({
               timestamp,
               action: 'hold',
               ticker: null,
               quantity: null,
               estimatedPrice: null,
-              reasoning: `Gap guard: ${decision.ticker} signal price $${estimatedPriceNative.toFixed(2)} is ${(gapPct * 100).toFixed(1)}% away from live $${liveQuote.toFixed(2)} — buy aborted to avoid chasing gap`,
+              reasoning: `Gap guard: ${decision.ticker} signal price $${estimatedPriceNative.toFixed(2)} is ${(gapPct * 100).toFixed(1)}% away from live $${liveQuote.toFixed(2)} — buy aborted, ticker cooling for ${GAP_REJECT_COOLDOWN_MS / 60_000} min`,
               signalsJson: JSON.stringify(
                 signals.map((s) => ({ ticker: s.ticker, signal: s.signal, reasons: s.reasons }))
               ),

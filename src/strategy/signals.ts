@@ -174,6 +174,15 @@ function classifySignal(
     }
   }
 
+  if (ind.bollingerPctB !== null && ind.bollingerPctB > 0.95) {
+    if (signal === 'strong_buy' || signal === 'buy') {
+      reasons.push(
+        `%B cap: ${ind.bollingerPctB.toFixed(2)} > 0.95 — buy signal suppressed near upper Bollinger Band`
+      )
+      signal = 'hold'
+    }
+  }
+
   const STRONG_BUY_UPSIDE_THRESHOLD = 0.02
   if (signal === 'strong_buy' && ind.bollingerUpper !== null && ind.currentPrice !== null) {
     const upsideToBand = (ind.bollingerUpper - ind.currentPrice) / ind.currentPrice
