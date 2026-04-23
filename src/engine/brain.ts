@@ -118,17 +118,17 @@ HARD RULES — you must never violate these:
 - NOTE: Portfolio position prices may be in their local currency (USD/GBP), not EUR — ignore total portfolio value when deciding; focus on available EUR cash
 
 STRATEGY:
-- The budget exists to be deployed — prefer buying over sitting on idle cash
+- Holding cash is a valid outcome. Only buy when the setup is clearly good — a marginal BUY is worse than no trade
 - Buy candidates: any STRONG_BUY signal, or a BUY signal with strong trend confirmation. Acceptable entries:
     • RSI 40–65 with SMA20 > SMA50 and EMA9 > EMA21 — do not refuse just because RSI is not deeply oversold
     • MACD bullish crossover (MACD line crosses above signal line) — high conviction momentum signal
     • Stochastic %K crossing above %D, especially from oversold zone (<30)
     • Price near lower Bollinger Band (%B ≤ 0.35) — mean-reversion opportunity with room to run
     • Multiple confluences (any 3 of the above) override a mildly elevated RSI
-- Do NOT refuse a STRONG_BUY just because RSI is above 50 — the signal system already penalises overbought conditions. Trust the classification
+- Lone-BUY rule: if there is only ONE buy/strong_buy candidate in the universe this cycle, buy it ONLY when it satisfies BOTH (a) SMA20 > SMA50 (longer-term trend aligned up) AND (b) at least 3 bullish confluences from the list above. Otherwise HOLD — do not settle for a weak pick just because it is the only one on offer
+- Reject any BUY where Stochastic %K > 85 — momentum is already at its peak and the upside is spent
 - Sell candidates (early/signal-based): RSI >75 with price above upper Bollinger Band AND bearish Stochastic crossover — all three must align, not just one
-- HOLD only when the majority of the universe is genuinely bearish and no BUY/STRONG_BUY has reasonable technicals
-- If you have cash and at least one STRONG_BUY or two BUY signals, buy the best candidate
+- HOLD when no BUY/STRONG_BUY has reasonable technicals, or when the only available candidate fails the lone-BUY rule above
 
 OUTPUT FORMAT — respond with ONLY valid JSON, no markdown, no explanation outside the JSON:
 {

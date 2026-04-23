@@ -157,8 +157,16 @@ function DurationInput({
   const [unit, setUnit] = useState<TimeUnit>(() => bestUnit(ms))
   const value = msToUnit(ms, unit)
 
+  // Don't clamp during typing — that swaps the input's displayed value mid-edit,
+  // and subsequent keystrokes append to the clamped value (typing "45" after
+  // clearing a min=15 field produced 1545). Clamp only on blur.
   function handleValue(raw: string) {
-    onChange(unitToMs(Math.max(min ?? 0, Number(raw) || 0), unit))
+    onChange(unitToMs(Number(raw) || 0, unit))
+  }
+  function handleBlur(raw: string) {
+    const typed = Number(raw) || 0
+    const clamped = Math.max(min ?? 0, typed)
+    if (clamped !== typed) onChange(unitToMs(clamped, unit))
   }
   function handleUnit(u: TimeUnit) {
     setUnit(u)
@@ -174,6 +182,7 @@ function DurationInput({
         min={min}
         style={{ flex: 1 }}
         onChange={(e) => handleValue(e.target.value)}
+        onBlur={(e) => handleBlur(e.target.value)}
       />
       <select
         className="input"
@@ -949,7 +958,7 @@ export default function ConfigPage() {
                         onChange={(ms) =>
                           setDraft({ ...draft, stagnantTimeMinutes: Math.round(ms / 60_000) })
                         }
-                        min={15}
+                        min={1}
                         units={['minutes', 'hours']}
                       />
                     </Field>

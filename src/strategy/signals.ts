@@ -165,13 +165,28 @@ function classifySignal(
   else signal = 'hold'
 
   if (ind.rsi14 !== null) {
-    if (ind.rsi14 > 80 && (signal === 'strong_buy' || signal === 'buy')) {
-      reasons.push(`RSI cap: ${ind.rsi14.toFixed(1)} > 80 — buy signal suppressed`)
+    if (ind.rsi14 > 70 && (signal === 'strong_buy' || signal === 'buy')) {
+      reasons.push(`RSI cap: ${ind.rsi14.toFixed(1)} > 70 — buy signal suppressed (overbought)`)
       signal = 'hold'
-    } else if (ind.rsi14 > 70 && signal === 'strong_buy') {
-      reasons.push(`RSI cap: ${ind.rsi14.toFixed(1)} > 70 — strong_buy downgraded to buy`)
+    } else if (ind.rsi14 > 65 && signal === 'strong_buy') {
+      reasons.push(`RSI cap: ${ind.rsi14.toFixed(1)} > 65 — strong_buy downgraded to buy`)
       signal = 'buy'
     }
+  }
+
+  // Trend filter: don't buy confirmed downtrends. SMA20 < SMA50 means the
+  // longer-term trend is down, and short-term bullish momentum in a downtrend
+  // is usually a bounce that fails.
+  if (
+    ind.sma20 !== null &&
+    ind.sma50 !== null &&
+    ind.sma20 < ind.sma50 &&
+    (signal === 'buy' || signal === 'strong_buy')
+  ) {
+    reasons.push(
+      `Trend filter: SMA20 ${ind.sma20.toFixed(2)} < SMA50 ${ind.sma50.toFixed(2)} — buy suppressed (downtrend)`
+    )
+    signal = 'hold'
   }
 
   if (ind.bollingerPctB !== null && ind.bollingerPctB > 0.95) {

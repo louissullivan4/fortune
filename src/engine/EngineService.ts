@@ -1,4 +1,4 @@
-import { isMarketOpen, nextOpenMs } from './scheduler.js'
+import { isMarketOpen, nextOpenMs, nyseTradingDateStr } from './scheduler.js'
 import { decide } from './brain.js'
 import { validateOrder } from './riskmanager.js'
 import {
@@ -43,7 +43,9 @@ export interface EngineStatus {
 
 const CASH_BUFFER_EUR = 5
 const MIN_DEPLOYABLE_EUR = 6
-const TICKER_COOLDOWN_MS = 120 * 60 * 1_000
+// Ticker cooldown: once a position closes, don't re-enter it the same NYSE
+// trading day. Prevents chasing the same setup back into a losing re-entry
+// (e.g. FCX bought → sold → bought again 2h later → stopped out overnight).
 const GAP_REJECT_COOLDOWN_MS = 30 * 60 * 1_000
 const TRAIL_ACTIVATION_PCT = 0.8
 const TRAIL_STOP_PCT = 0.4
@@ -118,7 +120,8 @@ export class EngineService {
       .reduce((sum, c) => sum + c.amount, 0)
   }
   private _cycleRunning = false
-  private _recentlyClosedTickers = new Map<string, number>()
+  // ticker → NYSE trading-date string (YYYY-MM-DD ET) the position was closed on
+  private _recentlyClosedTickers = new Map<string, string>()
   private _gapRejectedAt = new Map<string, number>()
   private _lastSeenPrices = new Map<string, number>()
   private _consecutiveFingerprintSkips = 0
@@ -287,13 +290,13 @@ export class EngineService {
   // ── Ticker cooldown ─────────────────────────────────────────────────────
 
   private _recordTickerClose(ticker: string): void {
-    this._recentlyClosedTickers.set(ticker, Date.now())
+    this._recentlyClosedTickers.set(ticker, nyseTradingDateStr())
   }
 
   private _purgeStaleCooldowns(): void {
-    const closedCutoff = Date.now() - TICKER_COOLDOWN_MS
-    for (const [ticker, closedAt] of this._recentlyClosedTickers) {
-      if (closedAt < closedCutoff) this._recentlyClosedTickers.delete(ticker)
+    const today = nyseTradingDateStr()
+    for (const [ticker, closedOn] of this._recentlyClosedTickers) {
+      if (closedOn !== today) this._recentlyClosedTickers.delete(ticker)
     }
     const gapCutoff = Date.now() - GAP_REJECT_COOLDOWN_MS
     for (const [ticker, rejectedAt] of this._gapRejectedAt) {
@@ -437,17 +440,20 @@ export class EngineService {
       const pctFromEntry = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
       const minutesHeld = (Date.now() - new Date(pos.openedAt).getTime()) / 60_000
 
+      // Positions drifting within ±stagnantRangePct% of entry count as stagnant
+      // whether they're slightly up or slightly down. Losing drifters used to
+      // be skipped (atBreakEven guard) and left to sit until the stop-loss —
+      // now they rotate too, capping the realised loss at stagnantRangePct.
       const isStagnant =
         minutesHeld >= this.userConfig.stagnantTimeMinutes &&
         Math.abs(pctFromEntry) < this.userConfig.stagnantRangePct * 100
-      const atBreakEven = currentPrice >= pos.entryPrice
       const hwm = pos.highWaterMark ?? pos.entryPrice
       const positionRanUp = hwm > pos.entryPrice * (1 + this.userConfig.stagnantRangePct)
 
       const lastPrice = this._lastSeenPrices.get(pos.ticker)
       const isTrendingUp = lastPrice !== undefined && currentPrice > lastPrice
 
-      if (!isStagnant || !atBreakEven || positionRanUp || isTrendingUp) continue
+      if (!isStagnant || positionRanUp || isTrendingUp) continue
 
       const direction = pctFromEntry >= 0 ? '+' : ''
       const reason =
@@ -637,10 +643,11 @@ export class EngineService {
     const manualTickers = new Set(
       snapshot.positions.map((p) => p.ticker).filter((t) => !botQtyByTicker.has(t))
     )
+    const todayNy = nyseTradingDateStr()
     const coolingTickers = new Set(
-      [...this._recentlyClosedTickers.keys()].filter(
-        (t) => Date.now() - (this._recentlyClosedTickers.get(t) ?? 0) < TICKER_COOLDOWN_MS
-      )
+      [...this._recentlyClosedTickers.entries()]
+        .filter(([, closedOn]) => closedOn === todayNy)
+        .map(([t]) => t)
     )
     const gapRejectedTickers = new Set(
       [...this._gapRejectedAt.keys()].filter(

@@ -40,6 +40,11 @@ function nyDateString(date: Date): string {
   }).format(date)
 }
 
+/** NYSE trading-day identifier (YYYY-MM-DD in America/New_York) for `date` (defaults to now). */
+export function nyseTradingDateStr(date: Date = new Date()): string {
+  return nyDateString(date)
+}
+
 function nyMinutesOfDay(date: Date): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
