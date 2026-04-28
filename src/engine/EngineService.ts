@@ -1,6 +1,6 @@
 import { isMarketOpen, nextOpenMs, nyseTradingDateStr } from './scheduler.js'
 import { decide } from './brain.js'
-import { validateOrder } from './riskmanager.js'
+import { validateOrder, TICKER_BLOCK_LOOKBACK_DAYS } from './riskmanager.js'
 import {
   reconcileAiPositions,
   getOpenAiPositions,
@@ -17,6 +17,7 @@ import {
   logOrder,
   logAiUsage,
   getRecentDecisions,
+  getRecentTickerLossCount,
   type AiPosition,
 } from '../analytics/journal.js'
 import { Trading212Client, type PortfolioSnapshot, type T212Position } from '../api/trading212.js'
@@ -774,7 +775,7 @@ export class EngineService {
       minutesHeld: Math.round(c.minutesHeld),
       pctFromEntry: c.pctFromEntry,
     }))
-    const { decision, usage } = await decide(
+    const { decision: aiDecision, usage } = await decide(
       signals,
       botSnapshot,
       recentDecisions,
@@ -784,11 +785,37 @@ export class EngineService {
       stagnantInfo
     )
     console.log(
-      `[engine:${this.userId}] Claude decision: ${decision.action.toUpperCase()} ${decision.ticker ?? ''}`
+      `[engine:${this.userId}] Claude decision: ${aiDecision.action.toUpperCase()} ${aiDecision.ticker ?? ''}`
     )
     console.log(
       `[engine:${this.userId}] Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out — $${usage.totalCostUsd.toFixed(6)}`
     )
+
+    // Suppress AI discretionary sells. Hard exits (TP/SL/trailing) and
+    // stagnant rotation already ran or will run via their own paths; if the
+    // AI picks a sell on top of those, history shows it loses (0/3 wins,
+    // -$52 over the audit window). Allow only sells that line up with a
+    // stagnant candidate — the AI is just sealing what would have rotated.
+    const stagnantTickers = new Set(stagnantCandidates.map((c) => c.pos.ticker))
+    const isDiscretionarySell =
+      aiDecision.action === 'sell' &&
+      aiDecision.ticker !== null &&
+      !stagnantTickers.has(aiDecision.ticker)
+    const decision = isDiscretionarySell
+      ? {
+          ...aiDecision,
+          action: 'hold' as const,
+          ticker: null,
+          quantity: null,
+          estimatedPrice: null,
+          reasoning: `[AI sell suppressed — discretionary sells disabled. Original AI reasoning: ${aiDecision.reasoning.slice(0, 300)}]`,
+        }
+      : aiDecision
+    if (isDiscretionarySell) {
+      console.log(
+        `[engine:${this.userId}] AI discretionary sell on ${aiDecision.ticker} suppressed — exits run via TP/SL/trailing/stagnant only`
+      )
+    }
 
     const decisionId = await logDecision({
       timestamp,
@@ -884,6 +911,11 @@ export class EngineService {
         })()
       const estimatedPriceEur = estimatedPriceNative * fxRate
 
+      const recentLossCount =
+        decision.action === 'buy'
+          ? await getRecentTickerLossCount(this.userId, decision.ticker, TICKER_BLOCK_LOOKBACK_DAYS)
+          : 0
+
       const risk = await validateOrder(
         {
           action: decision.action,
@@ -896,7 +928,8 @@ export class EngineService {
         this.t212,
         this.userConfig,
         aiValue,
-        dailyAiOpenValue
+        dailyAiOpenValue,
+        recentLossCount
       )
 
       if (!risk.allowed) {

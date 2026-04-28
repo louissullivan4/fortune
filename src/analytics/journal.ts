@@ -334,6 +334,32 @@ export async function getOpenAiPositions(userId: string): Promise<AiPosition[]> 
   return res.rows.map(mapAiPosition)
 }
 
+/**
+ * Number of losing closed positions for a ticker within the last `days` days.
+ * Used by the per-ticker circuit breaker to refuse new entries on tickers that
+ * have been consistently bleeding (e.g. FCX took 3 losses worth -$128 before
+ * any rule blocked further entries).
+ */
+export async function getRecentTickerLossCount(
+  userId: string,
+  ticker: string,
+  days: number
+): Promise<number> {
+  const pool = getPool()
+  const res = await pool.query<{ c: string }>(
+    `SELECT COUNT(*) AS c
+     FROM ai_positions
+     WHERE user_id = $1
+       AND ticker = $2
+       AND status = 'closed'
+       AND realized_pnl IS NOT NULL
+       AND realized_pnl < 0
+       AND closed_at::timestamptz >= NOW() - ($3 || ' days')::interval`,
+    [userId, ticker, days]
+  )
+  return Number(res.rows[0].c)
+}
+
 export async function getClosedAiPositions(userId: string): Promise<AiPosition[]> {
   const pool = getPool()
   const res = await pool.query(

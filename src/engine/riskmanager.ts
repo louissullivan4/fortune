@@ -20,6 +20,13 @@ export interface RiskDecision {
   reason?: string
 }
 
+// Per-ticker circuit breaker: if a ticker has produced this many losing
+// closed positions within the lookback window, refuse new entries on it.
+// Currency-agnostic so it sidesteps the USD-stored-as-EUR DEBT in
+// realized_pnl.
+export const TICKER_BLOCK_LOSS_COUNT = 2
+export const TICKER_BLOCK_LOOKBACK_DAYS = 14
+
 export async function validateOrder(
   order: OrderRequest,
   snapshot: PortfolioSnapshot,
@@ -28,7 +35,10 @@ export async function validateOrder(
   userConfig: UserConfig,
   // Bot-scoped values to avoid contamination from manual position changes
   aiCurrentValue?: number,
-  aiOpenValue?: number
+  aiOpenValue?: number,
+  // Recent losing trades on this ticker — engine fetches via the journal so
+  // the risk manager stays DB-free (and trivially testable).
+  recentTickerLossCount?: number
 ): Promise<RiskDecision> {
   const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = userConfig
 
@@ -56,6 +66,13 @@ export async function validateOrder(
   }
 
   if (order.action === 'buy') {
+    if (recentTickerLossCount !== undefined && recentTickerLossCount >= TICKER_BLOCK_LOSS_COUNT) {
+      return {
+        allowed: false,
+        reason: `Ticker circuit breaker: ${order.ticker} has ${recentTickerLossCount} losing trades in the last ${TICKER_BLOCK_LOOKBACK_DAYS} days — blocked from new entries until losses age out`,
+      }
+    }
+
     const existingPosition = snapshot.positions.find((p) => p.ticker === order.ticker)
     if (existingPosition) {
       return {

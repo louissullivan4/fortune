@@ -153,6 +153,51 @@ describe('validateOrder', () => {
     })
   })
 
+  describe('ticker circuit breaker', () => {
+    it('blocks a buy when the ticker has 2+ recent losses', async () => {
+      const result = await validateOrder(
+        { action: 'buy', ticker: 'FCX', quantity: 1, estimatedPrice: 10 },
+        makeSnapshot(),
+        150,
+        makeMockT212(),
+        BASE_CONFIG,
+        undefined,
+        undefined,
+        2
+      )
+      expect(result.allowed).toBe(false)
+      expect(result.reason).toMatch(/circuit breaker/i)
+    })
+
+    it('allows a buy when the ticker has fewer than 2 recent losses', async () => {
+      const result = await validateOrder(
+        { action: 'buy', ticker: 'FCX', quantity: 1, estimatedPrice: 10 },
+        makeSnapshot(),
+        150,
+        makeMockT212(),
+        BASE_CONFIG,
+        undefined,
+        undefined,
+        1
+      )
+      expect(result.allowed).toBe(true)
+    })
+
+    it('does not block sell orders even with recent losses on the ticker', async () => {
+      const result = await validateOrder(
+        { action: 'sell', ticker: 'FCX', quantity: 1, estimatedPrice: 10 },
+        makeSnapshot({ positions: [makePosition('FCX', 1, 10)] }),
+        150,
+        makeMockT212(),
+        BASE_CONFIG,
+        undefined,
+        undefined,
+        5
+      )
+      expect(result.allowed).toBe(true)
+    })
+  })
+
   describe('minimum trade quantity', () => {
     it('blocks when order quantity is below the instrument minimum', async () => {
       const result = await validateOrder(
