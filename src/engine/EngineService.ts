@@ -620,7 +620,22 @@ export class EngineService {
       `[engine:${this.userId}] Budget: max=€${this.userConfig.maxBudgetEur.toFixed(2)} inPositions=€${aiPositionsValue.toFixed(2)} remaining=€${botBudgetRemaining.toFixed(2)} freeCash=€${snapshot.cash.free.toFixed(2)} → botCash=€${botCash.toFixed(2)}${botBudgetRemaining < snapshot.cash.free ? ' [budget cap]' : ' [cash cap]'}`
     )
 
-    await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
+    // Guard against intermittent T212 partial cash payloads (observed
+    // 2026-04-20: totalValue came back as €974 vs the true €3656 because
+    // cash.invested only reflected a subset of positions). The first cycle of
+    // the day wins via ON CONFLICT DO NOTHING, so a single bad snapshot
+    // anchors the entire day's chart wrong. Skip the upsert when totalValue
+    // collapses vs the previous day's stored open.
+    const previousDayOpen = await getPreviousDayAiOpenValue(dateStr, this.userId)
+    const looksAnomalous =
+      previousDayOpen != null && previousDayOpen > 0 && snapshot.totalValue < previousDayOpen * 0.5
+    if (looksAnomalous) {
+      console.warn(
+        `[engine:${this.userId}] Skipping daily snapshot upsert — totalValue €${snapshot.totalValue.toFixed(2)} is <50% of previous day's open €${previousDayOpen!.toFixed(2)} (likely partial T212 payload)`
+      )
+    } else {
+      await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
+    }
 
     const dailyOpenValue = (await getDailyOpenValue(dateStr, this.userId)) ?? snapshot.totalValue
     const dailyAiOpenValue = (await getDailyAiOpenValue(dateStr, this.userId)) ?? aiValue
@@ -838,25 +853,18 @@ export class EngineService {
         if (liveQuote !== null) {
           const gapPct = Math.abs(liveQuote - estimatedPriceNative) / estimatedPriceNative
           if (gapPct > GAP_REJECT_PCT) {
-            console.log(
-              `[engine:${this.userId}] GAP GUARD — ${decision.ticker}: signal $${estimatedPriceNative.toFixed(2)} vs live $${liveQuote.toFixed(2)} (${(gapPct * 100).toFixed(1)}% gap > ${GAP_REJECT_PCT * 100}%) — aborting buy`
-            )
+            const reason = `Gap guard: ${decision.ticker} signal price $${estimatedPriceNative.toFixed(2)} is ${(gapPct * 100).toFixed(1)}% away from live $${liveQuote.toFixed(2)} — buy aborted, ticker cooling for ${GAP_REJECT_COOLDOWN_MS / 60_000} min`
+            console.log(`[engine:${this.userId}] GAP GUARD — ${reason}`)
             this._gapRejectedAt.set(decision.ticker, Date.now())
-            await logDecision({
+            // Mark the AI's buy decision as rejected so reconcileAiPositions
+            // doesn't treat it as a real trade and conjure a phantom position.
+            await logOrder({
+              decisionId,
+              t212OrderId: null,
+              status: `blocked: ${reason}`,
+              fillPrice: null,
+              fillQuantity: null,
               timestamp,
-              action: 'hold',
-              ticker: null,
-              quantity: null,
-              estimatedPrice: null,
-              reasoning: `Gap guard: ${decision.ticker} signal price $${estimatedPriceNative.toFixed(2)} is ${(gapPct * 100).toFixed(1)}% away from live $${liveQuote.toFixed(2)} — buy aborted, ticker cooling for ${GAP_REJECT_COOLDOWN_MS / 60_000} min`,
-              signalsJson: JSON.stringify(
-                signals.map((s) => ({ ticker: s.ticker, signal: s.signal, reasons: s.reasons }))
-              ),
-              portfolioJson: JSON.stringify({
-                totalValue: snapshot.totalValue,
-                aiValue,
-                cash: snapshot.cash.free,
-              }),
               userId: this.userId,
             })
             return

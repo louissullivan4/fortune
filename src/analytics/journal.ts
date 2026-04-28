@@ -486,6 +486,10 @@ export async function getClosedAiPositionsWithOrders(
 export async function reconcileAiPositions(userId: string): Promise<{ inserted: number }> {
   const pool = getPool()
 
+  // Only reconcile decisions that actually placed an order at T212. Without
+  // this filter, any buy/sell decision that the engine logged but then aborted
+  // (gap guard, pre-order error before logOrder ran, etc.) would produce a
+  // phantom position with fabricated entry/exit and realised P&L.
   const trades = (
     await pool.query<{
       timestamp: string
@@ -496,11 +500,12 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
     }>(
       `SELECT d.timestamp, d.action, d.ticker, d.quantity, d.estimated_price
        FROM decisions d
-       LEFT JOIN orders o ON o.decision_id = d.id
+       JOIN orders o ON o.decision_id = d.id
        WHERE d.action IN ('buy', 'sell')
          AND d.ticker IS NOT NULL
          AND d.user_id = $1
-         AND (o.status IS NULL OR (o.status NOT LIKE 'blocked%' AND o.status NOT LIKE 'error%'))
+         AND o.status NOT LIKE 'blocked%'
+         AND o.status NOT LIKE 'error%'
        ORDER BY d.id ASC`,
       [userId]
     )
