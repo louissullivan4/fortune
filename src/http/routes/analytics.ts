@@ -31,9 +31,13 @@ router.get('/summary', async (req, res, next) => {
       getClosedAiPositions(userId),
       getAiUsageSummary(userId),
     ])
-    const realizedPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0)
-    const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0).length
-    const lossCount = closed.filter((p) => (p.realizedPnl ?? 0) < 0).length
+    // Prefer the EUR-denominated value (post-013); fall back to native
+    // realized_pnl on rows that pre-date the migration backfill.
+    const pnlOf = (p: { realizedPnlEur: number | null; realizedPnl: number | null }) =>
+      p.realizedPnlEur ?? p.realizedPnl ?? 0
+    const realizedPnl = closed.reduce((sum, p) => sum + pnlOf(p), 0)
+    const wins = closed.filter((p) => pnlOf(p) > 0).length
+    const lossCount = closed.filter((p) => pnlOf(p) < 0).length
     const decidedTrades = wins + lossCount
     const winRate = decidedTrades > 0 ? (wins / decidedTrades) * 100 : null
     res.json({
@@ -120,17 +124,16 @@ router.get('/performance', async (req, res, next) => {
       getOpenAiPositions(userId),
       getAllTimeStats(userId),
     ])
-    const realizedPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0)
-    const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0)
-    const losses = closed.filter((p) => (p.realizedPnl ?? 0) < 0)
+    const pnlOf = (p: { realizedPnlEur: number | null; realizedPnl: number | null }) =>
+      p.realizedPnlEur ?? p.realizedPnl ?? 0
+    const realizedPnl = closed.reduce((sum, p) => sum + pnlOf(p), 0)
+    const wins = closed.filter((p) => pnlOf(p) > 0)
+    const losses = closed.filter((p) => pnlOf(p) < 0)
     const decidedTrades = wins.length + losses.length
     const winRate = decidedTrades > 0 ? (wins.length / decidedTrades) * 100 : null
-    const avgWin =
-      wins.length > 0 ? wins.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / wins.length : null
+    const avgWin = wins.length > 0 ? wins.reduce((s, p) => s + pnlOf(p), 0) / wins.length : null
     const avgLoss =
-      losses.length > 0
-        ? losses.reduce((s, p) => s + (p.realizedPnl ?? 0), 0) / losses.length
-        : null
+      losses.length > 0 ? losses.reduce((s, p) => s + pnlOf(p), 0) / losses.length : null
     res.json({
       ...stats,
       realizedPnl,
@@ -201,18 +204,35 @@ router.get('/pnl', async (req, res, next) => {
     }
 
     const enriched = positions.map((p) => {
-      const actualEntry =
+      const actualEntryNative =
         (p.buyT212OrderId ? t212FillMap.get(p.buyT212OrderId) : undefined) ?? p.entryPrice
-      const actualExit =
+      const actualExitNative =
         (p.sellT212OrderId ? t212FillMap.get(p.sellT212OrderId) : undefined) ?? p.exitPrice
 
-      const grossPnl =
-        actualEntry != null && actualExit != null
-          ? Number(((actualExit - actualEntry) * p.quantity).toFixed(4))
-          : p.realizedPnl
+      // Per-position FX rate: derive from the stored EUR values where they
+      // exist (post-013), else fall back to the migration's approx rate so the
+      // FX-fee estimate stays denominated in EUR rather than USD.
+      const FALLBACK_USD_TO_EUR = 0.85616
+      const fxRate =
+        p.entryPriceEur != null && p.entryPrice != null && p.entryPrice !== 0
+          ? p.entryPriceEur / p.entryPrice
+          : isUsdTicker(p.ticker)
+            ? FALLBACK_USD_TO_EUR
+            : 1
 
+      const actualEntryEur = actualEntryNative != null ? actualEntryNative * fxRate : null
+      const actualExitEur = actualExitNative != null ? actualExitNative * fxRate : null
+
+      const grossPnl =
+        actualEntryEur != null && actualExitEur != null
+          ? Number(((actualExitEur - actualEntryEur) * p.quantity).toFixed(4))
+          : (p.realizedPnlEur ?? p.realizedPnl)
+
+      // FX fee estimate in EUR (T212 charges 0.15% on each leg in EUR-equivalent).
       const fxCost = Number(
-        estimateFxCost(actualEntry, actualExit, p.quantity, p.ticker).toFixed(4)
+        (
+          estimateFxCost(actualEntryNative, actualExitNative, p.quantity, p.ticker) * fxRate
+        ).toFixed(4)
       )
       const netPnl = grossPnl != null ? Number((grossPnl - fxCost).toFixed(4)) : null
 
@@ -222,8 +242,8 @@ router.get('/pnl', async (req, res, next) => {
         openedAt: p.openedAt,
         closedAt: p.closedAt,
         quantity: p.quantity,
-        entryPrice: actualEntry,
-        exitPrice: actualExit,
+        entryPrice: actualEntryEur,
+        exitPrice: actualExitEur,
         grossPnl,
         fxCost,
         netPnl,

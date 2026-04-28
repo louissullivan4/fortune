@@ -192,10 +192,18 @@ export interface AiPosition {
   openedAt: string
   quantity: number
   entryPrice: number | null
+  /** entry_price converted to EUR via the fxRate at fill time. */
+  entryPriceEur: number | null
   highWaterMark: number | null
   closedAt: string | null
   exitPrice: number | null
+  /** exit_price converted to EUR via the fxRate at fill time. */
+  exitPriceEur: number | null
   realizedPnl: number | null
+  /** (exit_eur − entry_eur) × quantity. Preferred over realizedPnl for analytics. */
+  realizedPnlEur: number | null
+  /** Instrument trading currency (USD, EUR, GBX, …). Audit metadata. */
+  currencyCode: string | null
   status: 'open' | 'closed'
 }
 
@@ -205,10 +213,14 @@ function mapAiPosition(r: {
   opened_at: string
   quantity: number
   entry_price: number | null
+  entry_price_eur?: number | null
   high_water_mark: number | null
   closed_at: string | null
   exit_price: number | null
+  exit_price_eur?: number | null
   realized_pnl: number | null
+  realized_pnl_eur?: number | null
+  currency_code?: string | null
   status: string
 }): AiPosition {
   return {
@@ -217,10 +229,14 @@ function mapAiPosition(r: {
     openedAt: r.opened_at,
     quantity: Number(r.quantity),
     entryPrice: r.entry_price != null ? Number(r.entry_price) : null,
+    entryPriceEur: r.entry_price_eur != null ? Number(r.entry_price_eur) : null,
     highWaterMark: r.high_water_mark != null ? Number(r.high_water_mark) : null,
     closedAt: r.closed_at,
     exitPrice: r.exit_price != null ? Number(r.exit_price) : null,
+    exitPriceEur: r.exit_price_eur != null ? Number(r.exit_price_eur) : null,
     realizedPnl: r.realized_pnl != null ? Number(r.realized_pnl) : null,
+    realizedPnlEur: r.realized_pnl_eur != null ? Number(r.realized_pnl_eur) : null,
+    currencyCode: r.currency_code ?? null,
     status: r.status as 'open' | 'closed',
   }
 }
@@ -230,14 +246,16 @@ export async function openAiPosition(
   quantity: number,
   entryPrice: number | null,
   openedAt: string,
-  userId: string
+  userId: string,
+  entryPriceEur: number | null = null,
+  currencyCode: string | null = null
 ): Promise<number> {
   const pool = getPool()
   const result = await pool.query<{ id: number }>(
-    `INSERT INTO ai_positions (ticker, opened_at, quantity, entry_price, high_water_mark, status, user_id)
-     VALUES ($1, $2, $3, $4, $5, 'open', $6)
+    `INSERT INTO ai_positions (ticker, opened_at, quantity, entry_price, entry_price_eur, high_water_mark, currency_code, status, user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8)
      RETURNING id`,
-    [ticker, openedAt, quantity, entryPrice, entryPrice, userId]
+    [ticker, openedAt, quantity, entryPrice, entryPriceEur, entryPrice, currencyCode, userId]
   )
   return result.rows[0].id
 }
@@ -261,11 +279,17 @@ export async function closeAiPosition(
   ticker: string,
   exitPrice: number | null,
   closedAt: string,
-  userId: string
+  userId: string,
+  exitPriceEur: number | null = null
 ): Promise<void> {
   const pool = getPool()
-  const res = await pool.query<{ id: number; quantity: number; entry_price: number | null }>(
-    `SELECT id, quantity, entry_price FROM ai_positions
+  const res = await pool.query<{
+    id: number
+    quantity: number
+    entry_price: number | null
+    entry_price_eur: number | null
+  }>(
+    `SELECT id, quantity, entry_price, entry_price_eur FROM ai_positions
      WHERE ticker = $1 AND status = 'open' AND user_id = $2
      ORDER BY opened_at DESC LIMIT 1`,
     [ticker, userId]
@@ -277,11 +301,18 @@ export async function closeAiPosition(
     exitPrice != null && open.entry_price != null
       ? (exitPrice - Number(open.entry_price)) * Number(open.quantity)
       : null
+  const realizedPnlEur =
+    exitPriceEur != null && open.entry_price_eur != null
+      ? (exitPriceEur - Number(open.entry_price_eur)) * Number(open.quantity)
+      : null
 
   await pool.query(
-    `UPDATE ai_positions SET status = 'closed', closed_at = $1, exit_price = $2, realized_pnl = $3
-     WHERE id = $4`,
-    [closedAt, exitPrice, realizedPnl, open.id]
+    `UPDATE ai_positions
+     SET status = 'closed', closed_at = $1,
+         exit_price = $2, exit_price_eur = $3,
+         realized_pnl = $4, realized_pnl_eur = $5
+     WHERE id = $6`,
+    [closedAt, exitPrice, exitPriceEur, realizedPnl, realizedPnlEur, open.id]
   )
 }
 
@@ -289,11 +320,17 @@ export async function closeAllAiPositions(
   ticker: string,
   exitPrice: number | null,
   closedAt: string,
-  userId: string
+  userId: string,
+  exitPriceEur: number | null = null
 ): Promise<void> {
   const pool = getPool()
-  const res = await pool.query<{ id: number; quantity: number; entry_price: number | null }>(
-    `SELECT id, quantity, entry_price FROM ai_positions
+  const res = await pool.query<{
+    id: number
+    quantity: number
+    entry_price: number | null
+    entry_price_eur: number | null
+  }>(
+    `SELECT id, quantity, entry_price, entry_price_eur FROM ai_positions
      WHERE ticker = $1 AND status = 'open' AND user_id = $2`,
     [ticker, userId]
   )
@@ -302,10 +339,17 @@ export async function closeAllAiPositions(
       exitPrice != null && open.entry_price != null
         ? (exitPrice - Number(open.entry_price)) * Number(open.quantity)
         : null
+    const realizedPnlEur =
+      exitPriceEur != null && open.entry_price_eur != null
+        ? (exitPriceEur - Number(open.entry_price_eur)) * Number(open.quantity)
+        : null
     await pool.query(
-      `UPDATE ai_positions SET status = 'closed', closed_at = $1, exit_price = $2, realized_pnl = $3
-       WHERE id = $4`,
-      [closedAt, exitPrice, realizedPnl, open.id]
+      `UPDATE ai_positions
+       SET status = 'closed', closed_at = $1,
+           exit_price = $2, exit_price_eur = $3,
+           realized_pnl = $4, realized_pnl_eur = $5
+       WHERE id = $6`,
+      [closedAt, exitPrice, exitPriceEur, realizedPnl, realizedPnlEur, open.id]
     )
   }
 }
@@ -313,15 +357,17 @@ export async function closeAllAiPositions(
 export async function updateEntryPrice(
   ticker: string,
   newEntryPrice: number,
-  userId: string
+  userId: string,
+  newEntryPriceEur: number | null = null
 ): Promise<void> {
   const pool = getPool()
   await pool.query(
     `UPDATE ai_positions
      SET entry_price = $1,
+         entry_price_eur = COALESCE($2, entry_price_eur),
          high_water_mark = CASE WHEN high_water_mark < $1 THEN $1 ELSE high_water_mark END
-     WHERE ticker = $2 AND status = 'open' AND user_id = $3`,
-    [newEntryPrice, ticker, userId]
+     WHERE ticker = $3 AND status = 'open' AND user_id = $4`,
+    [newEntryPrice, newEntryPriceEur, ticker, userId]
   )
 }
 
@@ -470,7 +516,11 @@ export async function getClosedAiPositionsWithOrders(
   const res = await pool.query(
     `SELECT
        ap.id, ap.ticker, ap.opened_at, ap.closed_at, ap.quantity,
-       ap.entry_price, ap.high_water_mark, ap.exit_price, ap.realized_pnl, ap.status,
+       ap.entry_price, ap.entry_price_eur,
+       ap.high_water_mark,
+       ap.exit_price, ap.exit_price_eur,
+       ap.realized_pnl, ap.realized_pnl_eur,
+       ap.currency_code, ap.status,
        buy_o.t212_order_id  AS buy_t212_id,
        sell_o.t212_order_id AS sell_t212_id
      FROM ai_positions ap
@@ -498,10 +548,14 @@ export async function getClosedAiPositionsWithOrders(
       opened_at: r.opened_at,
       quantity: r.quantity,
       entry_price: r.entry_price,
+      entry_price_eur: r.entry_price_eur,
       high_water_mark: r.high_water_mark,
       closed_at: r.closed_at,
       exit_price: r.exit_price,
+      exit_price_eur: r.exit_price_eur,
       realized_pnl: r.realized_pnl,
+      realized_pnl_eur: r.realized_pnl_eur,
+      currency_code: r.currency_code,
       status: r.status,
     }),
     buyT212OrderId: r.buy_t212_id ?? null,

@@ -204,16 +204,53 @@ export class EngineService {
 
     const openPositions = await getOpenAiPositions(this.userId)
     if (openPositions.length > 0) {
-      const [liveSnapshot, openOrders] = await Promise.all([
+      const [liveSnapshot, openOrders, orderHistory] = await Promise.all([
         this.t212.getPortfolioSnapshot(),
         this.t212.getOpenOrders(),
+        this.t212
+          .getOrderHistory()
+          .catch(() => [] as Awaited<ReturnType<typeof this.t212.getOrderHistory>>),
       ])
       const liveTickers = new Set(liveSnapshot.positions.map((p) => p.ticker))
       const pendingOrderTickers = new Set(openOrders.map((o) => o.ticker))
       for (const pos of openPositions) {
         if (!liveTickers.has(pos.ticker) && !pendingOrderTickers.has(pos.ticker)) {
-          await closeAiPosition(pos.ticker, null, new Date().toISOString(), this.userId)
-          console.log(`[engine:${this.userId}] ${pos.ticker} not in T212 — marked closed`)
+          // Find the most recent filled SELL on this ticker after the position
+          // was opened. T212 sell orders carry negative quantity. Without this,
+          // realized_pnl gets stored as NULL and the trade silently disappears
+          // from PnL aggregation.
+          const openedAtMs = new Date(pos.openedAt).getTime()
+          const lastSellFill = orderHistory
+            .filter(
+              (o) =>
+                o.ticker === pos.ticker &&
+                o.quantity < 0 &&
+                o.filledPrice != null &&
+                new Date(o.dateModified ?? o.dateCreated).getTime() >= openedAtMs
+            )
+            .sort(
+              (a, b) =>
+                new Date(b.dateModified ?? b.dateCreated).getTime() -
+                new Date(a.dateModified ?? a.dateCreated).getTime()
+            )[0]
+          const exitPrice = lastSellFill?.filledPrice ?? null
+          const closedAt = lastSellFill?.dateModified ?? new Date().toISOString()
+          // Best-effort EUR conversion: fall back to a same-currency live
+          // position's fxRate (USD/EUR/etc. drift over short windows is small).
+          // If no same-currency live position exists, leave exit_price_eur NULL —
+          // analytics can fall back to the legacy realized_pnl with a warning.
+          const inferredCurrency = pos.ticker.endsWith('_US_EQ') ? 'USD' : null
+          const fxRate =
+            inferredCurrency === null
+              ? 1
+              : (liveSnapshot.positions.find(
+                  (p) => p.currencyCode === inferredCurrency && Number.isFinite(p.fxRate)
+                )?.fxRate ?? null)
+          const exitPriceEur = exitPrice != null && fxRate != null ? exitPrice * fxRate : null
+          await closeAiPosition(pos.ticker, exitPrice, closedAt, this.userId, exitPriceEur)
+          console.log(
+            `[engine:${this.userId}] ${pos.ticker} not in T212 — marked closed${exitPrice != null ? ` at ${exitPrice} (T212 fill)` : ' (no fill found)'}`
+          )
         }
       }
       await this._reconcileEntryPrices(openPositions, liveSnapshot.positions)
@@ -244,7 +281,12 @@ export class EngineService {
             `${pos.entryPrice.toFixed(4)} → ${live.averagePrice.toFixed(4)} ` +
             `(${(deviation * 100).toFixed(1)}% deviation from T212 average fill)`
         )
-        await updateEntryPrice(pos.ticker, live.averagePrice, this.userId)
+        await updateEntryPrice(
+          pos.ticker,
+          live.averagePrice,
+          this.userId,
+          live.averagePrice * live.fxRate
+        )
       }
     }
   }
@@ -322,12 +364,15 @@ export class EngineService {
       const live = snapshot.positions.find((p) => p.ticker === pos.ticker)
       if (!live) continue
 
-      const currentPriceEur = live.currentPrice
-      await updateHighWaterMark(pos.ticker, currentPriceEur, this.userId)
-      const hwm = Math.max(pos.highWaterMark ?? pos.entryPrice, currentPriceEur)
+      // T212 prices are in instrument currency (USD for *_US_EQ); EUR is
+      // computed via the per-position fxRate so analytics see the right unit.
+      const currentPrice = live.currentPrice
+      const currentPriceEur = currentPrice * live.fxRate
+      await updateHighWaterMark(pos.ticker, currentPrice, this.userId)
+      const hwm = Math.max(pos.highWaterMark ?? pos.entryPrice, currentPrice)
 
-      const pctFromEntry = ((currentPriceEur - pos.entryPrice) / pos.entryPrice) * 100
-      const pctFromPeak = ((currentPriceEur - hwm) / hwm) * 100
+      const pctFromEntry = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
+      const pctFromPeak = ((currentPrice - hwm) / hwm) * 100
 
       const stopLossPct = this.userConfig.stopLossPct * 100
       const takeProfitPct = this.userConfig.takeProfitPct * 100
@@ -341,10 +386,10 @@ export class EngineService {
       if (!isStopLoss && !isTakeProfit && !isTrailingStop) continue
 
       const reason = isStopLoss
-        ? `Stop-loss: down ${Math.abs(pctFromEntry).toFixed(2)}% from entry €${pos.entryPrice.toFixed(2)}`
+        ? `Stop-loss: down ${Math.abs(pctFromEntry).toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)}`
         : isTakeProfit
-          ? `Take-profit: up ${pctFromEntry.toFixed(2)}% from entry €${pos.entryPrice.toFixed(2)} (target: ${takeProfitPct.toFixed(1)}%)`
-          : `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak €${hwm.toFixed(2)} (entry €${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
+          ? `Take-profit: up ${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)} (target: ${takeProfitPct.toFixed(1)}%)`
+          : `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak ${hwm.toFixed(2)} (entry ${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
 
       console.log(`[engine:${this.userId}] Hard exit — ${pos.ticker}: ${reason}`)
 
@@ -354,7 +399,7 @@ export class EngineService {
           action: 'sell',
           ticker: pos.ticker,
           quantity: sellQty,
-          estimatedPrice: currentPriceEur,
+          estimatedPrice: currentPrice,
         },
         snapshot,
         dailyOpen ?? snapshot.totalValue,
@@ -368,7 +413,7 @@ export class EngineService {
         action: 'sell',
         ticker: pos.ticker,
         quantity: sellQty,
-        estimatedPrice: currentPriceEur,
+        estimatedPrice: currentPrice,
         reasoning: reason,
         signalsJson: '[]',
         portfolioJson: JSON.stringify({
@@ -380,7 +425,7 @@ export class EngineService {
 
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
-        await closeAllAiPositions(pos.ticker, currentPriceEur, timestamp, this.userId)
+        await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId, currentPriceEur)
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         this.t212.invalidateOrderHistoryCache()
@@ -388,7 +433,7 @@ export class EngineService {
           decisionId,
           t212OrderId: order.id,
           status: order.status,
-          fillPrice: currentPriceEur,
+          fillPrice: currentPrice,
           fillQuantity: sellQty,
           timestamp,
           userId: this.userId,
@@ -487,13 +532,15 @@ export class EngineService {
     const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId)
     let exitsPlaced = 0
 
-    for (const { pos, currentPrice, sellQty, reason } of candidates) {
+    for (const { pos, live, currentPrice, sellQty, reason } of candidates) {
       if (pos.ticker === aiSoldTicker) {
         console.log(
           `[engine:${this.userId}] Stagnant exit for ${pos.ticker} deferred — AI already sold`
         )
         continue
       }
+
+      const currentPriceEur = currentPrice * live.fxRate
 
       const risk = await validateOrder(
         { action: 'sell', ticker: pos.ticker, quantity: sellQty, estimatedPrice: currentPrice },
@@ -521,7 +568,7 @@ export class EngineService {
 
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
-        await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId)
+        await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId, currentPriceEur)
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         this.t212.invalidateOrderHistoryCache()
@@ -968,10 +1015,18 @@ export class EngineService {
             decision.quantity,
             estimatedPriceNative,
             timestamp,
-            this.userId
+            this.userId,
+            estimatedPriceEur,
+            livePosition?.currencyCode ?? null
           )
         } else if (decision.action === 'sell') {
-          await closeAllAiPositions(decision.ticker, estimatedPriceNative, timestamp, this.userId)
+          await closeAllAiPositions(
+            decision.ticker,
+            estimatedPriceNative,
+            timestamp,
+            this.userId,
+            estimatedPriceEur
+          )
           this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
@@ -992,7 +1047,13 @@ export class EngineService {
         const msg = (err as Error).message
         console.error(`[engine:${this.userId}] Order failed: ${msg}`)
         if (decision.action === 'sell' && msg.includes('selling-equity-not-owned')) {
-          await closeAllAiPositions(decision.ticker, estimatedPriceNative, timestamp, this.userId)
+          await closeAllAiPositions(
+            decision.ticker,
+            estimatedPriceNative,
+            timestamp,
+            this.userId,
+            estimatedPriceEur
+          )
         }
         await logOrder({
           decisionId,
