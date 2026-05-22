@@ -75,6 +75,10 @@ function validateConfig(
     softStopEnabled: body.softStopEnabled ?? true,
     softStopHoldMinutes: body.softStopHoldMinutes!,
     softStopDrawdownPct: body.softStopDrawdownPct!,
+    // Backtests always run the shared deterministic picker; these fields are
+    // captured in the config snapshot for parity but ignored by the simulator.
+    decisionMode: 'deterministic',
+    aiCostBudgetMonthlyUsd: 0,
     autoStartOnRestart: body.autoStartOnRestart ?? false,
   }
   return { ok: true, cfg }

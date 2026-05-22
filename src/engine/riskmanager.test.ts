@@ -38,6 +38,8 @@ const BASE_CONFIG: UserConfig = {
   softStopEnabled: false,
   softStopHoldMinutes: 360,
   softStopDrawdownPct: 0.025,
+  decisionMode: 'ai',
+  aiCostBudgetMonthlyUsd: 5,
   autoStartOnRestart: false,
 }
 

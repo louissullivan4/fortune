@@ -1,3 +1,5 @@
+export type DecisionMode = 'ai' | 'deterministic' | 'ai_with_fallback'
+
 export interface UserConfig {
   tradeUniverse: string[]
   tradeIntervalMs: number
@@ -18,6 +20,15 @@ export interface UserConfig {
   softStopEnabled: boolean
   softStopHoldMinutes: number
   softStopDrawdownPct: number
+  /**
+   * 'ai'              — call Claude every cycle (current behaviour).
+   * 'deterministic'   — skip Claude entirely; use the shared rules picker.
+   * 'ai_with_fallback' — try Claude; on error or MTD-budget exceeded, fall
+   *                      back to the deterministic picker for this cycle.
+   */
+  decisionMode: DecisionMode
+  /** Soft cap on month-to-date Anthropic spend before fallback kicks in. */
+  aiCostBudgetMonthlyUsd: number
   autoStartOnRestart: boolean
 }
 
@@ -41,5 +52,7 @@ export const DEFAULT_USER_CONFIG: UserConfig = {
   softStopEnabled: true,
   softStopHoldMinutes: 1440,
   softStopDrawdownPct: 0.05,
+  decisionMode: 'ai',
+  aiCostBudgetMonthlyUsd: 5,
   autoStartOnRestart: false,
 }

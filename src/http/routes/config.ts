@@ -88,6 +88,20 @@ router.put('/', async (req, res, next) => {
     ) {
       updates.soft_stop_drawdown_pct = body.softStopDrawdownPct
     }
+    if (
+      body.decisionMode === 'ai' ||
+      body.decisionMode === 'deterministic' ||
+      body.decisionMode === 'ai_with_fallback'
+    ) {
+      updates.decision_mode = body.decisionMode
+    }
+    if (
+      typeof body.aiCostBudgetMonthlyUsd === 'number' &&
+      body.aiCostBudgetMonthlyUsd >= 0 &&
+      body.aiCostBudgetMonthlyUsd <= 1000
+    ) {
+      updates.ai_cost_budget_monthly_usd = body.aiCostBudgetMonthlyUsd
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' })

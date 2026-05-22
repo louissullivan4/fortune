@@ -951,6 +951,26 @@ export async function getAiUsageSummary(userId: string): Promise<AiUsageSummary>
   }
 }
 
+/**
+ * Sum of `ai_usage.total_cost_usd` for the current calendar month (UTC).
+ * Used by the `ai_with_fallback` decision mode to trip the deterministic
+ * fallback when monthly Anthropic spend reaches the user's configured cap.
+ */
+export async function getMonthToDateAiCostUsd(
+  userId: string,
+  now: Date = new Date()
+): Promise<number> {
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const pool = getPool()
+  const res = await pool.query<{ cost: string }>(
+    `SELECT COALESCE(SUM(total_cost_usd), 0) AS cost
+     FROM ai_usage
+     WHERE user_id = $1 AND timestamp >= $2`,
+    [userId, monthStart.toISOString()]
+  )
+  return Number(res.rows[0]?.cost ?? 0)
+}
+
 // ── Legacy CLI helpers ─────────────────────────────────────────────────────
 
 export interface AiTrade {

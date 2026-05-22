@@ -393,6 +393,8 @@ export interface Performance {
   closedPositions: number
 }
 
+export type DecisionMode = 'ai' | 'deterministic' | 'ai_with_fallback'
+
 export interface Config {
   tradeUniverse: string[]
   tradeIntervalMs: number
@@ -408,6 +410,8 @@ export interface Config {
   softStopEnabled: boolean
   softStopHoldMinutes: number
   softStopDrawdownPct: number
+  decisionMode: DecisionMode
+  aiCostBudgetMonthlyUsd: number
   autoStartOnRestart: boolean
 }
 

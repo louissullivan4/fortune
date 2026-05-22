@@ -4,7 +4,7 @@ import { api, type Config, type Instrument } from '../api/client'
 import { pushToast } from '../components/Toasts'
 
 type TimeUnit = 'seconds' | 'minutes' | 'hours'
-type Tab = 'universe' | 'settings' | 'credentials'
+type Tab = 'universe' | 'config' | 'credentials'
 
 const POSITION_SIZE_MIN = 0.05
 const POSITION_SIZE_MAX = 0.5
@@ -302,7 +302,7 @@ function SecretInput({
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'universe', label: 'Trade Universe' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'config', label: 'Configuration' },
   { id: 'credentials', label: 'Credentials' },
 ]
 
@@ -364,7 +364,7 @@ export default function ConfigPage() {
       const updated = await api.config.update(d)
       setCfg(updated)
       setDraft(updated)
-      pushToast('Settings saved', 'info')
+      pushToast('Configuration saved', 'info')
     } catch (err) {
       pushToast((err as Error).message, 'error')
     } finally {
@@ -815,8 +815,8 @@ export default function ConfigPage() {
           </div>
         )}
 
-        {/* ── Settings ───────────────────────────────────────────────────── */}
-        {tab === 'settings' && (
+        {/* ── Configuration ───────────────────────────────────────────────────── */}
+        {tab === 'config' && (
           <div>
             <div
               style={{
@@ -876,6 +876,80 @@ export default function ConfigPage() {
                   onChange={(v) => setDraft({ ...draft, maxPositionPct: v })}
                 />
               </div>
+            </div>
+
+            {/* Decision Engine */}
+            <div
+              className="card"
+              style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 12 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div className="section-label">decision engine</div>
+              </div>
+              <Field label="Mode">
+                <div style={{ display: 'flex', gap: 8, paddingBottom: 10 }}>
+                  {(
+                    [
+                      { v: 'ai', label: 'AI', desc: 'Claude every cycle' },
+                      {
+                        v: 'deterministic',
+                        label: 'Deterministic',
+                        desc: 'Built-in rules, no AI calls',
+                      },
+                      {
+                        v: 'ai_with_fallback',
+                        label: 'AI + fallback',
+                        desc: 'Claude, falls back to rules on error or budget cap',
+                      },
+                    ] as const
+                  ).map((opt) => {
+                    const active = draft.decisionMode === opt.v
+                    return (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        className={active ? 'btn btn-primary' : 'btn btn-secondary'}
+                        style={{
+                          flex: 1,
+                          textAlign: 'left',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          justifyContent: 'center',
+                          gap: 4,
+                          lineHeight: 1.2,
+                          height: 'auto',
+                        }}
+                        onClick={() => setDraft({ ...draft, decisionMode: opt.v })}
+                      >
+                        <span style={{ fontWeight: 600 }}>{opt.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </Field>
+              {draft.decisionMode === 'ai_with_fallback' && (
+                <Field
+                  label="Monthly AI budget (USD)"
+                  hint="When month-to-date Claude spend hits this, the bot switches to the rules engine for the rest of the month"
+                >
+                  <input
+                    type="number"
+                    className="input"
+                    value={draft.aiCostBudgetMonthlyUsd}
+                    min={0}
+                    max={1000}
+                    step={0.5}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        aiCostBudgetMonthlyUsd: Number(e.target.value),
+                      })
+                    }
+                  />
+                </Field>
+              )}
             </div>
 
             {/* Risk Controls */}

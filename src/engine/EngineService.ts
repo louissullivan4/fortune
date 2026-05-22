@@ -1,5 +1,5 @@
 import { isMarketOpen, nextOpenMs, nyseTradingDateStr } from './scheduler.js'
-import { decide } from './brain.js'
+import { decide, type TradeDecision } from './brain.js'
 import { validateOrder, TICKER_BLOCK_LOOKBACK_DAYS } from './riskmanager.js'
 import {
   reconcileAiPositions,
@@ -18,8 +18,10 @@ import {
   logAiUsage,
   getRecentDecisions,
   getRecentTickerLossCount,
+  getMonthToDateAiCostUsd,
   type AiPosition,
 } from '../analytics/journal.js'
+import { pickDecision, lastSellFromRecentDecisions } from '../strategy/picker.js'
 import { Trading212Client, type PortfolioSnapshot, type T212Position } from '../api/trading212.js'
 import { getAllHistories, getLivePrice } from '../api/marketdata.js'
 import { generateSignals } from '../strategy/signals.js'
@@ -825,7 +827,6 @@ export class EngineService {
     }
 
     const recentDecisions = await getRecentDecisions(this.userId, 5)
-    console.log(`[engine:${this.userId}] Asking Claude for decision...`)
     const botSnapshot = {
       ...snapshot,
       positions: botPositions,
@@ -836,21 +837,86 @@ export class EngineService {
       minutesHeld: Math.round(c.minutesHeld),
       pctFromEntry: c.pctFromEntry,
     }))
-    const { decision: aiDecision, usage } = await decide(
+
+    const pickerInput = {
       signals,
-      botSnapshot,
-      recentDecisions,
-      this.anthropicApiKey,
-      this.t212,
-      this.userConfig,
-      stagnantInfo
-    )
+      snapshot: botSnapshot,
+      stagnant: stagnantInfo,
+      config: { stagnantRangePct: this.userConfig.stagnantRangePct },
+      lastSell: lastSellFromRecentDecisions(recentDecisions),
+      nowMs: Date.now(),
+    }
+
+    const ZERO_USAGE = {
+      model: 'deterministic',
+      inputTokens: 0,
+      outputTokens: 0,
+      inputCostUsd: 0,
+      outputCostUsd: 0,
+      totalCostUsd: 0,
+    }
+
+    const mode = this.userConfig.decisionMode
+    let aiDecision: TradeDecision
+    let usage: typeof ZERO_USAGE = ZERO_USAGE
+    let fallbackReason: string | null = null
+
+    if (mode === 'deterministic') {
+      console.log(`[engine:${this.userId}] Deterministic mode — skipping AI`)
+      aiDecision = pickDecision(pickerInput)
+    } else {
+      let budgetExceeded = false
+      if (mode === 'ai_with_fallback') {
+        const mtd = await getMonthToDateAiCostUsd(this.userId)
+        if (mtd >= this.userConfig.aiCostBudgetMonthlyUsd) {
+          budgetExceeded = true
+          fallbackReason = `monthly AI budget reached ($${mtd.toFixed(4)} / $${this.userConfig.aiCostBudgetMonthlyUsd.toFixed(2)})`
+        }
+      }
+
+      if (budgetExceeded) {
+        console.warn(`[engine:${this.userId}] ${fallbackReason} — using deterministic fallback`)
+        aiDecision = pickDecision(pickerInput)
+      } else {
+        console.log(`[engine:${this.userId}] Asking Claude for decision...`)
+        try {
+          const result = await decide(
+            signals,
+            botSnapshot,
+            recentDecisions,
+            this.anthropicApiKey,
+            this.t212,
+            this.userConfig,
+            stagnantInfo
+          )
+          aiDecision = result.decision
+          usage = result.usage
+        } catch (err) {
+          if (mode !== 'ai_with_fallback') throw err
+          fallbackReason = err instanceof Error ? err.message : String(err)
+          console.error(
+            `[engine:${this.userId}] AI call failed — using deterministic fallback: ${fallbackReason}`
+          )
+          aiDecision = pickDecision(pickerInput)
+        }
+      }
+    }
+
+    if (fallbackReason) {
+      aiDecision = {
+        ...aiDecision,
+        reasoning: `[deterministic fallback: ${fallbackReason}] ${aiDecision.reasoning}`,
+      }
+    }
+
     console.log(
-      `[engine:${this.userId}] Claude decision: ${aiDecision.action.toUpperCase()} ${aiDecision.ticker ?? ''}`
+      `[engine:${this.userId}] Decision: ${aiDecision.action.toUpperCase()} ${aiDecision.ticker ?? ''}`
     )
-    console.log(
-      `[engine:${this.userId}] Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out — $${usage.totalCostUsd.toFixed(6)}`
-    )
+    if (usage.totalCostUsd > 0) {
+      console.log(
+        `[engine:${this.userId}] Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out — $${usage.totalCostUsd.toFixed(6)}`
+      )
+    }
 
     // Suppress AI discretionary sells. Hard exits (TP/SL/trailing) and
     // stagnant rotation already ran or will run via their own paths; if the

@@ -56,6 +56,8 @@ export async function getUserConfig(userId: string) {
     soft_stop_enabled: boolean
     soft_stop_hold_minutes: number
     soft_stop_drawdown_pct: number
+    decision_mode: string
+    ai_cost_budget_monthly_usd: number
     auto_start_on_restart: boolean
   }>('SELECT * FROM user_configs WHERE user_id = $1', [userId])
   const row = result.rows[0]
@@ -77,6 +79,8 @@ export async function getUserConfig(userId: string) {
     softStopEnabled: Boolean(row.soft_stop_enabled),
     softStopHoldMinutes: Number(row.soft_stop_hold_minutes),
     softStopDrawdownPct: Number(row.soft_stop_drawdown_pct),
+    decisionMode: row.decision_mode as 'ai' | 'deterministic' | 'ai_with_fallback',
+    aiCostBudgetMonthlyUsd: Number(row.ai_cost_budget_monthly_usd),
     autoStartOnRestart: Boolean(row.auto_start_on_restart),
   }
 }

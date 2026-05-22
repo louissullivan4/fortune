@@ -5,7 +5,8 @@ import type {
   T212Instrument,
   Trading212Client,
 } from '../api/trading212.js'
-import { generateSignals, type TickerSignal } from '../strategy/signals.js'
+import { generateSignals } from '../strategy/signals.js'
+import { pickDecision, type PickerDecision, type StagnantInfo } from '../strategy/picker.js'
 import { validateOrder, computeBuyQuantity } from '../engine/riskmanager.js'
 import type { BacktestConfig, BacktestMetrics, ClosedTrade, EquityPoint } from './types.js'
 
@@ -185,12 +186,6 @@ function checkHardExits(
   }
 }
 
-interface StagnantInfo {
-  ticker: string
-  minutesHeld: number
-  pctFromEntry: number
-}
-
 function detectStagnant(
   state: SimState,
   ts: number,
@@ -209,99 +204,6 @@ function detectStagnant(
     out.push({ ticker, minutesHeld: Math.round(minutes), pctFromEntry })
   }
   return out
-}
-
-interface SimDecision {
-  action: 'buy' | 'sell' | 'hold'
-  ticker: string | null
-  quantity: number | null
-  estimatedPrice: number | null
-  reasoning: string
-}
-
-/**
- * Deterministic stand-in for the live Claude AI step. Encodes the hard rules
- * from `buildSystemPrompt()` in src/engine/brain.ts so backtest results stay
- * faithful to the live algorithm.
- */
-function pickDecision(
-  signals: TickerSignal[],
-  snapshot: PortfolioSnapshot,
-  stagnant: StagnantInfo[],
-  config: BacktestConfig,
-  lastSell: SimState['lastSell'],
-  ts: number
-): SimDecision {
-  const buyCandidates = signals.filter((s) => {
-    if (s.signal !== 'buy' && s.signal !== 'strong_buy') return false
-    if (snapshot.positions.some((p) => p.ticker === s.ticker)) return false
-    const ind = s.indicators
-    if (ind.stochK !== null && ind.stochK > 85) return false
-    if (ind.sma20 === null || ind.sma50 === null || ind.sma20 <= ind.sma50) return false
-    // No same-day rebuy of just-sold ticker
-    if (lastSell?.ticker === s.ticker && dayKey(lastSell.ms) === dayKey(ts)) return false
-    // At least 3 net bullish confluences
-    if (s.bullishCount - s.bearishCount < 3) return false
-    return true
-  })
-
-  // Stagnant rotation: sell a stagnant position to make room for a buy
-  if (
-    stagnant.length > 0 &&
-    buyCandidates.some((b) => !stagnant.find((s) => s.ticker === b.ticker))
-  ) {
-    // pick worst-performing stagnant
-    const worst = [...stagnant].sort((a, b) => a.pctFromEntry - b.pctFromEntry)[0]
-    const held = snapshot.positions.find((p) => p.ticker === worst.ticker)
-    if (held) {
-      return {
-        action: 'sell',
-        ticker: worst.ticker,
-        quantity: held.quantity,
-        estimatedPrice: held.currentPrice,
-        reasoning: `Stagnant rotation: ${worst.ticker} held ${worst.minutesHeld}min with <${(config.stagnantRangePct * 100).toFixed(1)}% movement`,
-      }
-    }
-  }
-
-  if (buyCandidates.length === 0) {
-    return {
-      action: 'hold',
-      ticker: null,
-      quantity: null,
-      estimatedPrice: null,
-      reasoning: 'No qualifying buy candidates',
-    }
-  }
-
-  // Lone-BUY rule: with only one candidate, require stronger confluence
-  if (buyCandidates.length === 1 && buyCandidates[0].bullishCount < 5) {
-    return {
-      action: 'hold',
-      ticker: null,
-      quantity: null,
-      estimatedPrice: null,
-      reasoning: `Lone-BUY ${buyCandidates[0].ticker} rejected (bullishCount=${buyCandidates[0].bullishCount} < 5)`,
-    }
-  }
-
-  // Pick highest net-bullish; strong_buy beats buy on tiebreak; then alphabetical
-  buyCandidates.sort((a, b) => {
-    const da = a.bullishCount - a.bearishCount
-    const db = b.bullishCount - b.bearishCount
-    if (db !== da) return db - da
-    if (a.signal !== b.signal) return a.signal === 'strong_buy' ? -1 : 1
-    return a.ticker.localeCompare(b.ticker)
-  })
-  const pick = buyCandidates[0]
-  const price = pick.indicators.currentPrice ?? 0
-  return {
-    action: 'buy',
-    ticker: pick.ticker,
-    quantity: null, // risk manager will size it
-    estimatedPrice: price,
-    reasoning: `${pick.signal} ${pick.ticker} (bull ${pick.bullishCount}/bear ${pick.bearishCount}): ${pick.reasons.slice(0, 2).join('; ')}`,
-  }
 }
 
 function countRecentLosses(state: SimState, ticker: string, nowMs: number): number {
@@ -476,7 +378,14 @@ export async function runBacktest(
     const stagnant = detectStagnant(state, ts, priceMap, config)
 
     // 6) Deterministic decision
-    const decision = pickDecision(signals, snapshot, stagnant, config, state.lastSell, ts)
+    const decision = pickDecision({
+      signals,
+      snapshot,
+      stagnant,
+      config: { stagnantRangePct: config.stagnantRangePct },
+      lastSell: state.lastSell,
+      nowMs: ts,
+    })
 
     if (decision.action === 'hold' || !decision.ticker || !decision.estimatedPrice) {
       if (cycle % 50 === 0) onProgress(Math.floor((cycle / timestamps.length) * 100))
@@ -545,5 +454,6 @@ export async function runBacktest(
 }
 
 // Re-export for tests / unit use
-export { pickDecision, buildSnapshot, makeStubT212Client, checkHardExits, closePosition }
-export type { SimDecision, StagnantInfo, SimState, SimPosition }
+export { buildSnapshot, makeStubT212Client, checkHardExits, closePosition }
+export type { SimState, SimPosition }
+export type { PickerDecision, StagnantInfo }
