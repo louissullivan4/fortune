@@ -10,12 +10,14 @@ export interface TickerSignal {
   indicators: TickerIndicators
   reasons: string[]
   heldPosition: T212Position | null
+  bullishCount: number
+  bearishCount: number
 }
 
 function classifySignal(
   ind: TickerIndicators,
   held: T212Position | null
-): { signal: SignalType; reasons: string[] } {
+): { signal: SignalType; reasons: string[]; bullishCount: number; bearishCount: number } {
   const reasons: string[] = []
   let bullishCount = 0
   let bearishCount = 0
@@ -209,7 +211,7 @@ function classifySignal(
     }
   }
 
-  return { signal, reasons }
+  return { signal, reasons, bullishCount, bearishCount }
 }
 
 export function generateSignals(
@@ -230,9 +232,17 @@ export function generateSignals(
     const closes = history.bars.map((b) => b.close)
     const indicators = computeIndicators(ticker, closes)
     const held = positionMap.get(ticker) ?? null
-    const { signal, reasons } = classifySignal(indicators, held)
+    const { signal, reasons, bullishCount, bearishCount } = classifySignal(indicators, held)
 
-    signals.push({ ticker, signal, indicators, reasons, heldPosition: held })
+    signals.push({
+      ticker,
+      signal,
+      indicators,
+      reasons,
+      heldPosition: held,
+      bullishCount,
+      bearishCount,
+    })
   }
 
   // Also include held positions not in universe so we can decide to sell them
@@ -244,6 +254,8 @@ export function generateSignals(
         indicators: computeIndicators(pos.ticker, [pos.currentPrice]),
         reasons: ['Held position outside universe — available for sell only'],
         heldPosition: pos,
+        bullishCount: 0,
+        bearishCount: 0,
       })
     }
   }

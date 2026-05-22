@@ -1,0 +1,59 @@
+import type { UserConfig } from '../types/user.js'
+
+export interface BacktestConfig extends UserConfig {
+  name: string
+  /** ISO date YYYY-MM-DD (inclusive). */
+  startDate: string
+  /** ISO date YYYY-MM-DD (inclusive). */
+  endDate: string
+  /** Starting EUR balance for the simulation. */
+  initialCash: number
+}
+
+export interface ClosedTrade {
+  ticker: string
+  openedAt: string
+  closedAt: string
+  quantity: number
+  entryPrice: number
+  exitPrice: number
+  realizedPnl: number
+  exitReason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'stagnant_rotation' | 'end_of_run'
+  holdMinutes: number
+}
+
+export interface EquityPoint {
+  /** Epoch ms. */
+  t: number
+  /** Bot portfolio value in EUR (cash + open positions valued at last close). */
+  value: number
+}
+
+export interface BacktestMetrics {
+  initialCash: number
+  finalValue: number
+  realizedPnl: number
+  totalReturnPct: number
+  maxDrawdownPct: number
+  winRate: number | null
+  tradesCount: number
+  sharpe: number | null
+  equityCurve: EquityPoint[]
+  trades: ClosedTrade[]
+  /** Diagnostic counts to help debug surprising results. */
+  cyclesRun: number
+  signalsEvaluated: number
+  buysExecuted: number
+  sellsExecuted: number
+  blockedByRisk: number
+}
+
+export interface BacktestSummary {
+  finalValue: number
+  realizedPnl: number
+  totalReturnPct: number
+  maxDrawdownPct: number
+  winRate: number | null
+  tradesCount: number
+  sharpe: number | null
+}

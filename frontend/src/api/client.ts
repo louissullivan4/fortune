@@ -419,6 +419,83 @@ export interface Instrument {
   isin?: string
 }
 
+export interface BacktestConfig {
+  name: string
+  startDate: string
+  endDate: string
+  initialCash: number
+  tradeUniverse: string[]
+  tradeIntervalMs: number
+  maxBudgetEur: number
+  maxPositionPct: number
+  dailyLossLimitPct: number
+  stopLossPct: number
+  takeProfitPct: number
+  stagnantExitEnabled: boolean
+  stagnantTimeMinutes: number
+  stagnantRangePct: number
+  autoStartOnRestart: boolean
+}
+
+export interface BacktestClosedTrade {
+  ticker: string
+  openedAt: string
+  closedAt: string
+  quantity: number
+  entryPrice: number
+  exitPrice: number
+  realizedPnl: number
+  exitReason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'stagnant_rotation' | 'end_of_run'
+  holdMinutes: number
+}
+
+export interface BacktestEquityPoint {
+  t: number
+  value: number
+}
+
+export interface BacktestMetrics {
+  initialCash: number
+  finalValue: number
+  realizedPnl: number
+  totalReturnPct: number
+  maxDrawdownPct: number
+  winRate: number | null
+  tradesCount: number
+  sharpe: number | null
+  equityCurve: BacktestEquityPoint[]
+  trades: BacktestClosedTrade[]
+  cyclesRun: number
+  signalsEvaluated: number
+  buysExecuted: number
+  sellsExecuted: number
+  blockedByRisk: number
+}
+
+export interface Backtest {
+  id: number
+  userId: string
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  progressPct: number
+  configJson: BacktestConfig
+  startDate: string
+  endDate: string
+  initialCash: number
+  finalValue: number | null
+  realizedPnl: number | null
+  totalReturnPct: number | null
+  maxDrawdownPct: number | null
+  winRate: number | null
+  tradesCount: number | null
+  sharpe: number | null
+  metricsJson: BacktestMetrics | null
+  errorMessage: string | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+}
+
 // ── API functions ─────────────────────────────────────────────────────────
 
 export const api = {
@@ -576,5 +653,19 @@ export const api = {
       req<Record<string, Instrument>>(
         `/instruments/resolve?tickers=${encodeURIComponent(tickers.join(','))}`
       ),
+  },
+
+  backtests: {
+    list: (page = 1, limit = 20) =>
+      req<Paginated<Backtest>>(`/backtests?page=${page}&limit=${limit}`),
+    get: (id: number) => req<Backtest>(`/backtests/${id}`),
+    create: (body: BacktestConfig) =>
+      req<Backtest>('/backtests', { method: 'POST', body: JSON.stringify(body) }),
+    rerun: (id: number, overrides?: Partial<BacktestConfig>) =>
+      req<Backtest>(`/backtests/${id}/rerun`, {
+        method: 'POST',
+        body: JSON.stringify(overrides ?? {}),
+      }),
+    delete: (id: number) => req<void>(`/backtests/${id}`, { method: 'DELETE' }),
   },
 }

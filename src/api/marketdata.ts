@@ -39,54 +39,90 @@ interface YahooChartResponse {
   }
 }
 
+function parseChartResponse(t212Ticker: string, json: YahooChartResponse): TickerHistory {
+  const result = json.chart.result?.[0]
+  if (!result) {
+    if (json.chart.error) {
+      console.warn(`[marketdata] Yahoo error for ${t212Ticker}: ${json.chart.error.description}`)
+    }
+    return { ticker: t212Ticker, bars: [] }
+  }
+  const timestamps = result.timestamp
+  if (!timestamps?.length) return { ticker: t212Ticker, bars: [] }
+  const quote = result.indicators.quote[0]
+  const bars: OHLCV[] = []
+  for (let i = 0; i < timestamps.length; i++) {
+    const close = quote.close[i]
+    if (close === null) continue
+    bars.push({
+      date: new Date(timestamps[i] * 1000),
+      open: quote.open[i] ?? close,
+      high: quote.high[i] ?? close,
+      low: quote.low[i] ?? close,
+      close,
+      volume: quote.volume[i] ?? 0,
+    })
+  }
+  return { ticker: t212Ticker, bars }
+}
+
 export async function getHistory(t212Ticker: string, days = 90): Promise<TickerHistory> {
   const symbol = toYahooSymbol(t212Ticker)
   const range = days <= 30 ? '1mo' : days <= 90 ? '3mo' : '6mo'
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=1d&includePrePost=false`
-
   try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-    })
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
     if (!res.ok) {
       console.warn(`[marketdata] HTTP ${res.status} for ${symbol}`)
       return { ticker: t212Ticker, bars: [] }
     }
-
     const json = (await res.json()) as YahooChartResponse
-    const result = json.chart.result?.[0]
-    if (!result) {
-      if (json.chart.error) {
-        console.warn(`[marketdata] Yahoo error for ${symbol}: ${json.chart.error.description}`)
-      }
-      return { ticker: t212Ticker, bars: [] }
-    }
-
-    const timestamps = result.timestamp
-    if (!timestamps?.length) {
-      return { ticker: t212Ticker, bars: [] }
-    }
-    const quote = result.indicators.quote[0]
-    const bars: OHLCV[] = []
-
-    for (let i = 0; i < timestamps.length; i++) {
-      const close = quote.close[i]
-      if (close === null) continue
-      bars.push({
-        date: new Date(timestamps[i] * 1000),
-        open: quote.open[i] ?? close,
-        high: quote.high[i] ?? close,
-        low: quote.low[i] ?? close,
-        close,
-        volume: quote.volume[i] ?? 0,
-      })
-    }
-
-    return { ticker: t212Ticker, bars }
+    return parseChartResponse(t212Ticker, json)
   } catch (err) {
     console.warn(`[marketdata] Failed to fetch ${symbol}:`, (err as Error).message)
     return { ticker: t212Ticker, bars: [] }
   }
+}
+
+// Fetch OHLCV for an explicit date range. Yahoo allows up to ~730 days of 1h
+// data (60d for less common symbols) and ~50y of daily. Returns bars in
+// chronological order.
+export async function getHistoryRange(
+  t212Ticker: string,
+  start: Date,
+  end: Date,
+  interval: '1h' | '1d' = '1h'
+): Promise<TickerHistory> {
+  const symbol = toYahooSymbol(t212Ticker)
+  const period1 = Math.floor(start.getTime() / 1000)
+  const period2 = Math.floor(end.getTime() / 1000)
+  const url =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+    `?period1=${period1}&period2=${period2}&interval=${interval}&includePrePost=false`
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+    if (!res.ok) {
+      console.warn(`[marketdata] HTTP ${res.status} for ${symbol} range fetch`)
+      return { ticker: t212Ticker, bars: [] }
+    }
+    const json = (await res.json()) as YahooChartResponse
+    return parseChartResponse(t212Ticker, json)
+  } catch (err) {
+    console.warn(`[marketdata] Failed range fetch ${symbol}:`, (err as Error).message)
+    return { ticker: t212Ticker, bars: [] }
+  }
+}
+
+export async function getAllHistoriesRange(
+  tickers: string[],
+  start: Date,
+  end: Date,
+  interval: '1h' | '1d' = '1h'
+): Promise<Map<string, TickerHistory>> {
+  const entries = await Promise.all(
+    tickers.map(async (t) => [t, await getHistoryRange(t, start, end, interval)] as const)
+  )
+  return new Map(entries)
 }
 
 export async function getAllHistories(

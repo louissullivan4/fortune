@@ -9,6 +9,8 @@ type EventName =
   | 'order'
   | 'signal_refresh'
   | 'toast'
+  | 'backtest_progress'
+  | 'backtest_done'
 
 class Hub {
   private clients = new Set<WebSocket>()

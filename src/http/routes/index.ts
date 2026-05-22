@@ -9,6 +9,7 @@ import ordersRouter from './orders.js'
 import analyticsRouter from './analytics.js'
 import configRouter from './config.js'
 import instrumentsRouter from './instruments.js'
+import backtestsRouter from './backtests.js'
 
 const api = Router()
 
@@ -25,5 +26,6 @@ api.use('/orders', ordersRouter)
 api.use('/analytics', analyticsRouter)
 api.use('/config', configRouter)
 api.use('/instruments', instrumentsRouter)
+api.use('/backtests', backtestsRouter)
 
 export default api

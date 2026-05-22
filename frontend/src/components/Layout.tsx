@@ -7,6 +7,7 @@ import {
   Settings,
   User,
   Shield,
+  FlaskConical,
   LogOut,
 } from 'lucide-react'
 import Overview from '../pages/Dashboard'
@@ -15,13 +16,22 @@ import SignalsAndTrades from '../pages/Signals'
 import Config from '../pages/Config'
 import Profile from '../pages/Profile'
 import Admin from '../pages/Admin'
+import Backtest from '../pages/Backtest'
 import { useAuth } from '../context/AuthContext'
 import { setAccessToken, api, type EngineStatus } from '../api/client'
 
-const nav = [
+type Role = 'admin' | 'client' | 'accountant'
+
+const nav: Array<{
+  to: string
+  label: string
+  icon: typeof LayoutDashboard
+  roles?: Role[]
+}> = [
   { to: '/overview', label: 'Overview', icon: LayoutDashboard },
   { to: '/performance', label: 'Performance', icon: BarChart2 },
   { to: '/history', label: 'History', icon: HistoryIcon },
+  { to: '/backtest', label: 'Backtest', icon: FlaskConical, roles: ['admin', 'accountant'] },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
@@ -69,17 +79,19 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
         <hr className="divider" />
 
         <nav style={{ padding: '8px 0', flex: 1 }}>
-          {nav.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              title={label}
-              className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-            >
-              <Icon size={15} style={{ flexShrink: 0 }} />
-              <span className="nav-label">{label}</span>
-            </NavLink>
-          ))}
+          {nav
+            .filter((item) => !item.roles || (user && item.roles.includes(user.role as Role)))
+            .map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                title={label}
+                className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+              >
+                <Icon size={15} style={{ flexShrink: 0 }} />
+                <span className="nav-label">{label}</span>
+              </NavLink>
+            ))}
 
           <NavLink
             to="/profile"
@@ -171,6 +183,9 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
             <Route path="/settings" element={<Config />} />
             <Route path="/config" element={<Navigate to="/settings" replace />} />
             <Route path="/profile" element={<Profile />} />
+            {(user?.role === 'admin' || user?.role === 'accountant') && (
+              <Route path="/backtest" element={<Backtest />} />
+            )}
             {user?.role === 'admin' && <Route path="/admin" element={<Admin />} />}
             <Route path="*" element={<Navigate to="/overview" replace />} />
           </Routes>

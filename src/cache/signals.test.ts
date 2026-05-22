@@ -31,6 +31,8 @@ function mockSignals(count = 2): TickerSignal[] {
     },
     reasons: [],
     heldPosition: null,
+    bullishCount: 0,
+    bearishCount: 0,
   }))
 }
 
