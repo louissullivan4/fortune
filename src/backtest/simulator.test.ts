@@ -22,6 +22,11 @@ const baseConfig: BacktestConfig = {
   stagnantExitEnabled: false,
   stagnantTimeMinutes: 120,
   stagnantRangePct: 0.012,
+  // Soft stop disabled by default in tests so existing fixtures keep their
+  // expected behaviour; the soft-stop-specific tests opt in explicitly.
+  softStopEnabled: false,
+  softStopHoldMinutes: 360,
+  softStopDrawdownPct: 0.025,
   autoStartOnRestart: false,
 }
 
@@ -382,5 +387,106 @@ describe('checkHardExits', () => {
     }
     checkHardExits(state, ts, new Map([['AAPL', bar]]), cfg)
     expect(state.closedTrades).toHaveLength(0)
+  })
+})
+
+describe('soft time-stop', () => {
+  function makeState(openedAtMs: number): SimState {
+    const state: SimState = {
+      cash: 0,
+      positions: new Map(),
+      closedTrades: [],
+      currentDay: null,
+      dailyOpenValue: 100,
+      recentLosses: new Map(),
+      lastSell: null,
+      equityCurve: [],
+      cycles: 0,
+      buysExecuted: 0,
+      sellsExecuted: 0,
+      blockedByRisk: 0,
+      signalsEvaluated: 0,
+    }
+    state.positions.set('AAPL', {
+      ticker: 'AAPL',
+      quantity: 1,
+      entryPrice: 100,
+      openedAtMs,
+      highWaterMark: 100,
+      lowWaterMark: 100,
+    })
+    return state
+  }
+
+  const enabledCfg: BacktestConfig = {
+    ...baseConfig,
+    softStopEnabled: true,
+    softStopHoldMinutes: 360, // 6h
+    softStopDrawdownPct: 0.025, // 2.5%
+  }
+
+  it('fires when held ≥ softStopHoldMinutes AND close ≤ entry × (1 − drawdown)', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + 7 * 60 * 60 * 1000 // 7h later → past 6h threshold
+    const state = makeState(openedAt)
+    // Close at 97 → 3% below entry, exceeds 2.5% drawdown threshold
+    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    expect(state.closedTrades).toHaveLength(1)
+    expect(state.closedTrades[0].exitReason).toBe('soft_stop')
+    expect(state.closedTrades[0].exitPrice).toBeCloseTo(97)
+  })
+
+  it('does NOT fire before softStopHoldMinutes has elapsed', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + 3 * 60 * 60 * 1000 // 3h — below 6h threshold
+    const state = makeState(openedAt)
+    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    expect(state.closedTrades).toHaveLength(0)
+  })
+
+  it('does NOT fire when drawdown is shallower than threshold', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + 10 * 60 * 60 * 1000
+    const state = makeState(openedAt)
+    // Down only 1% — below 2.5% threshold
+    const bar: OHLCV = { date: new Date(ts), open: 99, high: 99.5, low: 98.5, close: 99, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    expect(state.closedTrades).toHaveLength(0)
+  })
+
+  it('does NOT fire if trailing stop has armed (HWM > entry × 1.008)', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + 10 * 60 * 60 * 1000
+    const state = makeState(openedAt)
+    // Pre-arm the trail by setting HWM > entry × 1.008
+    state.positions.get('AAPL')!.highWaterMark = 102
+    // Close back down to 97 — would trigger soft stop, but trail is armed
+    // (and trail level = 102 × 0.996 = 101.59; close 97 < trail → trailing_stop fires)
+    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    expect(state.closedTrades).toHaveLength(1)
+    expect(state.closedTrades[0].exitReason).toBe('trailing_stop')
+  })
+
+  it('does NOT fire when softStopEnabled is false', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + 10 * 60 * 60 * 1000
+    const state = makeState(openedAt)
+    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), { ...enabledCfg, softStopEnabled: false })
+    expect(state.closedTrades).toHaveLength(0)
+  })
+
+  it('stop_loss still wins precedence when both thresholds breached', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + 10 * 60 * 60 * 1000
+    const state = makeState(openedAt)
+    // Low pierces SL (entry × 0.95 = 95), close at 96 still below soft threshold
+    const bar: OHLCV = { date: new Date(ts), open: 97, high: 97, low: 94, close: 96, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    expect(state.closedTrades).toHaveLength(1)
+    expect(state.closedTrades[0].exitReason).toBe('stop_loss')
   })
 })

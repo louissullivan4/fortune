@@ -976,6 +976,56 @@ export default function ConfigPage() {
                   </div>
                 )}
               </div>
+
+              <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 20 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: draft.softStopEnabled ? 20 : 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div className="section-label">soft time-stop</div>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                      cut dying trades that never armed the trailing stop
+                    </span>
+                  </div>
+                  <Toggle
+                    value={draft.softStopEnabled}
+                    onChange={(v) => setDraft({ ...draft, softStopEnabled: v })}
+                  />
+                </div>
+                {draft.softStopEnabled && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Field
+                      label="Min hold before soft-stop"
+                      hint="Earlier than this, soft-stop never fires"
+                    >
+                      <DurationInput
+                        ms={draft.softStopHoldMinutes * 60_000}
+                        onChange={(ms) =>
+                          setDraft({ ...draft, softStopHoldMinutes: Math.round(ms / 60_000) })
+                        }
+                        min={1}
+                        units={['minutes', 'hours']}
+                      />
+                    </Field>
+                    <SliderField
+                      label="Drawdown threshold"
+                      value={draft.softStopDrawdownPct}
+                      displayValue={pct(draft.softStopDrawdownPct)}
+                      min={0.005}
+                      max={0.1}
+                      step={0.005}
+                      minLabel="0.5%"
+                      maxLabel="10%"
+                      onChange={(v) => setDraft({ ...draft, softStopDrawdownPct: v })}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Save / Reset row */}

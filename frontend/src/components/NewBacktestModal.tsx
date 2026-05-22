@@ -116,6 +116,13 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
     prefill?.stagnantTimeMinutes ?? 120
   )
   const [stagnantRangePct, setStagnantRangePct] = useState(prefill?.stagnantRangePct ?? 0.012)
+  const [softStopEnabled, setSoftStopEnabled] = useState(prefill?.softStopEnabled ?? true)
+  const [softStopHoldMinutes, setSoftStopHoldMinutes] = useState(
+    prefill?.softStopHoldMinutes ?? 1440
+  )
+  const [softStopDrawdownPct, setSoftStopDrawdownPct] = useState(
+    prefill?.softStopDrawdownPct ?? 0.05
+  )
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -134,6 +141,9 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
         setStagnantExitEnabled(c.stagnantExitEnabled)
         setStagnantTimeMinutes(c.stagnantTimeMinutes)
         setStagnantRangePct(c.stagnantRangePct)
+        setSoftStopEnabled(c.softStopEnabled)
+        setSoftStopHoldMinutes(c.softStopHoldMinutes)
+        setSoftStopDrawdownPct(c.softStopDrawdownPct)
         setInitialCash(c.maxBudgetEur)
       })
       .catch(() => {})
@@ -187,6 +197,9 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
         stagnantExitEnabled,
         stagnantTimeMinutes,
         stagnantRangePct,
+        softStopEnabled,
+        softStopHoldMinutes,
+        softStopDrawdownPct,
         autoStartOnRestart: false,
       }
       await api.backtests.create(body)
@@ -419,6 +432,45 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
                   type="checkbox"
                   checked={stagnantExitEnabled}
                   onChange={(e) => setStagnantExitEnabled(e.target.checked)}
+                />
+                Enabled
+              </label>
+            </div>
+            <NumField
+              label="Soft-stop hold"
+              value={softStopHoldMinutes}
+              step={30}
+              min={15}
+              onChange={setSoftStopHoldMinutes}
+              suffix="min"
+              hint="Min hold before soft stop can fire"
+            />
+            <NumField
+              label="Soft-stop drawdown"
+              value={softStopDrawdownPct}
+              step={0.005}
+              min={0.005}
+              max={0.5}
+              onChange={setSoftStopDrawdownPct}
+              suffix="frac"
+              hint={`${(softStopDrawdownPct * 100).toFixed(1)}% — exits dying trades early`}
+            />
+            <div>
+              <label style={labelStyle}>Soft time-stop</label>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  height: 32,
+                  fontSize: 13,
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={softStopEnabled}
+                  onChange={(e) => setSoftStopEnabled(e.target.checked)}
                 />
                 Enabled
               </label>

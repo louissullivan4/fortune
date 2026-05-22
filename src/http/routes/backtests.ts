@@ -46,6 +46,8 @@ function validateConfig(
     ['takeProfitPct', 0.001, 1],
     ['stagnantTimeMinutes', 1, 10_000],
     ['stagnantRangePct', 0.0001, 1],
+    ['softStopHoldMinutes', 1, 10_000],
+    ['softStopDrawdownPct', 0.001, 1],
     ['tradeIntervalMs', 1000, 24 * 60 * 60 * 1000],
   ]
   for (const [k, min, max] of numFields) {
@@ -70,6 +72,9 @@ function validateConfig(
     stagnantExitEnabled: body.stagnantExitEnabled ?? true,
     stagnantTimeMinutes: body.stagnantTimeMinutes!,
     stagnantRangePct: body.stagnantRangePct!,
+    softStopEnabled: body.softStopEnabled ?? true,
+    softStopHoldMinutes: body.softStopHoldMinutes!,
+    softStopDrawdownPct: body.softStopDrawdownPct!,
     autoStartOnRestart: body.autoStartOnRestart ?? false,
   }
   return { ok: true, cfg }

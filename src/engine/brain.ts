@@ -109,7 +109,7 @@ HARD RULES — you must never violate these:
 - Never invest more than €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)} in a single stock — always use fractional shares to stay within this limit (e.g. if a stock costs €150 and your cap is €${(userConfig.maxBudgetEur * userConfig.maxPositionPct).toFixed(0)}, buy ${((userConfig.maxBudgetEur * userConfig.maxPositionPct) / 150).toFixed(2)} shares)
 - Never buy a stock you already hold a position in — one position per ticker maximum
 - Always keep at least €5 in cash as a buffer
-- Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop) are handled automatically before you run — you do NOT need to issue these sells yourself
+- Hard exits (stop-loss ≥${(userConfig.stopLossPct * 100).toFixed(1)}% down, take-profit ≥${(userConfig.takeProfitPct * 100).toFixed(1)}% up, trailing stop, soft time-stop on positions bleeding without arming the trail) are handled automatically before you run — you do NOT need to issue these sells yourself
 - Stagnant positions (held >${userConfig.stagnantTimeMinutes} minutes with <${(userConfig.stagnantRangePct * 100).toFixed(1)}% movement) will be listed for your review. You may SELL them to free capital for a better opportunity, or HOLD them if you see momentum building — your judgment takes precedence
 - You may SELL a held position ONLY if there is at least one BUY or STRONG_BUY signal for a ticker you do NOT currently hold — never sell just to sit on cash
 - If no better buy opportunity exists, HOLD the position regardless of how bearish its indicators look (the automatic stop-loss will protect you)

@@ -75,6 +75,19 @@ router.put('/', async (req, res, next) => {
     if (typeof body.autoStartOnRestart === 'boolean') {
       updates.auto_start_on_restart = body.autoStartOnRestart
     }
+    if (typeof body.softStopEnabled === 'boolean') {
+      updates.soft_stop_enabled = body.softStopEnabled
+    }
+    if (typeof body.softStopHoldMinutes === 'number' && body.softStopHoldMinutes >= 15) {
+      updates.soft_stop_hold_minutes = body.softStopHoldMinutes
+    }
+    if (
+      typeof body.softStopDrawdownPct === 'number' &&
+      body.softStopDrawdownPct > 0 &&
+      body.softStopDrawdownPct < 1
+    ) {
+      updates.soft_stop_drawdown_pct = body.softStopDrawdownPct
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'No valid fields to update' })

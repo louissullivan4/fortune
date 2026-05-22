@@ -35,6 +35,9 @@ const BASE_CONFIG: UserConfig = {
   stagnantExitEnabled: false,
   stagnantTimeMinutes: 120,
   stagnantRangePct: 0.01,
+  softStopEnabled: false,
+  softStopHoldMinutes: 360,
+  softStopDrawdownPct: 0.025,
   autoStartOnRestart: false,
 }
 

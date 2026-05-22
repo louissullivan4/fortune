@@ -169,6 +169,17 @@ function checkHardExits(
       const trailLevel = p.highWaterMark * (1 - TRAIL_STOP_PCT)
       if (bar.low <= trailLevel) {
         closePosition(state, ticker, trailLevel, ts, 'trailing_stop')
+        continue
+      }
+    }
+
+    // Soft time-stop — only relevant when trailing has never armed, because
+    // armed positions are managed by the trailing-stop logic above.
+    if (config.softStopEnabled && !armed) {
+      const minutesHeld = (ts - p.openedAtMs) / 60000
+      const softStopPrice = p.entryPrice * (1 - config.softStopDrawdownPct)
+      if (minutesHeld >= config.softStopHoldMinutes && bar.close <= softStopPrice) {
+        closePosition(state, ticker, bar.close, ts, 'soft_stop')
       }
     }
   }

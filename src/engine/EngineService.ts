@@ -383,13 +383,27 @@ export class EngineService {
         (pos.highWaterMark ?? 0) >= pos.entryPrice * (1 + TRAIL_ACTIVATION_PCT / 100)
       const isTrailingStop = trailActivated && pctFromPeak <= -TRAIL_STOP_PCT
 
-      if (!isStopLoss && !isTakeProfit && !isTrailingStop) continue
+      // Soft time-stop: a position that has bled for hours without ever
+      // arming the trailing stop is a dying trade — cut it before it hits
+      // the full stop-loss. (See backtest analysis: this converts week-long
+      // SL losses from ~−8% to ~−2.5%.)
+      const minutesHeldSoft = (Date.now() - new Date(pos.openedAt).getTime()) / 60_000
+      const softStopThresholdPct = this.userConfig.softStopDrawdownPct * 100
+      const isSoftStop =
+        this.userConfig.softStopEnabled &&
+        !trailActivated &&
+        minutesHeldSoft >= this.userConfig.softStopHoldMinutes &&
+        pctFromEntry <= -softStopThresholdPct
+
+      if (!isStopLoss && !isTakeProfit && !isTrailingStop && !isSoftStop) continue
 
       const reason = isStopLoss
         ? `Stop-loss: down ${Math.abs(pctFromEntry).toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)}`
         : isTakeProfit
           ? `Take-profit: up ${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)} (target: ${takeProfitPct.toFixed(1)}%)`
-          : `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak ${hwm.toFixed(2)} (entry ${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
+          : isTrailingStop
+            ? `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak ${hwm.toFixed(2)} (entry ${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
+            : `Soft stop: ${Math.abs(pctFromEntry).toFixed(2)}% down after ${Math.round(minutesHeldSoft)}min without arming trailing (threshold ${softStopThresholdPct.toFixed(1)}% / ${this.userConfig.softStopHoldMinutes}min)`
 
       console.log(`[engine:${this.userId}] Hard exit — ${pos.ticker}: ${reason}`)
 

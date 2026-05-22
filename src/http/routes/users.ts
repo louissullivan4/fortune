@@ -53,6 +53,9 @@ export async function getUserConfig(userId: string) {
     stagnant_exit_enabled: boolean
     stagnant_time_minutes: number
     stagnant_range_pct: number
+    soft_stop_enabled: boolean
+    soft_stop_hold_minutes: number
+    soft_stop_drawdown_pct: number
     auto_start_on_restart: boolean
   }>('SELECT * FROM user_configs WHERE user_id = $1', [userId])
   const row = result.rows[0]
@@ -71,6 +74,9 @@ export async function getUserConfig(userId: string) {
     stagnantExitEnabled: Boolean(row.stagnant_exit_enabled),
     stagnantTimeMinutes: Number(row.stagnant_time_minutes),
     stagnantRangePct: Number(row.stagnant_range_pct),
+    softStopEnabled: Boolean(row.soft_stop_enabled),
+    softStopHoldMinutes: Number(row.soft_stop_hold_minutes),
+    softStopDrawdownPct: Number(row.soft_stop_drawdown_pct),
     autoStartOnRestart: Boolean(row.auto_start_on_restart),
   }
 }

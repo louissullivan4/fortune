@@ -405,6 +405,9 @@ export interface Config {
   stagnantExitEnabled: boolean
   stagnantTimeMinutes: number
   stagnantRangePct: number
+  softStopEnabled: boolean
+  softStopHoldMinutes: number
+  softStopDrawdownPct: number
   autoStartOnRestart: boolean
 }
 
@@ -434,6 +437,9 @@ export interface BacktestConfig {
   stagnantExitEnabled: boolean
   stagnantTimeMinutes: number
   stagnantRangePct: number
+  softStopEnabled: boolean
+  softStopHoldMinutes: number
+  softStopDrawdownPct: number
   autoStartOnRestart: boolean
 }
 
@@ -445,7 +451,13 @@ export interface BacktestClosedTrade {
   entryPrice: number
   exitPrice: number
   realizedPnl: number
-  exitReason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'stagnant_rotation' | 'end_of_run'
+  exitReason:
+    | 'stop_loss'
+    | 'take_profit'
+    | 'trailing_stop'
+    | 'soft_stop'
+    | 'stagnant_rotation'
+    | 'end_of_run'
   holdMinutes: number
 }
 

@@ -18,7 +18,13 @@ export interface ClosedTrade {
   entryPrice: number
   exitPrice: number
   realizedPnl: number
-  exitReason: 'stop_loss' | 'take_profit' | 'trailing_stop' | 'stagnant_rotation' | 'end_of_run'
+  exitReason:
+    | 'stop_loss'
+    | 'take_profit'
+    | 'trailing_stop'
+    | 'soft_stop'
+    | 'stagnant_rotation'
+    | 'end_of_run'
   holdMinutes: number
 }
 
