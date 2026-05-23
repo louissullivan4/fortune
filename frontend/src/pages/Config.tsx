@@ -523,15 +523,7 @@ export default function ConfigPage() {
   return (
     <div>
       {/* Sticky header */}
-      <div
-        style={{
-          position: 'sticky',
-          top: 'var(--header-height)',
-          zIndex: 10,
-          background: 'var(--color-bg-page)',
-          paddingBottom: 0,
-        }}
-      >
+      <div className="page-sticky-header" style={{ paddingBottom: 0 }}>
         <div style={{ paddingBottom: 6 }}>
           <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Settings</h1>
         </div>
@@ -760,6 +752,7 @@ export default function ConfigPage() {
                     {['TICKER', 'NAME', 'TYPE', 'CCY', ''].map((h, i) => (
                       <th
                         key={i}
+                        className={i === 2 || i === 3 ? 'table-col-hide-mobile' : undefined}
                         style={{
                           textAlign: i === 4 ? 'right' : 'left',
                           padding: '6px 12px',
@@ -822,7 +815,7 @@ export default function ConfigPage() {
                           >
                             {meta?.name ?? '—'}
                           </td>
-                          <td style={{ padding: '9px 12px' }}>
+                          <td className="table-col-hide-mobile" style={{ padding: '9px 12px' }}>
                             {meta?.type ? (
                               <span
                                 style={{
@@ -841,6 +834,7 @@ export default function ConfigPage() {
                             )}
                           </td>
                           <td
+                            className="table-col-hide-mobile"
                             style={{
                               padding: '9px 12px',
                               fontFamily: 'var(--font-code)',
@@ -880,10 +874,8 @@ export default function ConfigPage() {
         {tab === 'config' && (
           <div>
             <div
+              className="grid-config-2col"
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: 12,
                 marginBottom: 12,
                 alignItems: 'start',
               }}
@@ -1016,7 +1008,7 @@ export default function ConfigPage() {
             {/* Risk Controls */}
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               <div className="section-label">risk controls</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
+              <div className="grid-risk-3col" style={{ gap: 24 }}>
                 <SliderField
                   label="Stop-loss"
                   value={draft.stopLossPct}
@@ -1069,7 +1061,7 @@ export default function ConfigPage() {
                     scale out at the take-profit, ride the rest on a tightened trail
                   </span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div className="grid-config-2col">
                   <SliderField
                     label="Sell at take-profit"
                     value={draft.partialExitPct}
@@ -1120,7 +1112,7 @@ export default function ConfigPage() {
                   />
                 </div>
                 {draft.stagnantExitEnabled && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="grid-config-2col">
                     <Field
                       label="Sell if held for longer than"
                       hint="Position must be near break-even to trigger"
@@ -1170,7 +1162,7 @@ export default function ConfigPage() {
                   />
                 </div>
                 {draft.softStopEnabled && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div className="grid-config-2col">
                     <Field
                       label="Min hold before soft-stop"
                       hint="Earlier than this, soft-stop never fires"

@@ -171,6 +171,7 @@ export default function PositionDrawer({ position, onClose }: Props) {
         }}
       />
       <div
+        className="position-drawer-panel"
         style={{
           position: 'fixed',
           top: 0,

@@ -235,13 +235,19 @@ export default function Admin() {
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
                   User
                 </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                <th
+                  className="table-col-hide-mobile"
+                  style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}
+                >
                   Email
                 </th>
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
                   Role
                 </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                <th
+                  className="table-col-hide-mobile"
+                  style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}
+                >
                   Keys
                 </th>
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
@@ -261,7 +267,12 @@ export default function Admin() {
                     </div>
                     <div style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>@{u.username}</div>
                   </td>
-                  <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{u.email}</td>
+                  <td
+                    className="table-col-hide-mobile"
+                    style={{ padding: '10px 12px', color: 'var(--muted)' }}
+                  >
+                    {u.email}
+                  </td>
                   <td style={{ padding: '10px 12px' }}>
                     <RolePicker
                       userId={u.user_id}
@@ -269,7 +280,7 @@ export default function Admin() {
                       onChanged={(role) => handleRoleChanged(u.user_id, role)}
                     />
                   </td>
-                  <td style={{ padding: '10px 12px' }}>
+                  <td className="table-col-hide-mobile" style={{ padding: '10px 12px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <span
                         className={`badge ${u.has_anthropic_key ? 'badge-green' : 'badge-red'}`}
@@ -351,10 +362,16 @@ export default function Admin() {
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
                   Email
                 </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                <th
+                  className="table-col-hide-mobile"
+                  style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}
+                >
                   Invited By
                 </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
+                <th
+                  className="table-col-hide-mobile"
+                  style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}
+                >
                   Sent
                 </th>
                 <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted)' }}>
@@ -375,10 +392,16 @@ export default function Admin() {
                   return (
                     <tr key={inv.id} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '10px 12px' }}>{inv.email}</td>
-                      <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
+                      <td
+                        className="table-col-hide-mobile"
+                        style={{ padding: '10px 12px', color: 'var(--muted)' }}
+                      >
                         {inv.invited_by_username ?? '—'}
                       </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>
+                      <td
+                        className="table-col-hide-mobile"
+                        style={{ padding: '10px 12px', color: 'var(--muted)' }}
+                      >
                         {new Date(inv.created_at).toLocaleDateString()}
                       </td>
                       <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -65,8 +65,31 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
     setAccessToken(null)
   }
 
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false)
+  const avatarMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (avatarMenuRef.current && !avatarMenuRef.current.contains(e.target as Node))
+        setAvatarMenuOpen(false)
+    }
+    if (avatarMenuOpen) document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [avatarMenuOpen])
+
+  const initials = user ? (user.firstName?.[0] ?? '').toUpperCase() : ''
+
+  const bottomNavItems = [
+    { to: '/overview', label: 'Overview', icon: LayoutDashboard },
+    { to: '/performance', label: 'Performance', icon: BarChart2 },
+    { to: '/history', label: 'History', icon: HistoryIcon },
+    { to: '/settings', label: 'Settings', icon: Settings },
+    { to: '/profile', label: 'Profile', icon: User },
+  ]
+
   return (
     <div className="layout">
+      {/* ── Desktop sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-logo">
           <span className="sidebar-wordmark">Fortune</span>
@@ -116,8 +139,6 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
           )}
         </nav>
 
-        {/* Market filter + compact status per enabled market */}
-
         <hr className="divider" />
 
         <button
@@ -130,6 +151,90 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
           <span className="nav-label">Sign out</span>
         </button>
       </aside>
+
+      {/* ── Mobile header ── */}
+      <header className="mobile-header">
+        <span className="sidebar-wordmark" style={{ fontSize: 14 }}>
+          Fortune
+        </span>
+        <div style={{ flex: 1, maxWidth: 160 }}>
+          <MarketDropdown />
+        </div>
+        <div ref={avatarMenuRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setAvatarMenuOpen((o) => !o)}
+            className="nav-avatar"
+            style={{ cursor: 'pointer' }}
+          >
+            {initials}
+          </button>
+          {avatarMenuOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                right: 0,
+                minWidth: 160,
+                background: 'var(--color-bg-page)',
+                border: '0.5px solid var(--color-border)',
+                borderRadius: 6,
+                padding: 4,
+                zIndex: 50,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+              }}
+            >
+              <div
+                style={{
+                  padding: '8px 10px',
+                  fontSize: 12,
+                  color: 'var(--color-text-muted)',
+                  borderBottom: '0.5px solid var(--color-border)',
+                  marginBottom: 4,
+                }}
+              >
+                {user?.firstName}
+              </div>
+              <button
+                onClick={() => {
+                  setAvatarMenuOpen(false)
+                  handleLogout()
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '8px 10px',
+                  fontSize: 13,
+                  color: 'var(--color-text-secondary)',
+                  background: 'none',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <LogOut size={14} />
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* ── Mobile bottom nav ── */}
+      <nav className="bottom-nav">
+        {bottomNavItems.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) => `bottom-nav-item${isActive ? ' active' : ''}`}
+          >
+            <Icon size={20} />
+            <span className="bottom-nav-label">{label}</span>
+          </NavLink>
+        ))}
+      </nav>
 
       <div className="right-panel">
         <main className="main-content">

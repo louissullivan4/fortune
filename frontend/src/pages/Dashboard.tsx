@@ -44,14 +44,7 @@ function EngineCard({
   return (
     <div className="card" style={{ marginBottom: 24 }}>
       {/* Top row: engine state + controls */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
+      <div className="engine-card-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span
             style={{
@@ -81,7 +74,7 @@ function EngineCard({
             style={{ display: 'flex', alignItems: 'center', gap: 5 }}
           >
             <Download size={13} />
-            Export
+            <span className="hide-mobile">Export</span>
           </button>
           <button
             className="btn btn-ghost"
@@ -111,7 +104,7 @@ function EngineCard({
 
       {/* Cycle timestamps */}
       {(status?.lastCycleAt || status?.nextCycleAt) && (
-        <div style={{ display: 'flex', gap: 24, marginTop: 12 }}>
+        <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
           {status?.lastCycleAt && (
             <div>
               <div className="section-label" style={{ marginBottom: 2 }}>
@@ -325,13 +318,7 @@ export default function Overview() {
         {error && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 4 }}>{error}</div>}
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: market === null && engineStatuses.length > 1 ? '1fr 1fr' : '1fr',
-          gap: 12,
-        }}
-      >
+      <div className="grid-stats">
         {market === null ? (
           engineStatuses.map((s) => (
             <EngineCard
@@ -382,14 +369,7 @@ export default function Overview() {
       {showExportModal && <ExportReportModal onClose={() => setShowExportModal(false)} />}
 
       {/* Stats row — two summary cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
+      <div className="grid-stats" style={{ marginBottom: 24 }}>
         {/* Card 1: Portfolio snapshot */}
         <div className="card">
           <div className="section-label" style={{ marginBottom: 8 }}>
@@ -615,14 +595,7 @@ export default function Overview() {
         </div>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-          gap: 16,
-          marginBottom: 24,
-        }}
-      >
+      <div className="grid-positions" style={{ marginBottom: 24 }}>
         {/* AI positions */}
         <div className="card">
           {(() => {

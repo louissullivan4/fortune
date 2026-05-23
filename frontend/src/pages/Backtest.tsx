@@ -179,7 +179,10 @@ function BacktestRow({
             <span style={{ fontWeight: 500 }}>{row.name}</span>
           </div>
         </td>
-        <td style={{ padding: '8px 6px', fontFamily: 'var(--font-code)', fontSize: 12 }}>
+        <td
+          className="table-col-hide-mobile"
+          style={{ padding: '8px 6px', fontFamily: 'var(--font-code)', fontSize: 12 }}
+        >
           {period}
         </td>
         <td style={{ padding: '8px 6px' }}>
@@ -193,13 +196,22 @@ function BacktestRow({
         <td style={{ padding: '8px 6px', fontFamily: 'var(--font-code)', color: returnColor }}>
           {fmtPct(row.totalReturnPct)}
         </td>
-        <td style={{ padding: '8px 6px', fontFamily: 'var(--font-code)' }}>
+        <td
+          className="table-col-hide-mobile"
+          style={{ padding: '8px 6px', fontFamily: 'var(--font-code)' }}
+        >
           {row.winRate != null ? `${(row.winRate * 100).toFixed(0)}%` : '—'}
         </td>
-        <td style={{ padding: '8px 6px', fontFamily: 'var(--font-code)' }}>
+        <td
+          className="table-col-hide-mobile"
+          style={{ padding: '8px 6px', fontFamily: 'var(--font-code)' }}
+        >
           {row.tradesCount ?? '—'}
         </td>
-        <td style={{ padding: '8px 6px', fontSize: 11, color: 'var(--color-text-muted)' }}>
+        <td
+          className="table-col-hide-mobile"
+          style={{ padding: '8px 6px', fontSize: 11, color: 'var(--color-text-muted)' }}
+        >
           {new Date(row.createdAt).toLocaleString()}
         </td>
         <td style={{ padding: '8px 6px', textAlign: 'right' }}>
@@ -496,12 +508,32 @@ export default function BacktestPage() {
           <thead style={{ background: 'var(--color-bg-surface)' }}>
             <tr style={{ color: 'var(--color-text-muted)', textAlign: 'left' }}>
               <th style={{ padding: '10px 6px', fontWeight: 500 }}>Name</th>
-              <th style={{ padding: '10px 6px', fontWeight: 500 }}>Period</th>
+              <th
+                className="table-col-hide-mobile"
+                style={{ padding: '10px 6px', fontWeight: 500 }}
+              >
+                Period
+              </th>
               <th style={{ padding: '10px 6px', fontWeight: 500 }}>Status</th>
               <th style={{ padding: '10px 6px', fontWeight: 500 }}>Return</th>
-              <th style={{ padding: '10px 6px', fontWeight: 500 }}>Win rate</th>
-              <th style={{ padding: '10px 6px', fontWeight: 500 }}>Trades</th>
-              <th style={{ padding: '10px 6px', fontWeight: 500 }}>Created</th>
+              <th
+                className="table-col-hide-mobile"
+                style={{ padding: '10px 6px', fontWeight: 500 }}
+              >
+                Win rate
+              </th>
+              <th
+                className="table-col-hide-mobile"
+                style={{ padding: '10px 6px', fontWeight: 500 }}
+              >
+                Trades
+              </th>
+              <th
+                className="table-col-hide-mobile"
+                style={{ padding: '10px 6px', fontWeight: 500 }}
+              >
+                Created
+              </th>
               <th style={{ padding: '10px 6px', fontWeight: 500 }} />
             </tr>
           </thead>

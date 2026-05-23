@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Eye, EyeOff, ChevronDown } from 'lucide-react'
+import { Eye, EyeOff, ChevronDown, LogOut } from 'lucide-react'
 import { api, type UserProfile } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { pushToast } from '../components/Toasts'
@@ -237,7 +237,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
 }
 
 export default function Profile() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -388,11 +388,9 @@ export default function Profile() {
     profileForm.address1 === profileForm.address2
 
   return (
-    <div
-      style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 20, alignItems: 'start' }}
-    >
+    <div className="grid-profile" style={{ alignItems: 'start' }}>
       {/* Left: identity card */}
-      <div style={{ position: 'sticky', top: 'var(--header-height)' }}>
+      <div className="profile-identity">
         <div
           className="card"
           style={{
@@ -477,9 +475,7 @@ export default function Profile() {
             personal information
           </div>
           <form onSubmit={saveProfile}>
-            <div
-              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}
-            >
+            <div className="grid-form-2col" style={{ marginBottom: 14 }}>
               <Field label="First name">
                 <input
                   className="input"
@@ -495,9 +491,7 @@ export default function Profile() {
                 />
               </Field>
             </div>
-            <div
-              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}
-            >
+            <div className="grid-form-2col" style={{ marginBottom: 14 }}>
               <Field label="Username">
                 <input
                   className="input"
@@ -557,9 +551,7 @@ export default function Profile() {
                 />
               </Field>
             </div>
-            <div
-              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}
-            >
+            <div className="grid-form-2col" style={{ marginBottom: 14 }}>
               <Field label="City">
                 <input className="input" value={profileForm.city ?? ''} onChange={pf('city')} />
               </Field>
@@ -567,9 +559,7 @@ export default function Profile() {
                 <input className="input" value={profileForm.county ?? ''} onChange={pf('county')} />
               </Field>
             </div>
-            <div
-              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}
-            >
+            <div className="grid-form-2col" style={{ marginBottom: 20 }}>
               <Field label="Country">
                 <input
                   className="input"
@@ -601,14 +591,7 @@ export default function Profile() {
           open={credentialsOpen}
           onToggle={() => setCredentialsOpen((o) => !o)}
         >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 16,
-              alignItems: 'start',
-            }}
-          >
+          <div className="grid-form-2col" style={{ alignItems: 'start' }}>
             {/* Anthropic */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div
@@ -767,9 +750,7 @@ export default function Profile() {
                 />
               </Field>
             </div>
-            <div
-              style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 8 }}
-            >
+            <div className="grid-form-2col" style={{ marginBottom: 8 }}>
               <Field label="New password">
                 <PasswordInput
                   value={pwForm.newPassword}
@@ -807,6 +788,21 @@ export default function Profile() {
             </button>
           </form>
         </AccordionSection>
+
+        {/* Mobile sign-out */}
+        <button
+          className="btn btn-secondary show-mobile"
+          onClick={() => logout()}
+          style={{
+            width: '100%',
+            justifyContent: 'center',
+            marginTop: 16,
+            gap: 8,
+          }}
+        >
+          <LogOut size={14} />
+          Sign out
+        </button>
       </div>
     </div>
   )

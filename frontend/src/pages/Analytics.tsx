@@ -507,16 +507,15 @@ export default function Performance() {
     <div>
       {/* Sticky page header */}
       <div
+        className="page-sticky-header"
         style={{
-          position: 'sticky',
-          top: 'var(--header-height)',
-          zIndex: 10,
-          background: 'var(--color-bg-page)',
           paddingBottom: 12,
           marginBottom: 12,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 8,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -560,10 +559,10 @@ export default function Performance() {
             </span>
           ) : null}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {!resetAt && (
             <button
-              className="btn btn-secondary"
+              className="btn btn-secondary hide-mobile"
               onClick={handleSetReset}
               disabled={resetBusy}
               title="Hide all P&L history before now from the view"
@@ -578,7 +577,7 @@ export default function Performance() {
             title="Export report"
           >
             <Download size={13} />
-            Export
+            <span className="hide-mobile">Export</span>
           </button>
           <RangeSelector
             value={range}
@@ -590,14 +589,7 @@ export default function Performance() {
       </div>
 
       {/* KPI cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(7, 1fr)',
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
+      <div className="grid-kpi" style={{ marginBottom: 16 }}>
         <StatCard
           label="Gross P&L"
           value={fmtEur(filteredStats.grossPnl)}
@@ -713,14 +705,7 @@ export default function Performance() {
 
           return (
             <>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: 12,
-                  marginBottom: 12,
-                }}
-              >
+              <div className="grid-kpi" style={{ marginBottom: 12 }}>
                 <StatCard
                   label="Avg win"
                   value={avgWin > 0 ? `+€${avgWin.toFixed(2)}` : '—'}
@@ -748,14 +733,7 @@ export default function Performance() {
                 />
               </div>
 
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 2fr',
-                  gap: 12,
-                  marginBottom: 12,
-                }}
-              >
+              <div className="grid-charts-2" style={{ marginBottom: 12 }}>
                 {/* Exit-type breakdown */}
                 <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                   <div style={{ padding: '12px 16px 8px' }}>
@@ -857,7 +835,7 @@ export default function Performance() {
         })()}
 
       {/* Row 3: Cumulative P&L hero (2/3) + Win/Loss donut (1/3) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div className="grid-hero" style={{ marginBottom: 12 }}>
         <ChartCard title="cumulative P&L" sub={periodLabel}>
           {(isHourlyMode ? hourlyCumPnlPoints : cumulativePnlPoints).length >= 1 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT_HERO}>
@@ -929,7 +907,7 @@ export default function Performance() {
       </div>
 
       {/* Row 4: P&L by Ticker + P&L by Hour side by side */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div className="grid-charts-2" style={{ marginBottom: 12 }}>
         <ChartCard title="P&L by ticker" sub={periodLabel}>
           {tickerPnlBars.length > 0 ? (
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
@@ -1056,13 +1034,17 @@ export default function Performance() {
                 <thead>
                   <tr>
                     <th>Ticker</th>
-                    <th>Qty</th>
+                    <th className="table-col-hide-mobile">Qty</th>
                     <th style={{ textAlign: 'right' }}>Entry</th>
                     <th style={{ textAlign: 'right' }}>Exit</th>
-                    <th style={{ textAlign: 'right' }}>Gross P&L</th>
-                    <th style={{ textAlign: 'right' }}>FX fee</th>
+                    <th className="table-col-hide-mobile" style={{ textAlign: 'right' }}>
+                      Gross P&L
+                    </th>
+                    <th className="table-col-hide-mobile" style={{ textAlign: 'right' }}>
+                      FX fee
+                    </th>
                     <th style={{ textAlign: 'right' }}>Net P&L</th>
-                    <th>Opened</th>
+                    <th className="table-col-hide-mobile">Opened</th>
                     <th>Closed</th>
                   </tr>
                 </thead>
@@ -1076,7 +1058,7 @@ export default function Performance() {
                       <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
                         {p.ticker}
                       </td>
-                      <td>{p.quantity}</td>
+                      <td className="table-col-hide-mobile">{p.quantity}</td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
                         {p.entryPrice != null ? `€${p.entryPrice.toFixed(2)}` : '—'}
                       </td>
@@ -1084,6 +1066,7 @@ export default function Performance() {
                         {p.exitPrice != null ? `€${p.exitPrice.toFixed(2)}` : '—'}
                       </td>
                       <td
+                        className="table-col-hide-mobile"
                         style={{
                           textAlign: 'right',
                           fontFamily: 'var(--font-code)',
@@ -1110,6 +1093,7 @@ export default function Performance() {
                         )}
                       </td>
                       <td
+                        className="table-col-hide-mobile"
                         style={{
                           textAlign: 'right',
                           fontFamily: 'var(--font-code)',
@@ -1132,6 +1116,7 @@ export default function Performance() {
                           : '—'}
                       </td>
                       <td
+                        className="table-col-hide-mobile"
                         style={{
                           fontSize: 12,
                           color: 'var(--color-text-muted)',
@@ -1155,7 +1140,10 @@ export default function Performance() {
                   ))}
                 </tbody>
               </table>
-              <div style={{ padding: '8px 16px', fontSize: 11, color: 'var(--color-text-muted)' }}>
+              <div
+                className="hide-mobile"
+                style={{ padding: '8px 16px', fontSize: 11, color: 'var(--color-text-muted)' }}
+              >
                 AI positions only · net P&L deducts T212 FX fee (0.15% per leg on USD stocks) ·
                 bid/ask spread not included · entry/exit uses actual T212 fill price where available
                 · <span style={{ opacity: 0.7 }}>est</span> = no fill record found, using last known
@@ -1203,14 +1191,7 @@ export default function Performance() {
 
         {costSectionOpen && (
           <>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: 12,
-                marginTop: 16,
-              }}
-            >
+            <div className="grid-charts-2" style={{ marginTop: 16 }}>
               <ChartCard title="AI cost per day">
                 {aiCostPoints.some((p) => p.cost > 0) ? (
                   <ResponsiveContainer width="100%" height={CHART_HEIGHT}>

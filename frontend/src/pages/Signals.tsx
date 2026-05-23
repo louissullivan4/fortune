@@ -155,6 +155,7 @@ function SignalRow({
           {fmt(ind.rsi14)}
         </td>
         <td
+          className="table-col-hide-mobile"
           style={{
             fontSize: 12,
             color: 'var(--color-text-secondary)',
@@ -459,17 +460,8 @@ export default function SignalsAndTrades() {
       {/* ── Signals tab ── */}
       {activeTab === 'signals' && (
         <div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 12,
-              gap: 12,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div className="signals-filter-bar">
+            <div className="filter-scroll">
               {/* Signal type filter chips */}
               {SIGNAL_TYPES.map((st) => (
                 <button
@@ -490,13 +482,15 @@ export default function SignalsAndTrades() {
                     fontWeight: signalTypeFilter === st.value ? 500 : 400,
                     cursor: 'pointer',
                     transition: 'background 150ms ease, color 150ms ease',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
                   }}
                 >
                   {st.label}
                 </button>
               ))}
               {/* Ticker search */}
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
                 <Search
                   size={12}
                   style={{
@@ -555,7 +549,7 @@ export default function SignalsAndTrades() {
           )}
 
           {filteredSignals.length > 0 && (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
               <table className="table">
                 <thead>
                   <tr>
@@ -564,7 +558,7 @@ export default function SignalsAndTrades() {
                     <th>Price</th>
                     <th>1d change</th>
                     <th>RSI</th>
-                    <th>Top reason</th>
+                    <th className="table-col-hide-mobile">Top reason</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -654,7 +648,7 @@ export default function SignalsAndTrades() {
                 : 'No decisions found.'}
             </div>
           ) : (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
               <table className="table">
                 <thead>
                   <tr>
@@ -662,10 +656,12 @@ export default function SignalsAndTrades() {
                     <th>Time</th>
                     <th>Action</th>
                     <th>Ticker</th>
-                    <th>Qty</th>
-                    <th style={{ textAlign: 'right' }}>Price</th>
+                    <th className="table-col-hide-mobile">Qty</th>
+                    <th className="table-col-hide-mobile" style={{ textAlign: 'right' }}>
+                      Price
+                    </th>
                     <th>Status</th>
-                    <th>Reasoning</th>
+                    <th className="table-col-hide-mobile">Reasoning</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -703,16 +699,23 @@ export default function SignalsAndTrades() {
                             <ActionBadge action={d.action} />
                           </td>
                           <td style={{ fontFamily: 'var(--font-code)' }}>{d.ticker ?? '—'}</td>
-                          <td style={{ color: 'var(--color-text-secondary)' }}>
+                          <td
+                            className="table-col-hide-mobile"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                          >
                             {d.quantity ?? '—'}
                           </td>
-                          <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                          <td
+                            className="table-col-hide-mobile"
+                            style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}
+                          >
                             {d.estimatedPrice != null ? `€${d.estimatedPrice.toFixed(2)}` : '—'}
                           </td>
                           <td style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                             {d.orderStatus ?? '—'}
                           </td>
                           <td
+                            className="table-col-hide-mobile"
                             style={{
                               fontSize: 12,
                               color: 'var(--color-text-secondary)',
@@ -831,7 +834,7 @@ export default function SignalsAndTrades() {
             </div>
           ) : orders && orders.data.length > 0 ? (
             <>
-              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
                 <table className="table">
                   <thead>
                     <tr>
@@ -840,8 +843,10 @@ export default function SignalsAndTrades() {
                       <th>Ticker</th>
                       <th>Status</th>
                       <th style={{ textAlign: 'right' }}>Fill price</th>
-                      <th style={{ textAlign: 'right' }}>Fill qty</th>
-                      <th>T212 order ID</th>
+                      <th className="table-col-hide-mobile" style={{ textAlign: 'right' }}>
+                        Fill qty
+                      </th>
+                      <th className="table-col-hide-mobile">T212 order ID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -887,10 +892,13 @@ export default function SignalsAndTrades() {
                         <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
                           {o.fillPrice != null ? `€${o.fillPrice.toFixed(2)}` : '—'}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>
+                        <td
+                          className="table-col-hide-mobile"
+                          style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}
+                        >
                           {o.fillQuantity ?? '—'}
                         </td>
-                        <td>
+                        <td className="table-col-hide-mobile">
                           {o.t212OrderId ? (
                             <button
                               onClick={() => copyOrderId(o.t212OrderId!)}
