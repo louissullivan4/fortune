@@ -479,6 +479,8 @@ export interface BacktestConfig {
   softStopDrawdownPct: number
   partialExitPct?: number
   trailPullbackAfterPartialPct?: number
+  slippageBps?: number
+  fxRoundTripPct?: number
   autoStartOnRestart: boolean
   market?: MarketCode
 }
@@ -547,6 +549,8 @@ export interface Backtest {
   startedAt: string | null
   completedAt: string | null
   market?: MarketCode
+  variantOf?: number | null
+  variant?: Backtest
 }
 
 // ── API functions ─────────────────────────────────────────────────────────

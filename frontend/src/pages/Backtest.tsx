@@ -286,6 +286,51 @@ function BacktestRow({
                   )}
                 </div>
                 {details?.metricsJson?.trades && <TradeTable trades={details.metricsJson.trades} />}
+
+                {details?.variant && details.variant.status === 'completed' && (
+                  <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 12 }}>
+                    <div className="section-label" style={{ marginBottom: 8 }}>
+                      variant B comparison
+                    </div>
+                    <div
+                      style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}
+                    >
+                      <Metric label="Final (B)" value={fmtEur(details.variant.finalValue)} />
+                      <Metric
+                        label="Return (B)"
+                        value={fmtPct(details.variant.totalReturnPct)}
+                        positive={(details.variant.totalReturnPct ?? 0) >= 0}
+                      />
+                      <Metric
+                        label="Max DD (B)"
+                        value={fmtPct(
+                          details.variant.maxDrawdownPct ? -details.variant.maxDrawdownPct : 0
+                        )}
+                      />
+                      <Metric
+                        label="Win rate (B)"
+                        value={
+                          details.variant.winRate != null
+                            ? `${(details.variant.winRate * 100).toFixed(0)}%`
+                            : '—'
+                        }
+                      />
+                      <Metric
+                        label="Trades (B)"
+                        value={details.variant.tradesCount?.toString() ?? '—'}
+                      />
+                      <Metric label="Sharpe (B)" value={fmtNum(details.variant.sharpe)} />
+                    </div>
+                    {details.variant.metricsJson?.equityCurve && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="section-label" style={{ marginBottom: 6 }}>
+                          Equity curve (B)
+                        </div>
+                        <EquitySparkline points={details.variant.metricsJson.equityCurve} />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </td>

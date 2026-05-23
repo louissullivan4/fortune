@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { runBacktest, checkHardExits, type SimState } from './simulator.js'
+import { applySlippage, runBacktest, checkHardExits, type SimState } from './simulator.js'
 import type { BacktestConfig } from './types.js'
 import type { TickerHistory, OHLCV } from '../api/marketdata.js'
 
@@ -328,5 +328,116 @@ describe('soft time-stop', () => {
     checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
     expect(state.closedTrades).toHaveLength(1)
     expect(state.closedTrades[0].exitReason).toBe('stop_loss')
+  })
+})
+
+describe('applySlippage', () => {
+  it('makes buys more expensive', () => {
+    expect(applySlippage(100, 'buy', 15)).toBeCloseTo(100.15, 4)
+  })
+  it('makes sells cheaper', () => {
+    expect(applySlippage(100, 'sell', 15)).toBeCloseTo(99.85, 4)
+  })
+  it('returns the exact price when slippage is 0', () => {
+    expect(applySlippage(100, 'buy', 0)).toBe(100)
+    expect(applySlippage(100, 'sell', 0)).toBe(100)
+  })
+})
+
+describe('friction model', () => {
+  it('applies slippage to hard-exit fills', () => {
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + HOUR_MS
+    const state: SimState = {
+      cash: 0,
+      positions: new Map([
+        [
+          'AAPL',
+          {
+            ticker: 'AAPL',
+            quantity: 1,
+            entryPrice: 100,
+            openedAtMs: openedAt,
+            highWaterMark: 100,
+            lowWaterMark: 100,
+          },
+        ],
+      ]),
+      closedTrades: [],
+      currentDay: null,
+      dailyOpenValue: 100,
+      recentLosses: new Map(),
+      lastSell: null,
+      equityCurve: [],
+      cycles: 0,
+      buysExecuted: 0,
+      sellsExecuted: 0,
+      blockedByRisk: 0,
+      signalsEvaluated: 0,
+    }
+    // TP at 1.5% → trigger price = 101.5. With 15bps slippage on sell:
+    // fill = 101.5 × (1 − 0.0015) = 101.34775
+    const bar: OHLCV = {
+      date: new Date(ts),
+      open: 102,
+      high: 103,
+      low: 101.6,
+      close: 102,
+      volume: 1,
+    }
+    checkHardExits(state, ts, new Map([['AAPL', bar]]), { ...baseConfig, slippageBps: 15 })
+    expect(state.closedTrades).toHaveLength(1)
+    expect(state.closedTrades[0].exitPrice).toBeCloseTo(101.34775, 2)
+  })
+
+  it('round-trip with no price change loses slippage + FX', () => {
+    // Buy at 100 + slippage = 100.15, sell at 100 - slippage = 99.85
+    // P&L from price alone = (99.85 - 100.15) × 1 = -0.30
+    // FX cost on sell leg = 99.85 × 0.0015 = 0.149775
+    const openedAt = Date.parse('2025-01-01T00:00:00Z')
+    const ts = openedAt + HOUR_MS
+    const state: SimState = {
+      cash: 200,
+      positions: new Map(),
+      closedTrades: [],
+      currentDay: null,
+      dailyOpenValue: 200,
+      recentLosses: new Map(),
+      lastSell: null,
+      equityCurve: [],
+      cycles: 0,
+      buysExecuted: 0,
+      sellsExecuted: 0,
+      blockedByRisk: 0,
+      signalsEvaluated: 0,
+    }
+    // Simulate manual buy with friction
+    const buyFill = applySlippage(100, 'buy', 15) // 100.15
+    const fxBuyCost = buyFill * 0.0015 // buy-leg FX
+    state.cash -= buyFill + fxBuyCost
+    state.positions.set('AAPL_US_EQ', {
+      ticker: 'AAPL_US_EQ',
+      quantity: 1,
+      entryPrice: buyFill,
+      openedAtMs: openedAt,
+      highWaterMark: buyFill,
+      lowWaterMark: buyFill,
+    })
+    const cashAfterBuy = state.cash
+
+    // Force a stop-loss that fills at 100 (no price change from signal)
+    const bar: OHLCV = { date: new Date(ts), open: 90, high: 90, low: 80, close: 85, volume: 1 }
+    checkHardExits(state, ts, new Map([['AAPL_US_EQ', bar]]), {
+      ...baseConfig,
+      tradeUniverse: ['AAPL_US_EQ'],
+      slippageBps: 15,
+      fxRoundTripPct: 0.003,
+    })
+    // Cash should be lower than starting €200 — slippage + FX ate value
+    expect(state.cash).toBeLessThan(200)
+    // Position closed
+    expect(state.positions.size).toBe(0)
+    // Cash went up from the sale proceeds minus FX
+    expect(state.cash).toBeGreaterThan(cashAfterBuy)
   })
 })

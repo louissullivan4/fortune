@@ -26,6 +26,7 @@ export interface BacktestRow {
   startedAt: string | null
   completedAt: string | null
   market: string
+  variantOf: number | null
 }
 
 interface RawRow {
@@ -51,6 +52,7 @@ interface RawRow {
   started_at: string | Date | null
   completed_at: string | Date | null
   market_code: string
+  variant_of: number | null
 }
 
 function asIsoDate(v: string | Date): string {
@@ -90,6 +92,7 @@ function fromRow(r: RawRow): BacktestRow {
     startedAt: asIso(r.started_at),
     completedAt: asIso(r.completed_at),
     market: r.market_code,
+    variantOf: r.variant_of ?? null,
   }
 }
 
@@ -97,14 +100,14 @@ const LIST_COLUMNS = `
   id, user_id, name, status, progress_pct, config_json, start_date, end_date,
   initial_cash, final_value, realized_pnl, total_return_pct, max_drawdown_pct,
   win_rate, trades_count, sharpe, error_message, created_at, started_at,
-  completed_at, market_code, NULL::jsonb AS metrics_json
+  completed_at, market_code, NULL::jsonb AS metrics_json, variant_of
 `
 
 const FULL_COLUMNS = `
   id, user_id, name, status, progress_pct, config_json, start_date, end_date,
   initial_cash, final_value, realized_pnl, total_return_pct, max_drawdown_pct,
   win_rate, trades_count, sharpe, error_message, created_at, started_at,
-  completed_at, market_code, metrics_json
+  completed_at, market_code, metrics_json, variant_of
 `
 
 export async function createBacktest(userId: string, config: BacktestConfig): Promise<BacktestRow> {
@@ -124,6 +127,39 @@ export async function createBacktest(userId: string, config: BacktestConfig): Pr
     ]
   )
   return fromRow(result.rows[0])
+}
+
+export async function createBacktestVariant(
+  userId: string,
+  config: BacktestConfig,
+  variantOf: number
+): Promise<BacktestRow> {
+  const pool = getPool()
+  const result = await pool.query<RawRow>(
+    `INSERT INTO backtests (user_id, name, status, config_json, start_date, end_date, initial_cash, market_code, variant_of)
+     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8)
+     RETURNING ${FULL_COLUMNS}`,
+    [
+      userId,
+      config.name + ' (variant B)',
+      JSON.stringify(config),
+      config.startDate,
+      config.endDate,
+      config.initialCash,
+      config.market,
+      variantOf,
+    ]
+  )
+  return fromRow(result.rows[0])
+}
+
+export async function getVariantOf(parentId: number, userId: string): Promise<BacktestRow | null> {
+  const pool = getPool()
+  const result = await pool.query<RawRow>(
+    `SELECT ${FULL_COLUMNS} FROM backtests WHERE variant_of = $1 AND user_id = $2 LIMIT 1`,
+    [parentId, userId]
+  )
+  return result.rows[0] ? fromRow(result.rows[0]) : null
 }
 
 export async function listBacktests(

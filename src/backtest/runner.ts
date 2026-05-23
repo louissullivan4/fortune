@@ -1,15 +1,27 @@
 import { getAllHistoriesRange } from '../api/marketdata.js'
 import { hub } from '../ws/hub.js'
 import { runBacktest } from './simulator.js'
-import { getBacktest, updateBacktestProgress, completeBacktest, failBacktest } from './journal.js'
+import {
+  getBacktest,
+  updateBacktestProgress,
+  completeBacktest,
+  failBacktest,
+  createBacktestVariant,
+} from './journal.js'
+import type { BacktestConfig } from './types.js'
 
 // Single in-process queue. Backtests are CPU-bound but short — running one at
 // a time per server keeps memory predictable and avoids contention.
-const queue: number[] = []
+interface QueueItem {
+  id: number
+  variantBConfig?: BacktestConfig
+}
+
+const queue: QueueItem[] = []
 let busy = false
 
-export function enqueueBacktest(id: number): void {
-  queue.push(id)
+export function enqueueBacktest(id: number, variantBConfig?: BacktestConfig): void {
+  queue.push({ id, variantBConfig })
   void drain()
 }
 
@@ -18,18 +30,18 @@ async function drain(): Promise<void> {
   busy = true
   try {
     while (queue.length > 0) {
-      const id = queue.shift()!
+      const item = queue.shift()!
       try {
-        await execute(id)
+        await execute(item.id, item.variantBConfig)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[backtest] runner failed for id=${id}: ${msg}`)
+        console.error(`[backtest] runner failed for id=${item.id}: ${msg}`)
         try {
-          await failBacktest(id, msg)
+          await failBacktest(item.id, msg)
         } catch {
           /* already logged */
         }
-        hub.broadcast('backtest_done', { id, status: 'failed', error: msg })
+        hub.broadcast('backtest_done', { id: item.id, status: 'failed', error: msg })
       }
     }
   } finally {
@@ -37,15 +49,12 @@ async function drain(): Promise<void> {
   }
 }
 
-async function execute(id: number): Promise<void> {
-  // Re-read the row inside the runner so the runner is self-contained — caller
-  // only needs to pass the id.
-  const row = await getBacktest(id, await ownerOf(id))
+async function execute(id: number, variantBConfig?: BacktestConfig): Promise<void> {
+  const userId = await ownerOf(id)
+  const row = await getBacktest(id, userId)
   if (!row) throw new Error(`backtest ${id} not found`)
   const config = row.configJson
 
-  // Warm-up: pull an extra 30 days before startDate so signals (which need
-  // ≥50 bars) are valid at the very first cycle.
   const start = new Date(config.startDate + 'T00:00:00Z')
   const end = new Date(config.endDate + 'T23:59:59Z')
   const warmup = new Date(start.getTime() - 30 * 24 * 60 * 60 * 1000)
@@ -53,14 +62,14 @@ async function execute(id: number): Promise<void> {
   await updateBacktestProgress(id, 0)
   hub.broadcast('backtest_progress', { id, progressPct: 0 })
 
-  const histories = await getAllHistoriesRange(config.tradeUniverse, warmup, end, '1h')
+  // Fetch historical data once — shared by both variants
+  const allTickers = new Set([...config.tradeUniverse, ...(variantBConfig?.tradeUniverse ?? [])])
+  const histories = await getAllHistoriesRange([...allTickers], warmup, end, '1h')
 
-  // Fail fast if Yahoo returned empty data for every ticker (commonly a bad
-  // date range or rate limiting)
   const totalBars = [...histories.values()].reduce((s, h) => s + h.bars.length, 0)
   if (totalBars === 0) {
     throw new Error(
-      `No market data returned for any ticker in [${config.tradeUniverse.join(', ')}] over ${config.startDate}..${config.endDate}. Yahoo hourly history is limited to ~730 days.`
+      `No market data returned for any ticker in [${[...allTickers].join(', ')}] over ${config.startDate}..${config.endDate}. Yahoo hourly history is limited to ~730 days.`
     )
   }
 
@@ -74,6 +83,21 @@ async function execute(id: number): Promise<void> {
 
   await completeBacktest(id, metrics)
   hub.broadcast('backtest_done', { id, status: 'completed' })
+
+  // Run variant B on the same data if provided
+  if (variantBConfig) {
+    const variantRow = await createBacktestVariant(userId, variantBConfig, id)
+    await updateBacktestProgress(variantRow.id, 0)
+    hub.broadcast('backtest_progress', { id: variantRow.id, progressPct: 0 })
+
+    const variantMetrics = await runBacktest(variantBConfig, histories, (pct) => {
+      void updateBacktestProgress(variantRow.id, pct).catch(() => {})
+      hub.broadcast('backtest_progress', { id: variantRow.id, progressPct: pct })
+    })
+
+    await completeBacktest(variantRow.id, variantMetrics)
+    hub.broadcast('backtest_done', { id: variantRow.id, status: 'completed' })
+  }
 }
 
 // Small helper — runner doesn't know the owner up front, but it's stored on

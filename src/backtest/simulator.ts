@@ -43,6 +43,11 @@ const HOUR_MS = 60 * 60 * 1000
 const TRAIL_ACTIVATION_PCT = 0.008 // 0.8% above entry → trailing armed
 const TRAIL_STOP_PCT = 0.004 // 0.4% drawdown from HWM → trail-exit
 
+function applySlippage(price: number, side: 'buy' | 'sell', slippageBps: number): number {
+  const factor = slippageBps / 10_000
+  return side === 'buy' ? price * (1 + factor) : price * (1 - factor)
+}
+
 function makeStubT212Client(universe: string[]): Trading212Client {
   const instruments = new Map<string, T212Instrument>(
     universe.map((t) => [
@@ -111,12 +116,14 @@ function closePosition(
   ticker: string,
   exitPrice: number,
   closedAtMs: number,
-  reason: ClosedTrade['exitReason']
+  reason: ClosedTrade['exitReason'],
+  fxRoundTripPct = 0
 ): void {
   const p = state.positions.get(ticker)
   if (!p) return
   const realized = (exitPrice - p.entryPrice) * p.quantity
-  state.cash += p.quantity * exitPrice
+  const fxCost = ticker.includes('_US_') ? p.quantity * exitPrice * (fxRoundTripPct / 2) : 0
+  state.cash += p.quantity * exitPrice - fxCost
   state.closedTrades.push({
     ticker,
     openedAt: new Date(p.openedAtMs).toISOString(),
@@ -144,6 +151,8 @@ function checkHardExits(
   barAtTs: Map<string, OHLCV>,
   config: BacktestConfig
 ): void {
+  const slip = config.slippageBps ?? 0
+  const fxPct = config.fxRoundTripPct ?? 0
   for (const [ticker, p] of [...state.positions]) {
     const bar = barAtTs.get(ticker)
     if (!bar) continue
@@ -151,36 +160,38 @@ function checkHardExits(
     const slPrice = p.entryPrice * (1 - config.stopLossPct)
     const tpPrice = p.entryPrice * (1 + config.takeProfitPct)
 
-    // Intra-bar checks: if SL and TP both triggered in the same bar, take the
-    // worse outcome (SL) — the engine cannot tell which came first intraday.
     if (bar.low <= slPrice) {
-      closePosition(state, ticker, slPrice, ts, 'stop_loss')
+      closePosition(state, ticker, applySlippage(slPrice, 'sell', slip), ts, 'stop_loss', fxPct)
       continue
     }
     if (bar.high >= tpPrice) {
-      closePosition(state, ticker, tpPrice, ts, 'take_profit')
+      closePosition(state, ticker, applySlippage(tpPrice, 'sell', slip), ts, 'take_profit', fxPct)
       continue
     }
 
-    // Trailing stop: update HWM, then if armed and close pulls back enough
     p.highWaterMark = Math.max(p.highWaterMark, bar.high)
     p.lowWaterMark = Math.min(p.lowWaterMark, bar.low)
     const armed = p.highWaterMark >= p.entryPrice * (1 + TRAIL_ACTIVATION_PCT)
     if (armed) {
       const trailLevel = p.highWaterMark * (1 - TRAIL_STOP_PCT)
       if (bar.low <= trailLevel) {
-        closePosition(state, ticker, trailLevel, ts, 'trailing_stop')
+        closePosition(
+          state,
+          ticker,
+          applySlippage(trailLevel, 'sell', slip),
+          ts,
+          'trailing_stop',
+          fxPct
+        )
         continue
       }
     }
 
-    // Soft time-stop — only relevant when trailing has never armed, because
-    // armed positions are managed by the trailing-stop logic above.
     if (config.softStopEnabled && !armed) {
       const minutesHeld = (ts - p.openedAtMs) / 60000
       const softStopPrice = p.entryPrice * (1 - config.softStopDrawdownPct)
       if (minutesHeld >= config.softStopHoldMinutes && bar.close <= softStopPrice) {
-        closePosition(state, ticker, bar.close, ts, 'soft_stop')
+        closePosition(state, ticker, applySlippage(bar.close, 'sell', slip), ts, 'soft_stop', fxPct)
       }
     }
   }
@@ -237,7 +248,7 @@ function computeMetrics(
   const finalTs = state.equityCurve.at(-1)?.t ?? Date.parse(config.endDate)
   for (const [ticker, p] of [...state.positions]) {
     const price = finalPriceMap.get(ticker) ?? p.entryPrice
-    closePosition(state, ticker, price, finalTs, 'end_of_run')
+    closePosition(state, ticker, price, finalTs, 'end_of_run', config.fxRoundTripPct ?? 0)
   }
 
   const finalValue = state.cash
@@ -428,11 +439,15 @@ export async function runBacktest(
       continue
     }
 
-    // 8) Execute at this bar's close (or last known close if no bar at ts)
-    const fillPrice = decision.estimatedPrice
+    // 8) Execute at this bar's close with friction applied
+    const slippageBps = config.slippageBps ?? 0
+    const fxRoundTripPct = config.fxRoundTripPct ?? 0
+    const rawPrice = decision.estimatedPrice
     if (decision.action === 'buy') {
+      const fillPrice = applySlippage(rawPrice, 'buy', slippageBps)
       const costEur = qty * fillPrice
-      state.cash -= costEur
+      const fxCost = decision.ticker.includes('_US_') ? costEur * (fxRoundTripPct / 2) : 0
+      state.cash -= costEur + fxCost
       state.positions.set(decision.ticker, {
         ticker: decision.ticker,
         quantity: qty,
@@ -443,7 +458,8 @@ export async function runBacktest(
       })
       state.buysExecuted++
     } else if (decision.action === 'sell') {
-      closePosition(state, decision.ticker, fillPrice, ts, 'stagnant_rotation')
+      const fillPrice = applySlippage(rawPrice, 'sell', slippageBps)
+      closePosition(state, decision.ticker, fillPrice, ts, 'stagnant_rotation', fxRoundTripPct)
     }
 
     if (cycle % 50 === 0) onProgress(Math.floor((cycle / timestamps.length) * 100))
@@ -454,6 +470,6 @@ export async function runBacktest(
 }
 
 // Re-export for tests / unit use
-export { buildSnapshot, makeStubT212Client, checkHardExits, closePosition }
+export { applySlippage, buildSnapshot, makeStubT212Client, checkHardExits, closePosition }
 export type { SimState, SimPosition }
 export type { PickerDecision, StagnantInfo }

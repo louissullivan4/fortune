@@ -5,6 +5,7 @@ import {
   createBacktest,
   listBacktests,
   getBacktest,
+  getVariantOf,
   deleteBacktest,
 } from '../../backtest/journal.js'
 import { enqueueBacktest } from '../../backtest/runner.js'
@@ -118,7 +119,8 @@ router.get('/:id', async (req, res, next) => {
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid id' })
     const row = await getBacktest(id, req.user!.userId)
     if (!row) return res.status(404).json({ error: 'Backtest not found' })
-    res.json(row)
+    const variant = await getVariantOf(id, req.user!.userId)
+    res.json({ ...row, variant: variant ?? undefined })
   } catch (err) {
     next(err)
   }
@@ -127,10 +129,26 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/backtests
 router.post('/', async (req, res, next) => {
   try {
-    const result = validateConfig(req.body as Partial<BacktestConfig>)
+    const body = req.body as { variantB?: Partial<BacktestConfig> } & Partial<BacktestConfig>
+    const result = validateConfig(body)
     if (!result.ok) return res.status(400).json({ error: result.error })
+
+    let variantBConfig: BacktestConfig | undefined
+    if (body.variantB) {
+      const vResult = validateConfig({
+        ...body.variantB,
+        name: result.cfg.name,
+        startDate: result.cfg.startDate,
+        endDate: result.cfg.endDate,
+        initialCash: result.cfg.initialCash,
+        market: result.cfg.market,
+      })
+      if (!vResult.ok) return res.status(400).json({ error: `variantB: ${vResult.error}` })
+      variantBConfig = vResult.cfg
+    }
+
     const row = await createBacktest(req.user!.userId, result.cfg)
-    enqueueBacktest(row.id)
+    enqueueBacktest(row.id, variantBConfig)
     res.status(201).json(row)
   } catch (err) {
     next(err)

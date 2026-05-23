@@ -127,6 +127,8 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
   const [softStopDrawdownPct, setSoftStopDrawdownPct] = useState(
     prefill?.softStopDrawdownPct ?? 0.05
   )
+  const [slippageBps, setSlippageBps] = useState(prefill?.slippageBps ?? 15)
+  const [fxRoundTripPct, setFxRoundTripPct] = useState(prefill?.fxRoundTripPct ?? 0.003)
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -204,6 +206,8 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
         softStopEnabled,
         softStopHoldMinutes,
         softStopDrawdownPct,
+        slippageBps,
+        fxRoundTripPct,
         autoStartOnRestart: false,
         market,
       }
@@ -520,6 +524,26 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
                 Enabled
               </label>
             </div>
+            <NumField
+              label="Slippage"
+              value={slippageBps}
+              step={5}
+              min={0}
+              max={100}
+              onChange={setSlippageBps}
+              suffix="bps"
+              hint={`${slippageBps} bps per fill (bid-ask proxy)`}
+            />
+            <NumField
+              label="FX round-trip"
+              value={fxRoundTripPct}
+              step={0.001}
+              min={0}
+              max={0.02}
+              onChange={setFxRoundTripPct}
+              suffix="frac"
+              hint={`${(fxRoundTripPct * 100).toFixed(2)}% — T212 FX on USD stocks`}
+            />
           </div>
 
           <div
