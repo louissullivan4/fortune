@@ -58,6 +58,8 @@ interface UserMarketConfigRow {
   soft_stop_enabled: boolean
   soft_stop_hold_minutes: number
   soft_stop_drawdown_pct: number
+  partial_exit_pct: number
+  trail_pullback_after_partial_pct: number
   decision_mode: string
   ai_cost_budget_monthly_usd: number
   auto_start_on_restart: boolean
@@ -81,6 +83,8 @@ function mapUserConfigRow(row: UserMarketConfigRow): UserConfig {
     softStopEnabled: Boolean(row.soft_stop_enabled),
     softStopHoldMinutes: Number(row.soft_stop_hold_minutes),
     softStopDrawdownPct: Number(row.soft_stop_drawdown_pct),
+    partialExitPct: Number(row.partial_exit_pct),
+    trailPullbackAfterPartialPct: Number(row.trail_pullback_after_partial_pct),
     decisionMode: row.decision_mode as 'ai' | 'deterministic' | 'ai_with_fallback',
     aiCostBudgetMonthlyUsd: Number(row.ai_cost_budget_monthly_usd),
     autoStartOnRestart: Boolean(row.auto_start_on_restart),

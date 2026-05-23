@@ -146,6 +146,26 @@ export async function validateOrder(
   return { allowed: true }
 }
 
+/**
+ * Splits a live position quantity into a partial-exit chunk and a remainder.
+ * Returns null when the split would leave either side below `minTradeQty` —
+ * the caller should then fall back to closing the whole position.
+ *
+ * Quantities are rounded down to 0.01 to match T212's fractional-share grid.
+ */
+export function sizePartialExit(args: {
+  liveQty: number
+  partialFraction: number
+  minTradeQty: number
+}): { partialQty: number; remainingQty: number } | null {
+  const { liveQty, partialFraction, minTradeQty } = args
+  if (!(liveQty > 0) || !(partialFraction > 0) || !(partialFraction < 1)) return null
+  const partialQty = Math.floor(liveQty * partialFraction * 100) / 100
+  const remainingQty = Math.round((liveQty - partialQty) * 100) / 100
+  if (partialQty < minTradeQty || remainingQty < minTradeQty) return null
+  return { partialQty, remainingQty }
+}
+
 export function computeBuyQuantity(
   ticker: string,
   estimatedPrice: number,

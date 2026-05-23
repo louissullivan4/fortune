@@ -100,6 +100,20 @@ router.put('/', async (req, res, next) => {
       updates.soft_stop_drawdown_pct = body.softStopDrawdownPct
     }
     if (
+      typeof body.partialExitPct === 'number' &&
+      body.partialExitPct > 0 &&
+      body.partialExitPct <= 1
+    ) {
+      updates.partial_exit_pct = body.partialExitPct
+    }
+    if (
+      typeof body.trailPullbackAfterPartialPct === 'number' &&
+      body.trailPullbackAfterPartialPct > 0 &&
+      body.trailPullbackAfterPartialPct < 1
+    ) {
+      updates.trail_pullback_after_partial_pct = body.trailPullbackAfterPartialPct
+    }
+    if (
       body.decisionMode === 'ai' ||
       body.decisionMode === 'deterministic' ||
       body.decisionMode === 'ai_with_fallback'

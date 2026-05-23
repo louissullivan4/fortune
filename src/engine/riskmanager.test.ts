@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { validateOrder, computeBuyQuantity } from './riskmanager.js'
+import { validateOrder, computeBuyQuantity, sizePartialExit } from './riskmanager.js'
 import type { PortfolioSnapshot, T212Position } from '../api/trading212.js'
 import type { UserConfig } from '../types/user.js'
 
@@ -38,6 +38,8 @@ const BASE_CONFIG: UserConfig = {
   softStopEnabled: false,
   softStopHoldMinutes: 360,
   softStopDrawdownPct: 0.025,
+  partialExitPct: 0.5,
+  trailPullbackAfterPartialPct: 0.003,
   decisionMode: 'ai',
   aiCostBudgetMonthlyUsd: 5,
   autoStartOnRestart: false,
@@ -432,5 +434,53 @@ describe('computeBuyQuantity', () => {
     // In native currency: 25 / 0.85 ≈ 29.41 USD. qty = floor(29.41/10 * 100)/100 = 2.94.
     const qty = computeBuyQuantity('AAPL', 10, makeSnapshot(), BASE_CONFIG, 0.01, 0.5, 0.85)
     expect(qty).toBe(2.94)
+  })
+})
+
+describe('sizePartialExit', () => {
+  it('splits the live qty into the configured fraction and a remainder', () => {
+    expect(sizePartialExit({ liveQty: 1, partialFraction: 0.5, minTradeQty: 0.01 })).toEqual({
+      partialQty: 0.5,
+      remainingQty: 0.5,
+    })
+  })
+
+  it('rounds the partial chunk down to the 0.01 grid', () => {
+    // 0.37 × 0.5 = 0.185 → floor at 2dp = 0.18; remainder = 0.19
+    expect(sizePartialExit({ liveQty: 0.37, partialFraction: 0.5, minTradeQty: 0.01 })).toEqual({
+      partialQty: 0.18,
+      remainingQty: 0.19,
+    })
+  })
+
+  it('returns null when the partial chunk would be below minTradeQty', () => {
+    // 0.02 × 0.5 = 0.01 exactly meets minQty, remainder 0.01 too — should pass
+    expect(sizePartialExit({ liveQty: 0.02, partialFraction: 0.5, minTradeQty: 0.01 })).toEqual({
+      partialQty: 0.01,
+      remainingQty: 0.01,
+    })
+    // 0.01 × 0.5 = 0.005 → floor = 0 < minQty → null
+    expect(sizePartialExit({ liveQty: 0.01, partialFraction: 0.5, minTradeQty: 0.01 })).toBeNull()
+  })
+
+  it('returns null when the remainder would be below minTradeQty', () => {
+    // 0.10 × 0.99 = 0.099 → floor = 0.09; remainder 0.01 → ok
+    expect(sizePartialExit({ liveQty: 0.1, partialFraction: 0.99, minTradeQty: 0.01 })).toEqual({
+      partialQty: 0.09,
+      remainingQty: 0.01,
+    })
+    // Bump minQty to 0.02 → remainder 0.01 < minQty → null
+    expect(sizePartialExit({ liveQty: 0.1, partialFraction: 0.99, minTradeQty: 0.02 })).toBeNull()
+  })
+
+  it('returns null for partialFraction at or above 1 — caller should do full close', () => {
+    expect(sizePartialExit({ liveQty: 5, partialFraction: 1, minTradeQty: 0.01 })).toBeNull()
+    expect(sizePartialExit({ liveQty: 5, partialFraction: 1.5, minTradeQty: 0.01 })).toBeNull()
+  })
+
+  it('returns null for non-positive inputs', () => {
+    expect(sizePartialExit({ liveQty: 0, partialFraction: 0.5, minTradeQty: 0.01 })).toBeNull()
+    expect(sizePartialExit({ liveQty: 5, partialFraction: 0, minTradeQty: 0.01 })).toBeNull()
+    expect(sizePartialExit({ liveQty: -1, partialFraction: 0.5, minTradeQty: 0.01 })).toBeNull()
   })
 })

@@ -25,6 +25,10 @@ const baseConfig: BacktestConfig = {
   softStopEnabled: false,
   softStopHoldMinutes: 360,
   softStopDrawdownPct: 0.025,
+  // Backtest doesn't model partial exits yet (Feature 3); 1.0 = full close at TP,
+  // matches pre-020 behaviour and keeps existing simulator assertions valid.
+  partialExitPct: 1,
+  trailPullbackAfterPartialPct: 0.003,
   decisionMode: 'ai',
   aiCostBudgetMonthlyUsd: 5,
   autoStartOnRestart: false,

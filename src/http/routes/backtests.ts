@@ -81,6 +81,10 @@ function validateConfig(
     softStopEnabled: body.softStopEnabled ?? true,
     softStopHoldMinutes: body.softStopHoldMinutes!,
     softStopDrawdownPct: body.softStopDrawdownPct!,
+    // Partial-exit not yet modelled in the simulator (Feature 3). Default to
+    // full close at take-profit so backtests retain pre-020 semantics.
+    partialExitPct: body.partialExitPct ?? 1,
+    trailPullbackAfterPartialPct: body.trailPullbackAfterPartialPct ?? 0.003,
     market,
     // Backtests always run the shared deterministic picker; these fields are
     // captured in the config snapshot for parity but ignored by the simulator.

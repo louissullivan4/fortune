@@ -21,6 +21,15 @@ export interface UserConfig {
   softStopHoldMinutes: number
   softStopDrawdownPct: number
   /**
+   * Staged take-profit. When pctFromEntry first reaches takeProfitPct, sell
+   * `partialExitPct` of the live position; the remainder stays open with the
+   * trailing-stop tightened to `trailPullbackAfterPartialPct` and the stop
+   * moved to breakeven. Setting partialExitPct=1.0 reproduces the pre-020
+   * binary take-profit.
+   */
+  partialExitPct: number
+  trailPullbackAfterPartialPct: number
+  /**
    * 'ai'              — call Claude every cycle (current behaviour).
    * 'deterministic'   — skip Claude entirely; use the shared rules picker.
    * 'ai_with_fallback' — try Claude; on error or MTD-budget exceeded, fall
@@ -52,6 +61,8 @@ export const DEFAULT_USER_CONFIG: UserConfig = {
   softStopEnabled: true,
   softStopHoldMinutes: 1440,
   softStopDrawdownPct: 0.05,
+  partialExitPct: 0.5,
+  trailPullbackAfterPartialPct: 0.003,
   decisionMode: 'ai',
   aiCostBudgetMonthlyUsd: 5,
   autoStartOnRestart: false,

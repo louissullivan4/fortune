@@ -254,6 +254,11 @@ export interface AiPosition {
   currencyCode: string | null
   market: string
   status: 'open' | 'closed'
+  /** Set when a staged take-profit has fired against this position. */
+  partialExitQty: number | null
+  partialExitPrice: number | null
+  partialExitPriceEur: number | null
+  partialExitAt: string | null
 }
 
 function mapAiPosition(r: {
@@ -272,6 +277,10 @@ function mapAiPosition(r: {
   currency_code?: string | null
   market_code?: string | null
   status: string
+  partial_exit_qty?: number | null
+  partial_exit_price?: number | null
+  partial_exit_price_eur?: number | null
+  partial_exit_at?: string | null
 }): AiPosition {
   return {
     id: r.id,
@@ -289,6 +298,10 @@ function mapAiPosition(r: {
     currencyCode: r.currency_code ?? null,
     market: r.market_code ?? 'NYSE',
     status: r.status as 'open' | 'closed',
+    partialExitQty: r.partial_exit_qty != null ? Number(r.partial_exit_qty) : null,
+    partialExitPrice: r.partial_exit_price != null ? Number(r.partial_exit_price) : null,
+    partialExitPriceEur: r.partial_exit_price_eur != null ? Number(r.partial_exit_price_eur) : null,
+    partialExitAt: r.partial_exit_at ?? null,
   }
 }
 
@@ -338,6 +351,26 @@ export async function updateHighWaterMark(
   )
 }
 
+/**
+ * Realized P&L when the position closed in one shot, OR across one partial
+ * scale-out followed by a final exit. The DB column `quantity` is always the
+ * original opened amount; `partial_exit_qty` captures the chunk sold early.
+ */
+export function computeStagedPnl(
+  entry: number | null,
+  exit: number | null,
+  qty: number,
+  partialQty: number | null,
+  partialPrice: number | null
+): number | null {
+  if (entry == null || exit == null) return null
+  if (partialQty != null && partialQty > 0 && partialPrice != null) {
+    const remaining = qty - partialQty
+    return partialQty * (partialPrice - entry) + remaining * (exit - entry)
+  }
+  return qty * (exit - entry)
+}
+
 export async function closeAiPosition(
   ticker: string,
   exitPrice: number | null,
@@ -352,8 +385,13 @@ export async function closeAiPosition(
     quantity: number
     entry_price: number | null
     entry_price_eur: number | null
+    partial_exit_qty: number | null
+    partial_exit_price: number | null
+    partial_exit_price_eur: number | null
   }>(
-    `SELECT id, quantity, entry_price, entry_price_eur FROM ai_positions
+    `SELECT id, quantity, entry_price, entry_price_eur,
+            partial_exit_qty, partial_exit_price, partial_exit_price_eur
+       FROM ai_positions
      WHERE ticker = $1 AND status = 'open' AND user_id = $2 AND market_code = $3
      ORDER BY opened_at DESC LIMIT 1`,
     [ticker, userId, market]
@@ -361,14 +399,20 @@ export async function closeAiPosition(
   const open = res.rows[0]
   if (!open) return
 
-  const realizedPnl =
-    exitPrice != null && open.entry_price != null
-      ? (exitPrice - Number(open.entry_price)) * Number(open.quantity)
-      : null
-  const realizedPnlEur =
-    exitPriceEur != null && open.entry_price_eur != null
-      ? (exitPriceEur - Number(open.entry_price_eur)) * Number(open.quantity)
-      : null
+  const realizedPnl = computeStagedPnl(
+    open.entry_price != null ? Number(open.entry_price) : null,
+    exitPrice,
+    Number(open.quantity),
+    open.partial_exit_qty != null ? Number(open.partial_exit_qty) : null,
+    open.partial_exit_price != null ? Number(open.partial_exit_price) : null
+  )
+  const realizedPnlEur = computeStagedPnl(
+    open.entry_price_eur != null ? Number(open.entry_price_eur) : null,
+    exitPriceEur,
+    Number(open.quantity),
+    open.partial_exit_qty != null ? Number(open.partial_exit_qty) : null,
+    open.partial_exit_price_eur != null ? Number(open.partial_exit_price_eur) : null
+  )
 
   await pool.query(
     `UPDATE ai_positions
@@ -394,20 +438,31 @@ export async function closeAllAiPositions(
     quantity: number
     entry_price: number | null
     entry_price_eur: number | null
+    partial_exit_qty: number | null
+    partial_exit_price: number | null
+    partial_exit_price_eur: number | null
   }>(
-    `SELECT id, quantity, entry_price, entry_price_eur FROM ai_positions
+    `SELECT id, quantity, entry_price, entry_price_eur,
+            partial_exit_qty, partial_exit_price, partial_exit_price_eur
+       FROM ai_positions
      WHERE ticker = $1 AND status = 'open' AND user_id = $2 AND market_code = $3`,
     [ticker, userId, market]
   )
   for (const open of res.rows) {
-    const realizedPnl =
-      exitPrice != null && open.entry_price != null
-        ? (exitPrice - Number(open.entry_price)) * Number(open.quantity)
-        : null
-    const realizedPnlEur =
-      exitPriceEur != null && open.entry_price_eur != null
-        ? (exitPriceEur - Number(open.entry_price_eur)) * Number(open.quantity)
-        : null
+    const realizedPnl = computeStagedPnl(
+      open.entry_price != null ? Number(open.entry_price) : null,
+      exitPrice,
+      Number(open.quantity),
+      open.partial_exit_qty != null ? Number(open.partial_exit_qty) : null,
+      open.partial_exit_price != null ? Number(open.partial_exit_price) : null
+    )
+    const realizedPnlEur = computeStagedPnl(
+      open.entry_price_eur != null ? Number(open.entry_price_eur) : null,
+      exitPriceEur,
+      Number(open.quantity),
+      open.partial_exit_qty != null ? Number(open.partial_exit_qty) : null,
+      open.partial_exit_price_eur != null ? Number(open.partial_exit_price_eur) : null
+    )
     await pool.query(
       `UPDATE ai_positions
        SET status = 'closed', closed_at = $1,
@@ -417,6 +472,39 @@ export async function closeAllAiPositions(
       [closedAt, exitPrice, exitPriceEur, realizedPnl, realizedPnlEur, open.id]
     )
   }
+}
+
+/**
+ * Records a staged take-profit fill against an open position. The position
+ * stays open (with reduced live quantity at the broker) and the trailing
+ * stop on the remainder is tightened by the engine in subsequent cycles.
+ *
+ * Only the most recently opened row for the ticker is marked, mirroring
+ * the close-path's ORDER BY opened_at DESC LIMIT 1 selection.
+ */
+export async function markPartialExit(
+  ticker: string,
+  partialQty: number,
+  partialPrice: number,
+  partialPriceEur: number | null,
+  at: string,
+  userId: string,
+  market: string
+): Promise<void> {
+  const pool = getPool()
+  await pool.query(
+    `UPDATE ai_positions
+     SET partial_exit_qty = $1,
+         partial_exit_price = $2,
+         partial_exit_price_eur = $3,
+         partial_exit_at = $4
+     WHERE id = (
+       SELECT id FROM ai_positions
+       WHERE ticker = $5 AND status = 'open' AND user_id = $6 AND market_code = $7
+       ORDER BY opened_at DESC LIMIT 1
+     )`,
+    [partialQty, partialPrice, partialPriceEur, at, ticker, userId, market]
+  )
 }
 
 export async function updateEntryPrice(
@@ -614,6 +702,8 @@ export async function getClosedAiPositionsWithOrders(
        ap.exit_price, ap.exit_price_eur,
        ap.realized_pnl, ap.realized_pnl_eur,
        ap.currency_code, ap.market_code, ap.status,
+       ap.partial_exit_qty, ap.partial_exit_price,
+       ap.partial_exit_price_eur, ap.partial_exit_at,
        buy_o.t212_order_id  AS buy_t212_id,
        sell_o.t212_order_id AS sell_t212_id
      FROM ai_positions ap
@@ -651,6 +741,10 @@ export async function getClosedAiPositionsWithOrders(
       currency_code: r.currency_code,
       market_code: r.market_code,
       status: r.status,
+      partial_exit_qty: r.partial_exit_qty,
+      partial_exit_price: r.partial_exit_price,
+      partial_exit_price_eur: r.partial_exit_price_eur,
+      partial_exit_at: r.partial_exit_at,
     }),
     buyT212OrderId: r.buy_t212_id ?? null,
     sellT212OrderId: r.sell_t212_id ?? null,

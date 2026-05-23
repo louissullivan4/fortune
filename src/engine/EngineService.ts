@@ -1,11 +1,12 @@
 import { isMarketOpenSpec, nextOpenMsSpec, tradingDateStr } from './scheduler.js'
 import { decide, type TradeDecision } from './brain.js'
-import { validateOrder, TICKER_BLOCK_LOOKBACK_DAYS } from './riskmanager.js'
+import { sizePartialExit, validateOrder, TICKER_BLOCK_LOOKBACK_DAYS } from './riskmanager.js'
 import {
   reconcileAiPositions,
   getOpenAiPositions,
   closeAiPosition,
   closeAllAiPositions,
+  markPartialExit,
   openAiPosition,
   updateHighWaterMark,
   updateEntryPrice,
@@ -367,6 +368,7 @@ export class EngineService {
 
     let exitsPlaced = 0
     const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId, this.market)
+    const instruments = await this.t212.getInstruments()
 
     const seenTickers = new Set<string>()
     for (const pos of openPositions) {
@@ -383,19 +385,30 @@ export class EngineService {
 
       const pctFromEntry = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
       const pctFromPeak = ((currentPrice - hwm) / hwm) * 100
+      // Once a partial take-profit has fired, the stop moves to breakeven and
+      // the trail tightens — half the win is already realized, so the
+      // remainder should exit quickly on any momentum loss.
+      const hasPartial = pos.partialExitAt != null
 
       const stopLossPct = this.userConfig.stopLossPct * 100
       const takeProfitPct = this.userConfig.takeProfitPct * 100
-      const isStopLoss = pctFromEntry <= -stopLossPct
-      const isTakeProfit = pctFromEntry >= takeProfitPct
+      const partialExitPct = Math.max(0, Math.min(1, this.userConfig.partialExitPct))
+      const trailPullbackPct = hasPartial
+        ? this.userConfig.trailPullbackAfterPartialPct * 100
+        : TRAIL_STOP_PCT
+
+      const isStopLoss = hasPartial ? pctFromEntry < 0 : pctFromEntry <= -stopLossPct
+      const isTakeProfit = !hasPartial && pctFromEntry >= takeProfitPct
       const trailActivated =
+        hasPartial ||
         pctFromEntry >= TRAIL_ACTIVATION_PCT ||
         (pos.highWaterMark ?? 0) >= pos.entryPrice * (1 + TRAIL_ACTIVATION_PCT / 100)
-      const isTrailingStop = trailActivated && pctFromPeak <= -TRAIL_STOP_PCT
+      const isTrailingStop = trailActivated && pctFromPeak <= -trailPullbackPct
 
       const minutesHeldSoft = (Date.now() - new Date(pos.openedAt).getTime()) / 60_000
       const softStopThresholdPct = this.userConfig.softStopDrawdownPct * 100
       const isSoftStop =
+        !hasPartial &&
         this.userConfig.softStopEnabled &&
         !trailActivated &&
         minutesHeldSoft >= this.userConfig.softStopHoldMinutes &&
@@ -403,17 +416,36 @@ export class EngineService {
 
       if (!isStopLoss && !isTakeProfit && !isTrailingStop && !isSoftStop) continue
 
-      const reason = isStopLoss
-        ? `Stop-loss: down ${Math.abs(pctFromEntry).toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)}`
-        : isTakeProfit
-          ? `Take-profit: up ${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)} (target: ${takeProfitPct.toFixed(1)}%)`
-          : isTrailingStop
-            ? `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak ${hwm.toFixed(2)} (entry ${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
-            : `Soft stop: ${Math.abs(pctFromEntry).toFixed(2)}% down after ${Math.round(minutesHeldSoft)}min without arming trailing (threshold ${softStopThresholdPct.toFixed(1)}% / ${this.userConfig.softStopHoldMinutes}min)`
+      // Decide whether this is a partial scale-out or a full close.
+      const minQty = instruments.get(pos.ticker)?.minTradeQuantity ?? 0.01
+      const split =
+        isTakeProfit && partialExitPct < 1
+          ? sizePartialExit({
+              liveQty: live.quantity,
+              partialFraction: partialExitPct,
+              minTradeQty: minQty,
+            })
+          : null
+      const mode: 'partial' | 'full' = split ? 'partial' : 'full'
+      const sellQty = split ? split.partialQty : live.quantity
 
-      console.log(`${tag} Hard exit — ${pos.ticker}: ${reason}`)
+      const reason =
+        mode === 'partial'
+          ? `Partial take-profit: scaling out ${(partialExitPct * 100).toFixed(0)}% (${sellQty}) at +${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)} — trailing stop tightens on remaining ${split!.remainingQty}`
+          : isStopLoss
+            ? hasPartial
+              ? `Breakeven stop after partial: ${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)}`
+              : `Stop-loss: down ${Math.abs(pctFromEntry).toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)}`
+            : isTakeProfit
+              ? `Take-profit: up ${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)} (target: ${takeProfitPct.toFixed(1)}%)`
+              : isTrailingStop
+                ? `Trailing stop${hasPartial ? ' (tightened after partial)' : ''}: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak ${hwm.toFixed(2)} (entry ${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
+                : `Soft stop: ${Math.abs(pctFromEntry).toFixed(2)}% down after ${Math.round(minutesHeldSoft)}min without arming trailing (threshold ${softStopThresholdPct.toFixed(1)}% / ${this.userConfig.softStopHoldMinutes}min)`
 
-      const sellQty = live.quantity
+      console.log(
+        `${tag} ${mode === 'partial' ? 'Partial' : 'Hard'} exit — ${pos.ticker}: ${reason}`
+      )
+
       const risk = await validateOrder(
         {
           action: 'sell',
@@ -446,15 +478,27 @@ export class EngineService {
 
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
-        await closeAllAiPositions(
-          pos.ticker,
-          currentPrice,
-          timestamp,
-          this.userId,
-          this.market,
-          currentPriceEur
-        )
-        this._recordTickerClose(pos.ticker)
+        if (mode === 'partial') {
+          await markPartialExit(
+            pos.ticker,
+            sellQty,
+            currentPrice,
+            currentPriceEur,
+            timestamp,
+            this.userId,
+            this.market
+          )
+        } else {
+          await closeAllAiPositions(
+            pos.ticker,
+            currentPrice,
+            timestamp,
+            this.userId,
+            this.market,
+            currentPriceEur
+          )
+          this._recordTickerClose(pos.ticker)
+        }
         this.t212.invalidatePortfolioCache()
         this.t212.invalidateOrderHistoryCache()
         await logOrder({

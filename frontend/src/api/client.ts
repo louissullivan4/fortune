@@ -439,6 +439,8 @@ export interface Config {
   softStopEnabled: boolean
   softStopHoldMinutes: number
   softStopDrawdownPct: number
+  partialExitPct: number
+  trailPullbackAfterPartialPct: number
   decisionMode: DecisionMode
   aiCostBudgetMonthlyUsd: number
   autoStartOnRestart: boolean
@@ -474,6 +476,8 @@ export interface BacktestConfig {
   softStopEnabled: boolean
   softStopHoldMinutes: number
   softStopDrawdownPct: number
+  partialExitPct?: number
+  trailPullbackAfterPartialPct?: number
   autoStartOnRestart: boolean
   market?: MarketCode
 }

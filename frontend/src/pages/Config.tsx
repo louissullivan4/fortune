@@ -1063,6 +1063,43 @@ export default function ConfigPage() {
               </div>
 
               <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <div className="section-label">staged take-profit</div>
+                  <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+                    scale out at the take-profit, ride the rest on a tightened trail
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <SliderField
+                    label="Sell at take-profit"
+                    value={draft.partialExitPct}
+                    displayValue={
+                      draft.partialExitPct >= 1
+                        ? '100% (full close)'
+                        : `${pct(draft.partialExitPct, 0)} now, ${pct(1 - draft.partialExitPct, 0)} on trail`
+                    }
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    minLabel="10%"
+                    maxLabel="100%"
+                    onChange={(v) => setDraft({ ...draft, partialExitPct: v })}
+                  />
+                  <SliderField
+                    label="Trail pullback after partial"
+                    value={draft.trailPullbackAfterPartialPct}
+                    displayValue={pct(draft.trailPullbackAfterPartialPct, 2)}
+                    min={0.001}
+                    max={0.02}
+                    step={0.0005}
+                    minLabel="0.1%"
+                    maxLabel="2%"
+                    onChange={(v) => setDraft({ ...draft, trailPullbackAfterPartialPct: v })}
+                  />
+                </div>
+              </div>
+
+              <div style={{ borderTop: '0.5px solid var(--color-border)', paddingTop: 20 }}>
                 <div
                   style={{
                     display: 'flex',
