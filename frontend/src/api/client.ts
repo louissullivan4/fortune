@@ -702,6 +702,9 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(params),
       }),
+    getReset: () => req<{ resetAt: string | null }>('/analytics/reset'),
+    setReset: () => req<{ resetAt: string }>('/analytics/reset', { method: 'POST' }),
+    clearReset: () => req<{ resetAt: null }>('/analytics/reset', { method: 'DELETE' }),
   },
 
   config: {

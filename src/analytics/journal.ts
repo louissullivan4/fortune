@@ -72,12 +72,24 @@ export async function logOrder(record: Omit<OrderRecord, 'id'>): Promise<number>
   return result.rows[0].id
 }
 
-// ── Helper: build optional market WHERE clause ─────────────────────────────
-// For read queries that accept an optional market filter: pass `market` to
-// scope to a single market, or undefined to span all markets.
-function marketClause(market: string | undefined, paramIndex: number, prefix = ''): string {
-  if (market === undefined) return ''
-  return ` AND ${prefix}market_code = $${paramIndex}`
+// ── Helper: user-controlled analytics cutoff ───────────────────────────────
+// Per-user soft cutoff. UI analytics queries respect it so a user can hide
+// pre-reset history from their own view. Trading-logic queries (e.g. circuit
+// breaker loss counts, MTD AI cost) must NOT use this — they always see real
+// history. Returns the cutoff as an ISO string, or null when unset.
+export async function getAnalyticsResetAt(userId: string): Promise<string | null> {
+  const pool = getPool()
+  const res = await pool.query<{ reset: string | null }>(
+    `SELECT analytics_reset_at AS reset FROM users WHERE user_id = $1`,
+    [userId]
+  )
+  const v = res.rows[0]?.reset
+  return v ? new Date(v).toISOString() : null
+}
+
+export async function setAnalyticsResetAt(userId: string, at: Date | null): Promise<void> {
+  const pool = getPool()
+  await pool.query(`UPDATE users SET analytics_reset_at = $1 WHERE user_id = $2`, [at, userId])
 }
 
 // ── Daily snapshots ────────────────────────────────────────────────────────
@@ -474,7 +486,12 @@ export async function getClosedAiPositions(userId: string, market?: string): Pro
   let sql = `SELECT * FROM ai_positions WHERE status = 'closed' AND user_id = $1`
   if (market !== undefined) {
     params.push(market)
-    sql += ` AND market_code = $2`
+    sql += ` AND market_code = $${params.length}`
+  }
+  const reset = await getAnalyticsResetAt(userId)
+  if (reset) {
+    params.push(reset)
+    sql += ` AND closed_at >= $${params.length}`
   }
   sql += ` ORDER BY closed_at DESC`
   const res = await pool.query(sql, params)
@@ -582,6 +599,11 @@ export async function getClosedAiPositionsWithOrders(
   if (market !== undefined) {
     params.push(market)
     conditions.push(`ap.market_code = $${params.length}`)
+  }
+  const reset = await getAnalyticsResetAt(userId)
+  if (reset) {
+    params.push(reset)
+    conditions.push(`ap.closed_at >= $${params.length}`)
   }
 
   const res = await pool.query(
@@ -712,19 +734,31 @@ export async function getAllTimeStats(
   market?: string
 ): Promise<{ totalDecisions: number; totalTrades: number; daysTraded: number }> {
   const pool = getPool()
-  const mc = marketClause(market, 2)
-  const params: unknown[] = market !== undefined ? [userId, market] : [userId]
+  const params: unknown[] = [userId]
+  let mc = ''
+  if (market !== undefined) {
+    params.push(market)
+    mc = ` AND market_code = $${params.length}`
+  }
+  const reset = await getAnalyticsResetAt(userId)
+  let tsClause = ''
+  let dateClause = ''
+  if (reset) {
+    params.push(reset)
+    tsClause = ` AND timestamp >= $${params.length}`
+    dateClause = ` AND date >= ($${params.length})::date`
+  }
   const [d, t, s] = await Promise.all([
     pool.query<{ c: string }>(
-      `SELECT COUNT(*) AS c FROM decisions WHERE user_id = $1${mc}`,
+      `SELECT COUNT(*) AS c FROM decisions WHERE user_id = $1${mc}${tsClause}`,
       params
     ),
     pool.query<{ c: string }>(
-      `SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND user_id = $1${mc}`,
+      `SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND user_id = $1${mc}${tsClause}`,
       params
     ),
     pool.query<{ c: string }>(
-      `SELECT COUNT(*) AS c FROM daily_snapshots WHERE user_id = $1${mc}`,
+      `SELECT COUNT(*) AS c FROM daily_snapshots WHERE user_id = $1${mc}${dateClause}`,
       params
     ),
   ])
@@ -741,29 +775,44 @@ export async function getDailyValues(
   market?: string
 ): Promise<Array<{ date: string; value: number }>> {
   const pool = getPool()
+  const reset = await getAnalyticsResetAt(userId)
   // When market is omitted, sum per date across all markets so the equity
   // curve shows the combined EUR value the user holds.
   if (market === undefined) {
+    const params: unknown[] = [userId]
+    let resetClause = ''
+    if (reset) {
+      params.push(reset)
+      resetClause = ` AND date >= ($${params.length})::date`
+    }
+    params.push(limit)
     const res = await pool.query<{ date: string; value: number }>(
       `SELECT date,
          SUM(COALESCE(ai_close_value, ai_open_value, close_value, open_value)) AS value
        FROM daily_snapshots
-       WHERE user_id = $1
+       WHERE user_id = $1${resetClause}
        GROUP BY date
        ORDER BY date DESC
-       LIMIT $2`,
-      [userId, limit]
+       LIMIT $${params.length}`,
+      params
     )
     return res.rows.reverse().map((r) => ({ date: r.date, value: Number(r.value) }))
   }
+  const params: unknown[] = [userId, market]
+  let resetClause = ''
+  if (reset) {
+    params.push(reset)
+    resetClause = ` AND date >= ($${params.length})::date`
+  }
+  params.push(limit)
   const res = await pool.query<{ date: string; value: number }>(
     `SELECT date,
        COALESCE(ai_close_value, ai_open_value, close_value, open_value) AS value
      FROM daily_snapshots
-     WHERE user_id = $1 AND market_code = $2
+     WHERE user_id = $1 AND market_code = $2${resetClause}
      ORDER BY date DESC
-     LIMIT $3`,
-    [userId, market, limit]
+     LIMIT $${params.length}`,
+    params
   )
   return res.rows.reverse().map((r) => ({ date: r.date, value: Number(r.value) }))
 }
@@ -774,12 +823,22 @@ export async function getIntradayValues(
   market?: string
 ): Promise<Array<{ timestamp: string; value: number }>> {
   const pool = getPool()
-  const mc = marketClause(market, 3)
-  const params: unknown[] = market !== undefined ? [userId, hours, market] : [userId, hours]
+  const params: unknown[] = [userId, hours]
+  let mc = ''
+  if (market !== undefined) {
+    params.push(market)
+    mc = ` AND market_code = $${params.length}`
+  }
+  const reset = await getAnalyticsResetAt(userId)
+  let resetClause = ''
+  if (reset) {
+    params.push(reset)
+    resetClause = ` AND timestamp >= $${params.length}`
+  }
   const res = await pool.query<{ timestamp: string; portfolio_json: string }>(
     `SELECT timestamp, portfolio_json
      FROM decisions
-     WHERE user_id = $1 AND timestamp::timestamptz >= NOW() - ($2 || ' hours')::interval${mc}
+     WHERE user_id = $1 AND timestamp::timestamptz >= NOW() - ($2 || ' hours')::interval${mc}${resetClause}
      ORDER BY timestamp ASC`,
     params
   )
@@ -1050,8 +1109,18 @@ export interface AiUsageSummary {
 
 export async function getAiUsageSummary(userId: string, market?: string): Promise<AiUsageSummary> {
   const pool = getPool()
-  const mc = marketClause(market, 2)
-  const params: unknown[] = market !== undefined ? [userId, market] : [userId]
+  const params: unknown[] = [userId]
+  let mc = ''
+  if (market !== undefined) {
+    params.push(market)
+    mc = ` AND market_code = $${params.length}`
+  }
+  const reset = await getAnalyticsResetAt(userId)
+  let resetClause = ''
+  if (reset) {
+    params.push(reset)
+    resetClause = ` AND timestamp >= $${params.length}`
+  }
   const res = await pool.query<{
     totalinputtokens: string
     totaloutputtokens: string
@@ -1063,7 +1132,7 @@ export async function getAiUsageSummary(userId: string, market?: string): Promis
        COALESCE(SUM(output_tokens),   0) AS totaloutputtokens,
        COALESCE(SUM(total_cost_usd),  0) AS totalcostusd,
        COUNT(*)                          AS callcount
-     FROM ai_usage WHERE user_id = $1${mc}`,
+     FROM ai_usage WHERE user_id = $1${mc}${resetClause}`,
     params
   )
   const r = res.rows[0]
@@ -1282,18 +1351,26 @@ export async function getDailyStatsRange(
   market?: string
 ): Promise<Array<{ date: string; pnl: number | null; tradesCount: number }>> {
   const pool = getPool()
+  const reset = await getAnalyticsResetAt(userId)
   if (market === undefined) {
+    const params: unknown[] = [userId]
+    let resetClause = ''
+    if (reset) {
+      params.push(reset)
+      resetClause = ` AND date >= ($${params.length})::date`
+    }
+    params.push(limit)
     // Aggregate per date across all markets
     const res = await pool.query<{ date: string; pnl: string | null; trades_count: string }>(
       `SELECT date,
               SUM(pnl)::numeric AS pnl,
               SUM(COALESCE(trades_count, 0))::numeric AS trades_count
        FROM daily_snapshots
-       WHERE user_id = $1
+       WHERE user_id = $1${resetClause}
        GROUP BY date
        ORDER BY date DESC
-       LIMIT $2`,
-      [userId, limit]
+       LIMIT $${params.length}`,
+      params
     )
     return res.rows.reverse().map((r) => ({
       date: r.date,
@@ -1301,13 +1378,20 @@ export async function getDailyStatsRange(
       tradesCount: Number(r.trades_count),
     }))
   }
+  const params: unknown[] = [userId, market]
+  let resetClause = ''
+  if (reset) {
+    params.push(reset)
+    resetClause = ` AND date >= ($${params.length})::date`
+  }
+  params.push(limit)
   const res = await pool.query<{ date: string; pnl: string | null; trades_count: string }>(
     `SELECT date, pnl, COALESCE(trades_count, 0) AS trades_count
      FROM daily_snapshots
-     WHERE user_id = $1 AND market_code = $2
+     WHERE user_id = $1 AND market_code = $2${resetClause}
      ORDER BY date DESC
-     LIMIT $3`,
-    [userId, market, limit]
+     LIMIT $${params.length}`,
+    params
   )
   return res.rows.reverse().map((r) => ({
     date: r.date,
@@ -1322,18 +1406,28 @@ export async function getAiUsageByDay(
   market?: string
 ): Promise<Array<{ date: string; costUsd: number; calls: number }>> {
   const pool = getPool()
-  const mc = marketClause(market, 2)
-  const params: unknown[] = market !== undefined ? [userId, market, limit] : [userId, limit]
-  const limitIdx = market !== undefined ? 3 : 2
+  const params: unknown[] = [userId]
+  let mc = ''
+  if (market !== undefined) {
+    params.push(market)
+    mc = ` AND market_code = $${params.length}`
+  }
+  const reset = await getAnalyticsResetAt(userId)
+  let resetClause = ''
+  if (reset) {
+    params.push(reset)
+    resetClause = ` AND timestamp >= $${params.length}`
+  }
+  params.push(limit)
   const res = await pool.query<{ date: string; costusd: string; calls: string }>(
     `SELECT timestamp::date AS date,
             COALESCE(SUM(total_cost_usd), 0) AS costusd,
             COUNT(*) AS calls
      FROM ai_usage
-     WHERE user_id = $1${mc}
+     WHERE user_id = $1${mc}${resetClause}
      GROUP BY timestamp::date
      ORDER BY date DESC
-     LIMIT $${limitIdx}`,
+     LIMIT $${params.length}`,
     params
   )
   return res.rows.map((r) => ({ date: r.date, costUsd: Number(r.costusd), calls: Number(r.calls) }))

@@ -201,6 +201,8 @@ export default function Performance() {
   const [selectedPosition, setSelectedPosition] = useState<PnlPosition | null>(null)
   const [showExportModal, setShowExportModal] = useState(false)
   const [costSectionOpen, setCostSectionOpen] = useState(false)
+  const [resetAt, setResetAt] = useState<string | null>(null)
+  const [resetBusy, setResetBusy] = useState(false)
 
   function handleRangeChange(r: Range) {
     setRange(r)
@@ -211,21 +213,62 @@ export default function Performance() {
     setPosPage(1)
   }
 
+  const [reloadKey, setReloadKey] = useState(0)
+
   useEffect(() => {
     setLoading(true)
     Promise.all([
       api.analytics.pnl(undefined, undefined, market ?? undefined),
       api.analytics.aiCost(market ?? undefined),
       api.analytics.summary(market ?? undefined),
+      api.analytics.getReset(),
     ])
-      .then(([pnl, ai, sum]) => {
+      .then(([pnl, ai, sum, reset]) => {
         setPnlData(pnl)
         setAiCost(ai)
         setSummary(sum)
+        setResetAt(reset.resetAt)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [market])
+  }, [market, reloadKey])
+
+  async function handleSetReset() {
+    if (
+      !confirm(
+        'Hide all P&L history before now from the Performance page?\n\n' +
+          'The underlying data stays in the database, so Excel reports and ' +
+          'trading logic still see the full history.'
+      )
+    ) {
+      return
+    }
+    setResetBusy(true)
+    try {
+      const res = await api.analytics.setReset()
+      setResetAt(res.resetAt)
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to set analytics reset point — see console.')
+    } finally {
+      setResetBusy(false)
+    }
+  }
+
+  async function handleClearReset() {
+    setResetBusy(true)
+    try {
+      await api.analytics.clearReset()
+      setResetAt(null)
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to clear analytics reset point — see console.')
+    } finally {
+      setResetBusy(false)
+    }
+  }
 
   const closedPositions = useMemo(() => pnlData?.positions ?? [], [pnlData])
   const isHourlyMode = range === 'Today' || pickedDate !== null
@@ -476,8 +519,58 @@ export default function Performance() {
           justifyContent: 'space-between',
         }}
       >
-        <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Performance</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Performance</h1>
+          {resetAt ? (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-muted)',
+                border: '0.5px solid var(--color-border)',
+                borderRadius: 4,
+                padding: '2px 6px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              title={`Hiding history before ${new Date(resetAt).toLocaleString('en-GB')}`}
+            >
+              since{' '}
+              {new Date(resetAt).toLocaleDateString('en-GB', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+              <button
+                onClick={handleClearReset}
+                disabled={resetBusy}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--color-accent, #2563eb)',
+                  cursor: resetBusy ? 'wait' : 'pointer',
+                  padding: 0,
+                  font: 'inherit',
+                  textDecoration: 'underline',
+                }}
+                title="Restore full history"
+              >
+                restore
+              </button>
+            </span>
+          ) : null}
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {!resetAt && (
+            <button
+              className="btn btn-secondary"
+              onClick={handleSetReset}
+              disabled={resetBusy}
+              title="Hide all P&L history before now from the view"
+            >
+              Reset view
+            </button>
+          )}
           <button
             className="btn btn-secondary"
             onClick={() => setShowExportModal(true)}

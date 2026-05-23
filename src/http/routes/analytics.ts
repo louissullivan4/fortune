@@ -12,6 +12,8 @@ import {
   getAiPortfolioConfig,
   getAiUsageSummary,
   getAiUsageByDay,
+  getAnalyticsResetAt,
+  setAnalyticsResetAt,
 } from '../../analytics/journal.js'
 import { getUserApiKeys } from './users.js'
 import { getOrCreateT212Client } from '../../api/trading212.js'
@@ -345,6 +347,37 @@ router.get('/positions/:id/details', async (req, res, next) => {
           }
         : null,
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/analytics/reset — read the current analytics cutoff (null = no cutoff)
+router.get('/reset', async (req, res, next) => {
+  try {
+    const resetAt = await getAnalyticsResetAt(req.user!.userId)
+    res.json({ resetAt })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// POST /api/analytics/reset — set cutoff to now; UI hides pre-cutoff history
+router.post('/reset', async (req, res, next) => {
+  try {
+    const now = new Date()
+    await setAnalyticsResetAt(req.user!.userId, now)
+    res.json({ resetAt: now.toISOString() })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// DELETE /api/analytics/reset — clear cutoff; UI shows full history again
+router.delete('/reset', async (req, res, next) => {
+  try {
+    await setAnalyticsResetAt(req.user!.userId, null)
+    res.json({ resetAt: null })
   } catch (err) {
     next(err)
   }
