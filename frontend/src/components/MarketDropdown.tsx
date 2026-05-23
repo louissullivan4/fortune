@@ -65,6 +65,7 @@ export default function MarketDropdown() {
           gap: 6,
           padding: '4px 10px',
           height: 30,
+          width: '100%',
           fontSize: 13,
           background: 'var(--color-bg-raised)',
           borderRadius: 6,
@@ -79,14 +80,15 @@ export default function MarketDropdown() {
           style={{
             position: 'absolute',
             top: 'calc(100% + 4px)',
-            right: 0,
-            minWidth: 200,
+            left: 0,
+            width: '100%',
             background: 'var(--color-bg-page)',
             border: '0.5px solid var(--color-border)',
-            borderRadius: 8,
-            padding: 4,
+            borderRadius: 6,
+            padding: 3,
             zIndex: 50,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            boxShadow: '0 -4px 16px rgba(0,0,0,0.1)',
+            overflow: 'hidden',
           }}
         >
           <DropdownItem
@@ -145,11 +147,11 @@ function DropdownItem({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 8,
+        gap: 6,
         width: '100%',
         textAlign: 'left',
-        padding: '6px 10px',
-        fontSize: 13,
+        padding: '6px 8px',
+        fontSize: 12,
         background: 'transparent',
         border: 'none',
         borderRadius: 4,
@@ -177,7 +179,7 @@ function DropdownItem({
 }
 
 function Divider() {
-  return <div style={{ height: '0.5px', background: 'var(--color-border)', margin: '4px 0' }} />
+  return <div style={{ height: '0.5px', background: 'var(--color-border)', margin: '2px 0' }} />
 }
 
 function getSpecLabel(code: string): string | null {

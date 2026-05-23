@@ -294,27 +294,39 @@ export default function SignalsAndTrades() {
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
   const [tabLoading, setTabLoading] = useState(false)
 
-  // Signals are inherently per-market (different universes); when filter = ALL
-  // default to NYSE so the page never falls back to an empty signals universe.
-  const signalsMarket = market ?? 'NYSE'
-
   const loadSignals = useCallback(
     async (refresh = false) => {
       setSignalsLoading(true)
       setSignalsError(null)
       try {
-        const res = refresh
-          ? await api.signals.refresh(signalsMarket)
-          : await api.signals.get(signalsMarket)
-        setSignals(res.data)
-        setComputedAt(res.computedAt)
+        if (market) {
+          const res = refresh ? await api.signals.refresh(market) : await api.signals.get(market)
+          setSignals(res.data)
+          setComputedAt(res.computedAt)
+        } else {
+          const { markets } = await api.markets.list()
+          const enabled = markets.filter((m) => m.enabled).map((m) => m.code)
+          if (enabled.length === 0) enabled.push('NYSE')
+          const results = await Promise.all(
+            enabled.map((m) =>
+              (refresh ? api.signals.refresh(m) : api.signals.get(m)).catch(() => null)
+            )
+          )
+          const merged = results.flatMap((r) => r?.data ?? [])
+          const latest = results.reduce((best, r) => {
+            if (!r) return best
+            return !best || r.computedAt > best ? r.computedAt : best
+          }, '' as string)
+          setSignals(merged)
+          setComputedAt(latest || new Date().toISOString())
+        }
       } catch (e) {
         setSignalsError((e as Error).message)
       } finally {
         setSignalsLoading(false)
       }
     },
-    [signalsMarket]
+    [market]
   )
 
   const loadDecisions = useCallback(

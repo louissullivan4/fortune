@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   History as HistoryIcon,
@@ -20,8 +20,6 @@ import Backtest from '../pages/Backtest'
 import { useAuth } from '../context/AuthContext'
 import { setAccessToken, api, type EngineStatus, type UserMarketStatus } from '../api/client'
 import MarketDropdown from './MarketDropdown'
-import MarketClock from './MarketClock'
-import { getMarketSpec } from '../markets/registry'
 
 type Role = 'admin' | 'client' | 'accountant'
 
@@ -42,22 +40,10 @@ interface Props {
   wsConnected: boolean
 }
 
-function pageTitle(pathname: string): string {
-  if (pathname.startsWith('/overview')) return 'Overview'
-  if (pathname.startsWith('/performance')) return 'Performance'
-  if (pathname.startsWith('/history')) return 'History'
-  if (pathname.startsWith('/backtest')) return 'Backtest'
-  if (pathname.startsWith('/settings')) return 'Settings'
-  if (pathname.startsWith('/profile')) return 'Profile'
-  if (pathname.startsWith('/admin')) return 'Admin'
-  return ''
-}
-
 export default function Layout({ wsConnected: _wsConnected }: Props) {
   const { user, logout } = useAuth()
-  const location = useLocation()
-  const [statuses, setStatuses] = useState<EngineStatus[]>([])
-  const [markets, setMarkets] = useState<UserMarketStatus[]>([])
+  const [_statuses, setStatuses] = useState<EngineStatus[]>([])
+  const [_markets, setMarkets] = useState<UserMarketStatus[]>([])
 
   useEffect(() => {
     const load = async () => {
@@ -79,13 +65,17 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
     setAccessToken(null)
   }
 
-  const enabledMarkets = markets.filter((m) => m.enabled)
-
   return (
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-logo">
           <span className="sidebar-wordmark">Fortune</span>
+        </div>
+
+        <hr className="divider" />
+
+        <div style={{ padding: '10px 12px 10px' }}>
+          <MarketDropdown />
         </div>
 
         <hr className="divider" />
@@ -126,49 +116,7 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
           )}
         </nav>
 
-        <hr className="divider" />
-
-        {/* Stacked market clocks + engine statuses, one row per enabled market */}
-        <div style={{ padding: '10px 16px 4px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {(enabledMarkets.length > 0
-            ? enabledMarkets
-            : [{ code: 'NYSE' } as UserMarketStatus]
-          ).map((m) => {
-            let spec
-            try {
-              spec = getMarketSpec(m.code)
-            } catch {
-              return null
-            }
-            const engine = statuses.find((s) => s.market === m.code)
-            return (
-              <div key={m.code} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <MarketClock spec={spec} compact />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 0 }}>
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      flexShrink: 0,
-                      background: engine?.running ? '#16a34a' : 'var(--color-text-muted)',
-                    }}
-                  />
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: engine?.running
-                        ? 'var(--color-text-secondary)'
-                        : 'var(--color-text-muted)',
-                    }}
-                  >
-                    Engine {engine?.running ? 'running' : 'stopped'}
-                  </span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        {/* Market filter + compact status per enabled market */}
 
         <hr className="divider" />
 
@@ -184,26 +132,6 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
       </aside>
 
       <div className="right-panel">
-        {/* Header strip with page title + market dropdown */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 24px',
-            borderBottom: '0.5px solid var(--color-border)',
-            background: 'var(--color-bg-page)',
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-          }}
-        >
-          <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
-            {pageTitle(location.pathname)}
-          </span>
-          <MarketDropdown />
-        </div>
-
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />

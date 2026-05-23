@@ -325,15 +325,60 @@ export default function Overview() {
         {error && <div style={{ fontSize: 12, color: '#dc2626', marginTop: 4 }}>{error}</div>}
       </div>
 
-      <EngineCard
-        status={engineStatus}
-        marketCode={engineMarket}
-        onStart={handleStart}
-        onStop={handleStop}
-        onCycle={handleCycle}
-        onExport={() => setShowExportModal(true)}
-        loading={loading}
-      />
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: market === null && engineStatuses.length > 1 ? '1fr 1fr' : '1fr',
+          gap: 12,
+        }}
+      >
+        {market === null ? (
+          engineStatuses.map((s) => (
+            <EngineCard
+              key={s.market}
+              status={s}
+              marketCode={s.market}
+              onStart={async () => {
+                setLoading(true)
+                try {
+                  replaceEngineStatus(await api.engine.start(s.market))
+                } finally {
+                  setLoading(false)
+                }
+              }}
+              onStop={async () => {
+                setLoading(true)
+                try {
+                  replaceEngineStatus(await api.engine.stop(s.market))
+                } finally {
+                  setLoading(false)
+                }
+              }}
+              onCycle={async () => {
+                setLoading(true)
+                try {
+                  replaceEngineStatus(await api.engine.cycle(s.market))
+                  await loadData()
+                } finally {
+                  setLoading(false)
+                }
+              }}
+              onExport={() => setShowExportModal(true)}
+              loading={loading}
+            />
+          ))
+        ) : (
+          <EngineCard
+            status={engineStatus}
+            marketCode={engineMarket}
+            onStart={handleStart}
+            onStop={handleStop}
+            onCycle={handleCycle}
+            onExport={() => setShowExportModal(true)}
+            loading={loading}
+          />
+        )}
+      </div>
       {showExportModal && <ExportReportModal onClose={() => setShowExportModal(false)} />}
 
       {/* Stats row — two summary cards */}
