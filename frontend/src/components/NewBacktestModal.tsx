@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { X, Play, AlertTriangle } from 'lucide-react'
 import { api, type Config, type BacktestConfig } from '../api/client'
 import { pushToast } from './Toasts'
+import { useMarketFilter } from '../hooks/useMarketFilter'
+import { MARKET_CODES, getMarketSpec } from '../markets/registry'
 
 function todayStr(): string {
   const d = new Date()
@@ -96,7 +98,9 @@ function NumField({
 }
 
 export default function NewBacktestModal({ prefill, onClose, onCreated }: Props) {
+  const { market: filterMarket } = useMarketFilter()
   const [config, setConfig] = useState<Config | null>(null)
+  const [market, setMarket] = useState<string>(prefill?.market ?? filterMarket ?? 'NYSE')
   const [name, setName] = useState(prefill?.name ?? `Backtest ${todayStr()}`)
   const [startDate, setStartDate] = useState(prefill?.startDate ?? daysAgoStr(30))
   const [endDate, setEndDate] = useState(prefill?.endDate ?? todayStr())
@@ -129,7 +133,7 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
     // Only fetch when no prefill — rerun already has the full config
     if (prefill) return
     api.config
-      .get()
+      .get(market)
       .then((c) => {
         setConfig(c)
         setTradeUniverse(c.tradeUniverse.join(', '))
@@ -147,7 +151,7 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
         setInitialCash(c.maxBudgetEur)
       })
       .catch(() => {})
-  }, [prefill])
+  }, [prefill, market])
 
   const tradeUniverseList = tradeUniverse
     .split(/[,\s]+/)
@@ -201,6 +205,7 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
         softStopHoldMinutes,
         softStopDrawdownPct,
         autoStartOnRestart: false,
+        market,
       }
       await api.backtests.create(body)
       pushToast('Backtest queued — results will appear shortly', 'info')
@@ -284,6 +289,46 @@ export default function NewBacktestModal({ prefill, onClose, onCreated }: Props)
               style={inputStyle}
               placeholder="Q1 2026 sweep"
             />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Market</label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {MARKET_CODES.map((code) => {
+                let label = code
+                try {
+                  label = getMarketSpec(code).displayName
+                } catch {
+                  /* unknown */
+                }
+                const selected = market === code
+                return (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setMarket(code)}
+                    style={{
+                      flex: 1,
+                      height: 32,
+                      borderRadius: 4,
+                      border: `0.5px solid ${
+                        selected ? 'var(--color-accent)' : 'var(--color-border)'
+                      }`,
+                      background: selected ? 'var(--color-bg-raised)' : 'transparent',
+                      color: selected ? 'var(--color-accent)' : 'var(--color-text-primary)',
+                      fontSize: 13,
+                      fontWeight: selected ? 500 : 400,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>
+              One backtest = one market. Run a separate backtest per market to compare.
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: 8 }}>

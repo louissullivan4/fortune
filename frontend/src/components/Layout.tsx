@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
+import { NavLink, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   History as HistoryIcon,
@@ -18,7 +18,10 @@ import Profile from '../pages/Profile'
 import Admin from '../pages/Admin'
 import Backtest from '../pages/Backtest'
 import { useAuth } from '../context/AuthContext'
-import { setAccessToken, api, type EngineStatus } from '../api/client'
+import { setAccessToken, api, type EngineStatus, type UserMarketStatus } from '../api/client'
+import MarketDropdown from './MarketDropdown'
+import MarketClock from './MarketClock'
+import { getMarketSpec } from '../markets/registry'
 
 type Role = 'admin' | 'client' | 'accountant'
 
@@ -35,29 +38,38 @@ const nav: Array<{
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
-function isNYSEOpen(): boolean {
-  const now = new Date()
-  const day = now.getUTCDay()
-  if (day === 0 || day === 6) return false
-  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes()
-  return minutes >= 14 * 60 + 30 && minutes < 21 * 60
-}
-
 interface Props {
   wsConnected: boolean
 }
 
+function pageTitle(pathname: string): string {
+  if (pathname.startsWith('/overview')) return 'Overview'
+  if (pathname.startsWith('/performance')) return 'Performance'
+  if (pathname.startsWith('/history')) return 'History'
+  if (pathname.startsWith('/backtest')) return 'Backtest'
+  if (pathname.startsWith('/settings')) return 'Settings'
+  if (pathname.startsWith('/profile')) return 'Profile'
+  if (pathname.startsWith('/admin')) return 'Admin'
+  return ''
+}
+
 export default function Layout({ wsConnected: _wsConnected }: Props) {
   const { user, logout } = useAuth()
-  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
+  const location = useLocation()
+  const [statuses, setStatuses] = useState<EngineStatus[]>([])
+  const [markets, setMarkets] = useState<UserMarketStatus[]>([])
 
   useEffect(() => {
-    const load = () =>
-      api.engine
-        .status()
-        .then(setEngineStatus)
-        .catch(() => {})
-    load()
+    const load = async () => {
+      try {
+        const [s, m] = await Promise.all([api.engine.status(), api.markets.list()])
+        setStatuses(s.statuses)
+        setMarkets(m.markets)
+      } catch {
+        /* ignore */
+      }
+    }
+    void load()
     const id = setInterval(load, 30_000)
     return () => clearInterval(id)
   }, [])
@@ -67,7 +79,7 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
     setAccessToken(null)
   }
 
-  const nyseOpen = isNYSEOpen()
+  const enabledMarkets = markets.filter((m) => m.enabled)
 
   return (
     <div className="layout">
@@ -116,46 +128,46 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
 
         <hr className="divider" />
 
-        {/* Status indicators */}
+        {/* Stacked market clocks + engine statuses, one row per enabled market */}
         <div style={{ padding: '10px 16px 4px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {/* NYSE */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                flexShrink: 0,
-                background: nyseOpen ? '#16a34a' : 'var(--color-text-muted)',
-              }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-              NYSE {nyseOpen ? 'open' : 'closed'}
-            </span>
-          </div>
-
-          {/* Engine */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                flexShrink: 0,
-                background: engineStatus?.running ? '#16a34a' : 'var(--color-text-muted)',
-              }}
-            />
-            <span
-              style={{
-                fontSize: 11,
-                color: engineStatus?.running
-                  ? 'var(--color-text-secondary)'
-                  : 'var(--color-text-muted)',
-              }}
-            >
-              Engine {engineStatus?.running ? 'running' : 'stopped'}
-            </span>
-          </div>
+          {(enabledMarkets.length > 0
+            ? enabledMarkets
+            : [{ code: 'NYSE' } as UserMarketStatus]
+          ).map((m) => {
+            let spec
+            try {
+              spec = getMarketSpec(m.code)
+            } catch {
+              return null
+            }
+            const engine = statuses.find((s) => s.market === m.code)
+            return (
+              <div key={m.code} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <MarketClock spec={spec} compact />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 0 }}>
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      flexShrink: 0,
+                      background: engine?.running ? '#16a34a' : 'var(--color-text-muted)',
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: engine?.running
+                        ? 'var(--color-text-secondary)'
+                        : 'var(--color-text-muted)',
+                    }}
+                  >
+                    Engine {engine?.running ? 'running' : 'stopped'}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
         </div>
 
         <hr className="divider" />
@@ -172,6 +184,26 @@ export default function Layout({ wsConnected: _wsConnected }: Props) {
       </aside>
 
       <div className="right-panel">
+        {/* Header strip with page title + market dropdown */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 24px',
+            borderBottom: '0.5px solid var(--color-border)',
+            background: 'var(--color-bg-page)',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <span style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>
+            {pageTitle(location.pathname)}
+          </span>
+          <MarketDropdown />
+        </div>
+
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />

@@ -1,4 +1,4 @@
-import { isMarketOpen, nextOpenMs, nyseTradingDateStr } from './scheduler.js'
+import { isMarketOpenSpec, nextOpenMsSpec, tradingDateStr } from './scheduler.js'
 import { decide, type TradeDecision } from './brain.js'
 import { validateOrder, TICKER_BLOCK_LOOKBACK_DAYS } from './riskmanager.js'
 import {
@@ -28,6 +28,7 @@ import { generateSignals } from '../strategy/signals.js'
 import type { TickerSignal } from '../strategy/signals.js'
 import { hub } from '../ws/hub.js'
 import type { UserConfig } from '../types/user.js'
+import type { MarketSpec } from '../markets/registry.js'
 
 export interface EngineStatus {
   running: boolean
@@ -39,6 +40,7 @@ export interface EngineStatus {
   mode: string
   intervalMs: number
   userId: string
+  market: string
   pendingSettlement: number
 }
 
@@ -46,7 +48,7 @@ export interface EngineStatus {
 
 const CASH_BUFFER_EUR = 5
 const MIN_DEPLOYABLE_EUR = 6
-// Ticker cooldown: once a position closes, don't re-enter it the same NYSE
+// Ticker cooldown: once a position closes, don't re-enter it the same local
 // trading day. Prevents chasing the same setup back into a losing re-entry
 // (e.g. FCX bought → sold → bought again 2h later → stopped out overnight).
 const GAP_REJECT_COOLDOWN_MS = 30 * 60 * 1_000
@@ -100,7 +102,7 @@ function computeSignalFingerprint(signals: TickerSignal[], freeCash: number): st
   return `${cashBucket}|${signalPart}`
 }
 
-// ── Per-user EngineService ─────────────────────────────────────────────────
+// ── Per-(user, market) EngineService ───────────────────────────────────────
 
 export class EngineService {
   private _running = false
@@ -123,22 +125,32 @@ export class EngineService {
       .reduce((sum, c) => sum + c.amount, 0)
   }
   private _cycleRunning = false
-  // ticker → NYSE trading-date string (YYYY-MM-DD ET) the position was closed on
+  // ticker → local trading-date string (YYYY-MM-DD in market TZ) the position was closed on
   private _recentlyClosedTickers = new Map<string, string>()
   private _gapRejectedAt = new Map<string, number>()
   private _lastSeenPrices = new Map<string, number>()
   private _consecutiveFingerprintSkips = 0
 
+  public readonly market: string
+
   constructor(
     public readonly userId: string,
+    public readonly spec: MarketSpec,
     public readonly t212: Trading212Client,
     private anthropicApiKey: string,
     private userConfig: UserConfig
-  ) {}
+  ) {
+    this.market = spec.code
+  }
 
-  /** Called by engine route when config is updated at runtime */
+  /** Called by config route when this market's config is updated at runtime */
   updateConfig(config: UserConfig): void {
     this.userConfig = config
+  }
+
+  /** Restrict a portfolio snapshot to positions whose ticker belongs to this engine's market. */
+  private _filterToMarket(positions: T212Position[]): T212Position[] {
+    return positions.filter((p) => this.spec.t212TickerSuffixes.some((s) => p.ticker.endsWith(s)))
   }
 
   get status(): EngineStatus {
@@ -148,10 +160,11 @@ export class EngineService {
       lastCycleAt: this._lastCycleAt,
       nextCycleAt: this._nextCycleAt,
       cycleCount: this._cycleCount,
-      marketOpen: isMarketOpen(),
+      marketOpen: isMarketOpenSpec(this.spec),
       mode: this.t212['mode'] as string,
       intervalMs: this.userConfig.tradeIntervalMs,
       userId: this.userId,
+      market: this.market,
       pendingSettlement: this._sessionCashCommitted,
     }
   }
@@ -190,21 +203,22 @@ export class EngineService {
   // ── Initialization ─────────────────────────────────────────────────────
 
   private async _initialize(): Promise<void> {
-    console.log(`[engine:${this.userId}] Initializing...`)
-    const { inserted } = await reconcileAiPositions(this.userId)
-    if (inserted > 0) console.log(`[engine:${this.userId}] Reconciled ${inserted} position(s)`)
+    const tag = `[engine:${this.userId}:${this.market}]`
+    console.log(`${tag} Initializing...`)
+    const { inserted } = await reconcileAiPositions(this.userId, this.market)
+    if (inserted > 0) console.log(`${tag} Reconciled ${inserted} position(s)`)
 
     const instruments = await this.t212.getInstruments()
     const validUniverse = this.userConfig.tradeUniverse.filter((t) => {
       if (instruments.has(t)) return true
-      console.warn(`[engine:${this.userId}] "${t}" not in T212 — removing from universe`)
+      console.warn(`${tag} "${t}" not in T212 — removing from universe`)
       return false
     })
     if (validUniverse.length !== this.userConfig.tradeUniverse.length) {
       this.userConfig = { ...this.userConfig, tradeUniverse: validUniverse }
     }
 
-    const openPositions = await getOpenAiPositions(this.userId)
+    const openPositions = await getOpenAiPositions(this.userId, this.market)
     if (openPositions.length > 0) {
       const [liveSnapshot, openOrders, orderHistory] = await Promise.all([
         this.t212.getPortfolioSnapshot(),
@@ -217,10 +231,6 @@ export class EngineService {
       const pendingOrderTickers = new Set(openOrders.map((o) => o.ticker))
       for (const pos of openPositions) {
         if (!liveTickers.has(pos.ticker) && !pendingOrderTickers.has(pos.ticker)) {
-          // Find the most recent filled SELL on this ticker after the position
-          // was opened. T212 sell orders carry negative quantity. Without this,
-          // realized_pnl gets stored as NULL and the trade silently disappears
-          // from PnL aggregation.
           const openedAtMs = new Date(pos.openedAt).getTime()
           const lastSellFill = orderHistory
             .filter(
@@ -237,10 +247,6 @@ export class EngineService {
             )[0]
           const exitPrice = lastSellFill?.filledPrice ?? null
           const closedAt = lastSellFill?.dateModified ?? new Date().toISOString()
-          // Best-effort EUR conversion: fall back to a same-currency live
-          // position's fxRate (USD/EUR/etc. drift over short windows is small).
-          // If no same-currency live position exists, leave exit_price_eur NULL —
-          // analytics can fall back to the legacy realized_pnl with a warning.
           const inferredCurrency = pos.ticker.endsWith('_US_EQ') ? 'USD' : null
           const fxRate =
             inferredCurrency === null
@@ -249,29 +255,30 @@ export class EngineService {
                   (p) => p.currencyCode === inferredCurrency && Number.isFinite(p.fxRate)
                 )?.fxRate ?? null)
           const exitPriceEur = exitPrice != null && fxRate != null ? exitPrice * fxRate : null
-          await closeAiPosition(pos.ticker, exitPrice, closedAt, this.userId, exitPriceEur)
+          await closeAiPosition(
+            pos.ticker,
+            exitPrice,
+            closedAt,
+            this.userId,
+            this.market,
+            exitPriceEur
+          )
           console.log(
-            `[engine:${this.userId}] ${pos.ticker} not in T212 — marked closed${exitPrice != null ? ` at ${exitPrice} (T212 fill)` : ' (no fill found)'}`
+            `${tag} ${pos.ticker} not in T212 — marked closed${exitPrice != null ? ` at ${exitPrice} (T212 fill)` : ' (no fill found)'}`
           )
         }
       }
       await this._reconcileEntryPrices(openPositions, liveSnapshot.positions)
     }
-    console.log(
-      `[engine:${this.userId}] Ready. Universe: ${this.userConfig.tradeUniverse.join(', ')}`
-    )
+    console.log(`${tag} Ready. Universe: ${this.userConfig.tradeUniverse.join(', ')}`)
   }
 
   // ── Fill-price reconciliation ───────────────────────────────────────────
-  // T212's averagePrice is the authoritative fill price. If our stored
-  // entry_price diverges by more than ENTRY_PRICE_CORRECTION_THRESHOLD (e.g.
-  // because the signal price was stale at buy time), correct it so take-profit
-  // and stop-loss calculations are based on what was actually paid.
-
   private async _reconcileEntryPrices(
     openPositions: AiPosition[],
     t212Positions: PortfolioSnapshot['positions']
   ): Promise<void> {
+    const tag = `[engine:${this.userId}:${this.market}]`
     for (const pos of openPositions) {
       if (!pos.entryPrice) continue
       const live = t212Positions.find((p) => p.ticker === pos.ticker)
@@ -279,7 +286,7 @@ export class EngineService {
       const deviation = Math.abs(live.averagePrice - pos.entryPrice) / pos.entryPrice
       if (deviation > ENTRY_PRICE_CORRECTION_THRESHOLD) {
         console.log(
-          `[engine:${this.userId}] Correcting entry_price for ${pos.ticker}: ` +
+          `${tag} Correcting entry_price for ${pos.ticker}: ` +
             `${pos.entryPrice.toFixed(4)} → ${live.averagePrice.toFixed(4)} ` +
             `(${(deviation * 100).toFixed(1)}% deviation from T212 average fill)`
         )
@@ -287,6 +294,7 @@ export class EngineService {
           pos.ticker,
           live.averagePrice,
           this.userId,
+          this.market,
           live.averagePrice * live.fxRate
         )
       }
@@ -296,6 +304,7 @@ export class EngineService {
   // ── Adjusted snapshot (session cash accounting) ─────────────────────────
 
   private _adjustedSnapshot(snapshot: PortfolioSnapshot): PortfolioSnapshot {
+    const tag = `[engine:${this.userId}:${this.market}]`
     const now = Date.now()
 
     this._cashCommitments = this._cashCommitments.filter((c) => c.expiresAt > now)
@@ -326,7 +335,7 @@ export class EngineService {
         ? ` | ${this._cashCommitments.length} pending order(s) =€${committed.toFixed(2)} (expire in ${Math.round((Math.min(...this._cashCommitments.map((c) => c.expiresAt)) - now) / 1_000)}s)`
         : ''
     console.log(
-      `[engine:${this.userId}] Cash: raw=€${snapshot.cash.free.toFixed(2)} blocked=€${snapshot.cash.blocked.toFixed(2)}${commitNote} → effective=€${effectiveFree.toFixed(2)}`
+      `${tag} Cash: raw=€${snapshot.cash.free.toFixed(2)} blocked=€${snapshot.cash.blocked.toFixed(2)}${commitNote} → effective=€${effectiveFree.toFixed(2)}`
     )
 
     return { ...snapshot, cash: { ...snapshot.cash, free: effectiveFree } }
@@ -335,11 +344,11 @@ export class EngineService {
   // ── Ticker cooldown ─────────────────────────────────────────────────────
 
   private _recordTickerClose(ticker: string): void {
-    this._recentlyClosedTickers.set(ticker, nyseTradingDateStr())
+    this._recentlyClosedTickers.set(ticker, tradingDateStr(this.spec))
   }
 
   private _purgeStaleCooldowns(): void {
-    const today = nyseTradingDateStr()
+    const today = tradingDateStr(this.spec)
     for (const [ticker, closedOn] of this._recentlyClosedTickers) {
       if (closedOn !== today) this._recentlyClosedTickers.delete(ticker)
     }
@@ -352,11 +361,12 @@ export class EngineService {
   // ── Hard exit check ─────────────────────────────────────────────────────
 
   private async _checkHardExits(snapshot: PortfolioSnapshot, timestamp: string): Promise<number> {
-    const openPositions = await getOpenAiPositions(this.userId)
+    const tag = `[engine:${this.userId}:${this.market}]`
+    const openPositions = await getOpenAiPositions(this.userId, this.market)
     if (openPositions.length === 0) return 0
 
     let exitsPlaced = 0
-    const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId)
+    const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId, this.market)
 
     const seenTickers = new Set<string>()
     for (const pos of openPositions) {
@@ -366,11 +376,9 @@ export class EngineService {
       const live = snapshot.positions.find((p) => p.ticker === pos.ticker)
       if (!live) continue
 
-      // T212 prices are in instrument currency (USD for *_US_EQ); EUR is
-      // computed via the per-position fxRate so analytics see the right unit.
       const currentPrice = live.currentPrice
       const currentPriceEur = currentPrice * live.fxRate
-      await updateHighWaterMark(pos.ticker, currentPrice, this.userId)
+      await updateHighWaterMark(pos.ticker, currentPrice, this.userId, this.market)
       const hwm = Math.max(pos.highWaterMark ?? pos.entryPrice, currentPrice)
 
       const pctFromEntry = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
@@ -385,10 +393,6 @@ export class EngineService {
         (pos.highWaterMark ?? 0) >= pos.entryPrice * (1 + TRAIL_ACTIVATION_PCT / 100)
       const isTrailingStop = trailActivated && pctFromPeak <= -TRAIL_STOP_PCT
 
-      // Soft time-stop: a position that has bled for hours without ever
-      // arming the trailing stop is a dying trade — cut it before it hits
-      // the full stop-loss. (See backtest analysis: this converts week-long
-      // SL losses from ~−8% to ~−2.5%.)
       const minutesHeldSoft = (Date.now() - new Date(pos.openedAt).getTime()) / 60_000
       const softStopThresholdPct = this.userConfig.softStopDrawdownPct * 100
       const isSoftStop =
@@ -407,7 +411,7 @@ export class EngineService {
             ? `Trailing stop: down ${Math.abs(pctFromPeak).toFixed(2)}% from peak ${hwm.toFixed(2)} (entry ${pos.entryPrice.toFixed(2)}, +${pctFromEntry.toFixed(2)}%)`
             : `Soft stop: ${Math.abs(pctFromEntry).toFixed(2)}% down after ${Math.round(minutesHeldSoft)}min without arming trailing (threshold ${softStopThresholdPct.toFixed(1)}% / ${this.userConfig.softStopHoldMinutes}min)`
 
-      console.log(`[engine:${this.userId}] Hard exit — ${pos.ticker}: ${reason}`)
+      console.log(`${tag} Hard exit — ${pos.ticker}: ${reason}`)
 
       const sellQty = live.quantity
       const risk = await validateOrder(
@@ -437,11 +441,19 @@ export class EngineService {
           cash: snapshot.cash.free,
         }),
         userId: this.userId,
+        market: this.market,
       })
 
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
-        await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId, currentPriceEur)
+        await closeAllAiPositions(
+          pos.ticker,
+          currentPrice,
+          timestamp,
+          this.userId,
+          this.market,
+          currentPriceEur
+        )
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         this.t212.invalidateOrderHistoryCache()
@@ -453,6 +465,7 @@ export class EngineService {
           fillQuantity: sellQty,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
         exitsPlaced++
       } catch (err) {
@@ -464,6 +477,7 @@ export class EngineService {
           fillQuantity: null,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
       }
     }
@@ -478,7 +492,7 @@ export class EngineService {
   ): Promise<StagnantCandidate[]> {
     if (!this.userConfig.stagnantExitEnabled) return []
 
-    const openPositions = await getOpenAiPositions(this.userId)
+    const openPositions = await getOpenAiPositions(this.userId, this.market)
     if (openPositions.length === 0) return []
 
     const heldTickers = new Set(openPositions.map((p) => p.ticker))
@@ -502,10 +516,6 @@ export class EngineService {
       const pctFromEntry = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
       const minutesHeld = (Date.now() - new Date(pos.openedAt).getTime()) / 60_000
 
-      // Positions drifting within ±stagnantRangePct% of entry count as stagnant
-      // whether they're slightly up or slightly down. Losing drifters used to
-      // be skipped (atBreakEven guard) and left to sit until the stop-loss —
-      // now they rotate too, capping the realised loss at stagnantRangePct.
       const isStagnant =
         minutesHeld >= this.userConfig.stagnantTimeMinutes &&
         Math.abs(pctFromEntry) < this.userConfig.stagnantRangePct * 100
@@ -545,14 +555,13 @@ export class EngineService {
     snapshot: PortfolioSnapshot,
     timestamp: string
   ): Promise<number> {
-    const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId)
+    const tag = `[engine:${this.userId}:${this.market}]`
+    const dailyOpen = await getDailyOpenValue(timestamp.slice(0, 10), this.userId, this.market)
     let exitsPlaced = 0
 
     for (const { pos, live, currentPrice, sellQty, reason } of candidates) {
       if (pos.ticker === aiSoldTicker) {
-        console.log(
-          `[engine:${this.userId}] Stagnant exit for ${pos.ticker} deferred — AI already sold`
-        )
+        console.log(`${tag} Stagnant exit for ${pos.ticker} deferred — AI already sold`)
         continue
       }
 
@@ -580,11 +589,19 @@ export class EngineService {
           cash: snapshot.cash.free,
         }),
         userId: this.userId,
+        market: this.market,
       })
 
       try {
         const order = await this.t212.placeMarketOrder(pos.ticker, sellQty, 'sell')
-        await closeAllAiPositions(pos.ticker, currentPrice, timestamp, this.userId, currentPriceEur)
+        await closeAllAiPositions(
+          pos.ticker,
+          currentPrice,
+          timestamp,
+          this.userId,
+          this.market,
+          currentPriceEur
+        )
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
         this.t212.invalidateOrderHistoryCache()
@@ -596,6 +613,7 @@ export class EngineService {
           fillQuantity: sellQty,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
         exitsPlaced++
       } catch (err) {
@@ -607,6 +625,7 @@ export class EngineService {
           fillQuantity: null,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
       }
     }
@@ -625,8 +644,9 @@ export class EngineService {
   // ── Main cycle ─────────────────────────────────────────────────────────
 
   private async _cycle(): Promise<void> {
-    if (!isMarketOpen()) {
-      console.log(`[engine:${this.userId}] Markets closed — skipping cycle`)
+    const tag = `[engine:${this.userId}:${this.market}]`
+    if (!isMarketOpenSpec(this.spec)) {
+      console.log(`${tag} ${this.market} closed — skipping cycle`)
       return
     }
 
@@ -635,37 +655,39 @@ export class EngineService {
     const timestamp = now.toISOString()
 
     this._purgeStaleCooldowns()
-    console.log(`\n[engine:${this.userId}] ${timestamp} — running cycle`)
+    console.log(`\n${tag} ${timestamp} — running cycle`)
 
-    const snapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
+    // Pre-filter the broker snapshot to this market's positions only, so
+    // both engines that share the T212 client see a market-scoped view.
+    const rawSnapshot = await this.t212.getPortfolioSnapshot()
+    const snapshot: PortfolioSnapshot = this._adjustedSnapshot({
+      ...rawSnapshot,
+      positions: this._filterToMarket(rawSnapshot.positions),
+    })
     console.log(
-      `[engine:${this.userId}] Portfolio: €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} effective free cash`
+      `${tag} Portfolio (this market): €${snapshot.totalValue.toFixed(2)} total, €${snapshot.cash.free.toFixed(2)} effective free cash`
     )
 
-    // Correct any entry_prices that were recorded from stale signal data rather
-    // than actual T212 fill prices. Runs every cycle so positions opened last
-    // cycle are corrected before the first take-profit/stop-loss check.
-    const openForReconcile = await getOpenAiPositions(this.userId)
+    const openForReconcile = await getOpenAiPositions(this.userId, this.market)
     if (openForReconcile.length > 0) {
       await this._reconcileEntryPrices(openForReconcile, snapshot.positions)
     }
 
-    console.log(`[engine:${this.userId}] Checking hard exits...`)
+    console.log(`${tag} Checking hard exits...`)
     const exitsPlaced = await this._checkHardExits(snapshot, timestamp)
     if (exitsPlaced > 0) {
-      console.log(
-        `[engine:${this.userId}] ${exitsPlaced} hard exit(s) placed — refreshing snapshot`
-      )
-      const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
-      Object.assign(snapshot, freshSnapshot)
+      console.log(`${tag} ${exitsPlaced} hard exit(s) placed — refreshing snapshot`)
+      const fresh = await this.t212.getPortfolioSnapshot()
+      const refreshed = this._adjustedSnapshot({
+        ...fresh,
+        positions: this._filterToMarket(fresh.positions),
+      })
+      Object.assign(snapshot, refreshed)
     } else {
-      console.log(`[engine:${this.userId}] No hard exits triggered`)
+      console.log(`${tag} No hard exits triggered`)
     }
 
-    // Compute bot-scoped values before any halts so the daily snapshot is always written.
-    // T212 aggregates bot + manual shares under one ticker; scale its EUR value by the
-    // bot's tracked share of the position so manual stakes don't consume the bot budget.
-    const openAiPositions = await getOpenAiPositions(this.userId)
+    const openAiPositions = await getOpenAiPositions(this.userId, this.market)
     const botQtyByTicker = new Map<string, number>()
     for (const pos of openAiPositions) {
       botQtyByTicker.set(pos.ticker, (botQtyByTicker.get(pos.ticker) ?? 0) + pos.quantity)
@@ -676,56 +698,51 @@ export class EngineService {
       const share = p.quantity > 0 ? botQty / p.quantity : 0
       return sum + p.valueEur * share
     }, 0)
-    // Cap the bot's visible cash to its remaining budget — never touch personal cash
     const botBudgetRemaining = Math.max(0, this.userConfig.maxBudgetEur - aiPositionsValue)
     const botCash = Math.min(botBudgetRemaining, snapshot.cash.free)
     const aiValue = botCash + aiPositionsValue
     console.log(
-      `[engine:${this.userId}] Budget: max=€${this.userConfig.maxBudgetEur.toFixed(2)} inPositions=€${aiPositionsValue.toFixed(2)} remaining=€${botBudgetRemaining.toFixed(2)} freeCash=€${snapshot.cash.free.toFixed(2)} → botCash=€${botCash.toFixed(2)}${botBudgetRemaining < snapshot.cash.free ? ' [budget cap]' : ' [cash cap]'}`
+      `${tag} Budget: max=€${this.userConfig.maxBudgetEur.toFixed(2)} inPositions=€${aiPositionsValue.toFixed(2)} remaining=€${botBudgetRemaining.toFixed(2)} freeCash=€${snapshot.cash.free.toFixed(2)} → botCash=€${botCash.toFixed(2)}${botBudgetRemaining < snapshot.cash.free ? ' [budget cap]' : ' [cash cap]'}`
     )
 
-    // Guard against intermittent T212 partial cash payloads (observed
-    // 2026-04-20: totalValue came back as €974 vs the true €3656 because
-    // cash.invested only reflected a subset of positions). The first cycle of
-    // the day wins via ON CONFLICT DO NOTHING, so a single bad snapshot
-    // anchors the entire day's chart wrong. Skip the upsert when totalValue
-    // collapses vs the previous day's stored open.
-    const previousDayOpen = await getPreviousDayAiOpenValue(dateStr, this.userId)
+    const previousDayOpen = await getPreviousDayAiOpenValue(dateStr, this.userId, this.market)
     const looksAnomalous =
       previousDayOpen != null && previousDayOpen > 0 && snapshot.totalValue < previousDayOpen * 0.5
     if (looksAnomalous) {
       console.warn(
-        `[engine:${this.userId}] Skipping daily snapshot upsert — totalValue €${snapshot.totalValue.toFixed(2)} is <50% of previous day's open €${previousDayOpen!.toFixed(2)} (likely partial T212 payload)`
+        `${tag} Skipping daily snapshot upsert — totalValue €${snapshot.totalValue.toFixed(2)} is <50% of previous day's open €${previousDayOpen!.toFixed(2)} (likely partial T212 payload)`
       )
     } else {
-      await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId)
+      await upsertDailySnapshot(dateStr, snapshot.totalValue, aiValue, this.userId, this.market)
     }
 
-    const dailyOpenValue = (await getDailyOpenValue(dateStr, this.userId)) ?? snapshot.totalValue
-    const dailyAiOpenValue = (await getDailyAiOpenValue(dateStr, this.userId)) ?? aiValue
+    const dailyOpenValue =
+      (await getDailyOpenValue(dateStr, this.userId, this.market)) ?? snapshot.totalValue
+    const dailyAiOpenValue =
+      (await getDailyAiOpenValue(dateStr, this.userId, this.market)) ?? aiValue
     const previousDayAiValue =
-      (await getPreviousDayAiOpenValue(dateStr, this.userId)) ?? dailyAiOpenValue
+      (await getPreviousDayAiOpenValue(dateStr, this.userId, this.market)) ?? dailyAiOpenValue
 
     const aiDrawdown = (previousDayAiValue - aiValue) / previousDayAiValue
     if (aiDrawdown > this.userConfig.dailyLossLimitPct) {
       console.log(
-        `[engine:${this.userId}] Bot daily loss limit hit (${(aiDrawdown * 100).toFixed(1)}% vs yesterday) — halting for today`
+        `${tag} Bot daily loss limit hit (${(aiDrawdown * 100).toFixed(1)}% vs yesterday) — halting for today`
       )
       return
     }
 
     console.log(
-      `[engine:${this.userId}] Fetching price history for ${this.userConfig.tradeUniverse.length} tickers...`
+      `${tag} Fetching price history for ${this.userConfig.tradeUniverse.length} tickers...`
     )
     const histories = await getAllHistories(this.userConfig.tradeUniverse, 90)
 
     const manualTickers = new Set(
       snapshot.positions.map((p) => p.ticker).filter((t) => !botQtyByTicker.has(t))
     )
-    const todayNy = nyseTradingDateStr()
+    const todayLocal = tradingDateStr(this.spec)
     const coolingTickers = new Set(
       [...this._recentlyClosedTickers.entries()]
-        .filter(([, closedOn]) => closedOn === todayNy)
+        .filter(([, closedOn]) => closedOn === todayLocal)
         .map(([t]) => t)
     )
     const gapRejectedTickers = new Set(
@@ -742,38 +759,36 @@ export class EngineService {
     )
     if (botQtyByTicker.size > 0) {
       console.log(
-        `[engine:${this.userId}] Excluding bot-held tickers from buy universe: ${[...botQtyByTicker.keys()].join(', ')}`
+        `${tag} Excluding bot-held tickers from buy universe: ${[...botQtyByTicker.keys()].join(', ')}`
       )
     }
     if (manualTickers.size > 0) {
       console.log(
-        `[engine:${this.userId}] Excluding manually held tickers from buy universe: ${[...manualTickers].join(', ')}`
+        `${tag} Excluding manually held tickers from buy universe: ${[...manualTickers].join(', ')}`
       )
     }
     if (coolingTickers.size > 0) {
       console.log(
-        `[engine:${this.userId}] Cooling down tickers (recently closed): ${[...coolingTickers].join(', ')}`
+        `${tag} Cooling down tickers (recently closed): ${[...coolingTickers].join(', ')}`
       )
     }
     if (gapRejectedTickers.size > 0) {
       console.log(
-        `[engine:${this.userId}] Gap-rejected tickers (stale signal price): ${[...gapRejectedTickers].join(', ')}`
+        `${tag} Gap-rejected tickers (stale signal price): ${[...gapRejectedTickers].join(', ')}`
       )
     }
     const signals = generateSignals(buyUniverse, histories, botPositions)
     const actionable = signals.filter((s) => s.signal !== 'hold').length
-    console.log(
-      `[engine:${this.userId}] Signals: ${signals.length} tickers, ${actionable} actionable`
-    )
+    console.log(`${tag} Signals: ${signals.length} tickers, ${actionable} actionable`)
 
-    console.log(`[engine:${this.userId}] Identifying stagnant candidates...`)
+    console.log(`${tag} Identifying stagnant candidates...`)
     const stagnantCandidates = await this._identifyStagnantCandidates(snapshot, signals)
     if (stagnantCandidates.length > 0) {
       console.log(
-        `[engine:${this.userId}] ${stagnantCandidates.length} stagnant candidate(s): ${stagnantCandidates.map((c) => c.pos.ticker).join(', ')} — deferring to AI`
+        `${tag} ${stagnantCandidates.length} stagnant candidate(s): ${stagnantCandidates.map((c) => c.pos.ticker).join(', ')} — deferring to AI`
       )
     } else {
-      console.log(`[engine:${this.userId}] No stagnant candidates`)
+      console.log(`${tag} No stagnant candidates`)
     }
 
     const currentFingerprint = computeSignalFingerprint(signals, botCash)
@@ -788,12 +803,12 @@ export class EngineService {
       this._consecutiveFingerprintSkips++
       if (this._consecutiveFingerprintSkips < MAX_FINGERPRINT_SKIPS) {
         console.log(
-          `[engine:${this.userId}] Signals + cash unchanged since last hold — skipping AI call (${this._consecutiveFingerprintSkips}/${MAX_FINGERPRINT_SKIPS})`
+          `${tag} Signals + cash unchanged since last hold — skipping AI call (${this._consecutiveFingerprintSkips}/${MAX_FINGERPRINT_SKIPS})`
         )
         return
       }
       console.log(
-        `[engine:${this.userId}] Signals unchanged for ${MAX_FINGERPRINT_SKIPS} cycles — forcing AI re-check`
+        `${tag} Signals unchanged for ${MAX_FINGERPRINT_SKIPS} cycles — forcing AI re-check`
       )
       this._consecutiveFingerprintSkips = 0
     } else {
@@ -804,7 +819,7 @@ export class EngineService {
     const deployable = botCash - cashBuffer
     if (deployable < MIN_DEPLOYABLE_EUR && stagnantCandidates.length === 0) {
       const reason = `Cash-constrained hold: €${botCash.toFixed(2)} bot cash (budget €${this.userConfig.maxBudgetEur} − €${aiPositionsValue.toFixed(2)} in positions), €${deployable.toFixed(2)} deployable after €${cashBuffer} buffer — minimum €${MIN_DEPLOYABLE_EUR} needed to open a position`
-      console.log(`[engine:${this.userId}] ${reason}`)
+      console.log(`${tag} ${reason}`)
       await logDecision({
         timestamp,
         action: 'hold',
@@ -821,12 +836,13 @@ export class EngineService {
           cash: snapshot.cash.free,
         }),
         userId: this.userId,
+        market: this.market,
       })
       this._lastSignalState = { fingerprint: currentFingerprint, lastDecisionAction: 'hold' }
       return
     }
 
-    const recentDecisions = await getRecentDecisions(this.userId, 5)
+    const recentDecisions = await getRecentDecisions(this.userId, 5, this.market)
     const botSnapshot = {
       ...snapshot,
       positions: botPositions,
@@ -862,12 +878,12 @@ export class EngineService {
     let fallbackReason: string | null = null
 
     if (mode === 'deterministic') {
-      console.log(`[engine:${this.userId}] Deterministic mode — skipping AI`)
+      console.log(`${tag} Deterministic mode — skipping AI`)
       aiDecision = pickDecision(pickerInput)
     } else {
       let budgetExceeded = false
       if (mode === 'ai_with_fallback') {
-        const mtd = await getMonthToDateAiCostUsd(this.userId)
+        const mtd = await getMonthToDateAiCostUsd(this.userId, this.market)
         if (mtd >= this.userConfig.aiCostBudgetMonthlyUsd) {
           budgetExceeded = true
           fallbackReason = `monthly AI budget reached ($${mtd.toFixed(4)} / $${this.userConfig.aiCostBudgetMonthlyUsd.toFixed(2)})`
@@ -875,10 +891,10 @@ export class EngineService {
       }
 
       if (budgetExceeded) {
-        console.warn(`[engine:${this.userId}] ${fallbackReason} — using deterministic fallback`)
+        console.warn(`${tag} ${fallbackReason} — using deterministic fallback`)
         aiDecision = pickDecision(pickerInput)
       } else {
-        console.log(`[engine:${this.userId}] Asking Claude for decision...`)
+        console.log(`${tag} Asking Claude for decision...`)
         try {
           const result = await decide(
             signals,
@@ -894,9 +910,7 @@ export class EngineService {
         } catch (err) {
           if (mode !== 'ai_with_fallback') throw err
           fallbackReason = err instanceof Error ? err.message : String(err)
-          console.error(
-            `[engine:${this.userId}] AI call failed — using deterministic fallback: ${fallbackReason}`
-          )
+          console.error(`${tag} AI call failed — using deterministic fallback: ${fallbackReason}`)
           aiDecision = pickDecision(pickerInput)
         }
       }
@@ -909,20 +923,13 @@ export class EngineService {
       }
     }
 
-    console.log(
-      `[engine:${this.userId}] Decision: ${aiDecision.action.toUpperCase()} ${aiDecision.ticker ?? ''}`
-    )
+    console.log(`${tag} Decision: ${aiDecision.action.toUpperCase()} ${aiDecision.ticker ?? ''}`)
     if (usage.totalCostUsd > 0) {
       console.log(
-        `[engine:${this.userId}] Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out — $${usage.totalCostUsd.toFixed(6)}`
+        `${tag} Token usage: ${usage.inputTokens} in / ${usage.outputTokens} out — $${usage.totalCostUsd.toFixed(6)}`
       )
     }
 
-    // Suppress AI discretionary sells. Hard exits (TP/SL/trailing) and
-    // stagnant rotation already ran or will run via their own paths; if the
-    // AI picks a sell on top of those, history shows it loses (0/3 wins,
-    // -$52 over the audit window). Allow only sells that line up with a
-    // stagnant candidate — the AI is just sealing what would have rotated.
     const stagnantTickers = new Set(stagnantCandidates.map((c) => c.pos.ticker))
     const isDiscretionarySell =
       aiDecision.action === 'sell' &&
@@ -940,7 +947,7 @@ export class EngineService {
       : aiDecision
     if (isDiscretionarySell) {
       console.log(
-        `[engine:${this.userId}] AI discretionary sell on ${aiDecision.ticker} suppressed — exits run via TP/SL/trailing/stagnant only`
+        `${tag} AI discretionary sell on ${aiDecision.ticker} suppressed — exits run via TP/SL/trailing/stagnant only`
       )
     }
 
@@ -965,16 +972,22 @@ export class EngineService {
         })),
       }),
       userId: this.userId,
+      market: this.market,
     })
 
-    await logAiUsage({ decisionId, timestamp, ...usage, userId: this.userId })
+    await logAiUsage({
+      decisionId,
+      timestamp,
+      ...usage,
+      userId: this.userId,
+      market: this.market,
+    })
 
     this._lastSignalState = {
       fingerprint: currentFingerprint,
       lastDecisionAction: decision.action,
     }
 
-    // Execute stagnant exits now that the AI has had its say — skip any ticker the AI sold
     const aiSoldTicker = decision.action === 'sell' && decision.ticker ? decision.ticker : null
     if (stagnantCandidates.length > 0) {
       const stagnantExits = await this._executeStagnantExits(
@@ -984,12 +997,14 @@ export class EngineService {
         timestamp
       )
       if (stagnantExits > 0) {
-        const freshSnapshot = this._adjustedSnapshot(await this.t212.getPortfolioSnapshot())
-        Object.assign(snapshot, freshSnapshot)
+        const fresh = await this.t212.getPortfolioSnapshot()
+        const refreshed = this._adjustedSnapshot({
+          ...fresh,
+          positions: this._filterToMarket(fresh.positions),
+        })
+        Object.assign(snapshot, refreshed)
         this._lastSignalState = null
-        console.log(
-          `[engine:${this.userId}] ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`
-        )
+        console.log(`${tag} ${stagnantExits} stagnant exit(s) placed — refreshing snapshot`)
       }
     }
 
@@ -999,19 +1014,14 @@ export class EngineService {
       const signal = signals.find((s) => s.ticker === decision.ticker)
       let estimatedPriceNative = decision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
 
-      // For BUY orders, cross-check the signal price (daily close from Yahoo)
-      // against a fresh intraday quote. If the stock has gapped significantly,
-      // abort: we'd be chasing a move with a stale signal and a wrong entry_price.
       if (decision.action === 'buy' && estimatedPriceNative > 0) {
         const liveQuote = await getLivePrice(decision.ticker)
         if (liveQuote !== null) {
           const gapPct = Math.abs(liveQuote - estimatedPriceNative) / estimatedPriceNative
           if (gapPct > GAP_REJECT_PCT) {
             const reason = `Gap guard: ${decision.ticker} signal price $${estimatedPriceNative.toFixed(2)} is ${(gapPct * 100).toFixed(1)}% away from live $${liveQuote.toFixed(2)} — buy aborted, ticker cooling for ${GAP_REJECT_COOLDOWN_MS / 60_000} min`
-            console.log(`[engine:${this.userId}] GAP GUARD — ${reason}`)
+            console.log(`${tag} GAP GUARD — ${reason}`)
             this._gapRejectedAt.set(decision.ticker, Date.now())
-            // Mark the AI's buy decision as rejected so reconcileAiPositions
-            // doesn't treat it as a real trade and conjure a phantom position.
             await logOrder({
               decisionId,
               t212OrderId: null,
@@ -1020,10 +1030,10 @@ export class EngineService {
               fillQuantity: null,
               timestamp,
               userId: this.userId,
+              market: this.market,
             })
             return
           }
-          // Use the live price for entry so stop-loss/take-profit anchor to reality.
           estimatedPriceNative = liveQuote
         }
       }
@@ -1040,7 +1050,12 @@ export class EngineService {
 
       const recentLossCount =
         decision.action === 'buy'
-          ? await getRecentTickerLossCount(this.userId, decision.ticker, TICKER_BLOCK_LOOKBACK_DAYS)
+          ? await getRecentTickerLossCount(
+              this.userId,
+              decision.ticker,
+              TICKER_BLOCK_LOOKBACK_DAYS,
+              this.market
+            )
           : 0
 
       const risk = await validateOrder(
@@ -1060,7 +1075,7 @@ export class EngineService {
       )
 
       if (!risk.allowed) {
-        console.log(`[engine:${this.userId}] Risk manager blocked: ${risk.reason}`)
+        console.log(`${tag} Risk manager blocked: ${risk.reason}`)
         await logOrder({
           decisionId,
           t212OrderId: null,
@@ -1069,14 +1084,15 @@ export class EngineService {
           fillQuantity: null,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
         return
       }
 
-      console.log(`[engine:${this.userId}] Risk check passed — submitting order to T212`)
+      console.log(`${tag} Risk check passed — submitting order to T212`)
       try {
         console.log(
-          `[engine:${this.userId}] Placing ${decision.action} order: ${decision.quantity} × ${decision.ticker}`
+          `${tag} Placing ${decision.action} order: ${decision.quantity} × ${decision.ticker}`
         )
 
         const orderResult = await this.t212.placeMarketOrder(
@@ -1096,6 +1112,7 @@ export class EngineService {
             estimatedPriceNative,
             timestamp,
             this.userId,
+            this.market,
             estimatedPriceEur,
             livePosition?.currencyCode ?? null
           )
@@ -1105,15 +1122,14 @@ export class EngineService {
             estimatedPriceNative,
             timestamp,
             this.userId,
+            this.market,
             estimatedPriceEur
           )
           this._recordTickerClose(decision.ticker)
         }
         this.t212.invalidatePortfolioCache()
         this.t212.invalidateOrderHistoryCache()
-        console.log(
-          `[engine:${this.userId}] Order placed: ${orderResult.id} (${orderResult.status})`
-        )
+        console.log(`${tag} Order placed: ${orderResult.id} (${orderResult.status})`)
         await logOrder({
           decisionId,
           t212OrderId: orderResult.id,
@@ -1122,16 +1138,18 @@ export class EngineService {
           fillQuantity: decision.quantity,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
       } catch (err) {
         const msg = (err as Error).message
-        console.error(`[engine:${this.userId}] Order failed: ${msg}`)
+        console.error(`${tag} Order failed: ${msg}`)
         if (decision.action === 'sell' && msg.includes('selling-equity-not-owned')) {
           await closeAllAiPositions(
             decision.ticker,
             estimatedPriceNative,
             timestamp,
             this.userId,
+            this.market,
             estimatedPriceEur
           )
         }
@@ -1143,17 +1161,24 @@ export class EngineService {
           fillQuantity: null,
           timestamp,
           userId: this.userId,
+          market: this.market,
         })
       }
     }
 
-    hub.broadcast('decision', { cycleAt: timestamp, count: this._cycleCount, userId: this.userId })
+    hub.broadcast('decision', {
+      cycleAt: timestamp,
+      count: this._cycleCount,
+      userId: this.userId,
+      market: this.market,
+    })
     hub.broadcast('engine_status', this.status)
   }
 
   private async _runCycle(): Promise<void> {
+    const tag = `[engine:${this.userId}:${this.market}]`
     if (this._cycleRunning) {
-      console.log(`[engine:${this.userId}] Cycle already in progress — skipping`)
+      console.log(`${tag} Cycle already in progress — skipping`)
       return
     }
     this._cycleRunning = true
@@ -1163,11 +1188,11 @@ export class EngineService {
       await this._cycle()
       this._cycleCount++
       const elapsed = ((Date.now() - cycleStart) / 1_000).toFixed(1)
-      console.log(`[engine:${this.userId}] Cycle #${this._cycleCount} complete in ${elapsed}s`)
+      console.log(`${tag} Cycle #${this._cycleCount} complete in ${elapsed}s`)
     } catch (err) {
       const msg = (err as Error).message
       const elapsed = ((Date.now() - cycleStart) / 1_000).toFixed(1)
-      console.error(`[engine:${this.userId}] Cycle failed after ${elapsed}s: ${msg}`)
+      console.error(`${tag} Cycle failed after ${elapsed}s: ${msg}`)
       hub.broadcast('toast', { message: `Cycle error: ${msg}`, level: 'error' })
     } finally {
       this._cycleRunning = false
@@ -1177,14 +1202,13 @@ export class EngineService {
 
   private _scheduleTick(): void {
     if (!this._running) return
+    const tag = `[engine:${this.userId}:${this.market}]`
 
-    if (!isMarketOpen()) {
-      const waitMs = nextOpenMs()
+    if (!isMarketOpenSpec(this.spec)) {
+      const waitMs = nextOpenMsSpec(this.spec)
       this._nextCycleAt = new Date(Date.now() + waitMs).toISOString()
       hub.broadcast('engine_status', this.status)
-      console.log(
-        `[engine:${this.userId}] Markets closed — next open in ${Math.round(waitMs / 60000)}min`
-      )
+      console.log(`${tag} Market closed — next open in ${Math.round(waitMs / 60000)}min`)
       this._timer = setTimeout(() => this._scheduleTick(), waitMs)
       return
     }
@@ -1196,7 +1220,7 @@ export class EngineService {
         this._timer = setTimeout(() => this._scheduleTick(), this.userConfig.tradeIntervalMs)
       })
       .catch((err) => {
-        console.error(`[engine:${this.userId}] Unhandled cycle error:`, (err as Error).message)
+        console.error(`${tag} Unhandled cycle error:`, (err as Error).message)
         if (this._running) {
           this._timer = setTimeout(() => this._scheduleTick(), this.userConfig.tradeIntervalMs)
         }
@@ -1205,28 +1229,50 @@ export class EngineService {
 }
 
 // ── Engine registry ────────────────────────────────────────────────────────
-// One EngineService instance per user.
+// One EngineService instance per (user, market) tuple.
 
 const _engines = new Map<string, EngineService>()
 
-export function getEngine(userId: string): EngineService | null {
-  return _engines.get(userId) ?? null
+function key(userId: string, market: string): string {
+  return `${userId}::${market}`
+}
+
+export function getEngine(userId: string, market: string): EngineService | null {
+  return _engines.get(key(userId, market)) ?? null
+}
+
+export function getEnginesForUser(userId: string): EngineService[] {
+  const out: EngineService[] = []
+  for (const [k, e] of _engines) {
+    if (k.startsWith(`${userId}::`)) out.push(e)
+  }
+  return out
 }
 
 export function createEngine(
   userId: string,
+  spec: MarketSpec,
   t212: Trading212Client,
   anthropicApiKey: string,
   userConfig: UserConfig
 ): EngineService {
-  let engine = _engines.get(userId)
+  const k = key(userId, spec.code)
+  let engine = _engines.get(k)
   if (!engine) {
-    engine = new EngineService(userId, t212, anthropicApiKey, userConfig)
-    _engines.set(userId, engine)
+    engine = new EngineService(userId, spec, t212, anthropicApiKey, userConfig)
+    _engines.set(k, engine)
   }
   return engine
 }
 
 export function getAllEngineStatuses(): EngineStatus[] {
   return [..._engines.values()].map((e) => e.status)
+}
+
+export function stopEngineIfRunning(userId: string, market: string): void {
+  const engine = _engines.get(key(userId, market))
+  if (engine) {
+    engine.stop()
+    _engines.delete(key(userId, market))
+  }
 }

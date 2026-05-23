@@ -43,11 +43,12 @@ async function getCliContext(): Promise<{ userId: string; t212: Trading212Client
 export async function dailyReport(
   userId: string,
   t212: Trading212Client,
-  date = today()
+  date = today(),
+  market?: string
 ): Promise<void> {
   const [stats, trades, snapshot] = await Promise.all([
-    getDailyStats(date, userId),
-    getOrdersForDay(date, userId),
+    getDailyStats(date, userId, market),
+    getOrdersForDay(date, userId, market),
     t212.getPortfolioSnapshot(),
   ])
 
@@ -102,10 +103,14 @@ export async function dailyReport(
   console.log('\n' + line('═') + '\n')
 }
 
-export async function fullReport(userId: string, t212: Trading212Client): Promise<void> {
+export async function fullReport(
+  userId: string,
+  t212: Trading212Client,
+  market: string = 'NYSE'
+): Promise<void> {
   const [stats, recent, snapshot] = await Promise.all([
-    getAllTimeStats(userId),
-    getRecentDecisions(userId, 20),
+    getAllTimeStats(userId, market),
+    getRecentDecisions(userId, 20, market),
     t212.getPortfolioSnapshot(),
   ])
 
@@ -134,14 +139,15 @@ export async function fullReport(userId: string, t212: Trading212Client): Promis
 if (process.argv[1]?.endsWith('reporter.ts') || process.argv[1]?.endsWith('reporter.js')) {
   const allFlag = process.argv.includes('--all')
   const dateArg = process.argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a))
+  const market = process.env.MARKET ?? 'NYSE'
 
   async function run() {
     await runMigrations()
     const { userId, t212 } = await getCliContext()
     if (allFlag) {
-      await fullReport(userId, t212)
+      await fullReport(userId, t212, market)
     } else {
-      await dailyReport(userId, t212, dateArg)
+      await dailyReport(userId, t212, dateArg, market)
     }
     process.exit(0)
   }

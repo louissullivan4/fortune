@@ -25,6 +25,7 @@ export interface BacktestRow {
   createdAt: string
   startedAt: string | null
   completedAt: string | null
+  market: string
 }
 
 interface RawRow {
@@ -49,6 +50,7 @@ interface RawRow {
   created_at: string | Date
   started_at: string | Date | null
   completed_at: string | Date | null
+  market_code: string
 }
 
 function asIsoDate(v: string | Date): string {
@@ -87,6 +89,7 @@ function fromRow(r: RawRow): BacktestRow {
     createdAt: asIso(r.created_at)!,
     startedAt: asIso(r.started_at),
     completedAt: asIso(r.completed_at),
+    market: r.market_code,
   }
 }
 
@@ -94,21 +97,21 @@ const LIST_COLUMNS = `
   id, user_id, name, status, progress_pct, config_json, start_date, end_date,
   initial_cash, final_value, realized_pnl, total_return_pct, max_drawdown_pct,
   win_rate, trades_count, sharpe, error_message, created_at, started_at,
-  completed_at, NULL::jsonb AS metrics_json
+  completed_at, market_code, NULL::jsonb AS metrics_json
 `
 
 const FULL_COLUMNS = `
   id, user_id, name, status, progress_pct, config_json, start_date, end_date,
   initial_cash, final_value, realized_pnl, total_return_pct, max_drawdown_pct,
   win_rate, trades_count, sharpe, error_message, created_at, started_at,
-  completed_at, metrics_json
+  completed_at, market_code, metrics_json
 `
 
 export async function createBacktest(userId: string, config: BacktestConfig): Promise<BacktestRow> {
   const pool = getPool()
   const result = await pool.query<RawRow>(
-    `INSERT INTO backtests (user_id, name, status, config_json, start_date, end_date, initial_cash)
-     VALUES ($1, $2, 'pending', $3, $4, $5, $6)
+    `INSERT INTO backtests (user_id, name, status, config_json, start_date, end_date, initial_cash, market_code)
+     VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7)
      RETURNING ${FULL_COLUMNS}`,
     [
       userId,
@@ -117,6 +120,7 @@ export async function createBacktest(userId: string, config: BacktestConfig): Pr
       config.startDate,
       config.endDate,
       config.initialCash,
+      config.market,
     ]
   )
   return fromRow(result.rows[0])
@@ -125,21 +129,26 @@ export async function createBacktest(userId: string, config: BacktestConfig): Pr
 export async function listBacktests(
   userId: string,
   page: number,
-  limit: number
+  limit: number,
+  market?: string
 ): Promise<{ data: BacktestRow[]; total: number }> {
   const pool = getPool()
   const offset = (page - 1) * limit
+  const params: unknown[] = [userId]
+  let where = 'WHERE user_id = $1'
+  if (market !== undefined) {
+    params.push(market)
+    where += ` AND market_code = $${params.length}`
+  }
   const [rowsRes, countRes] = await Promise.all([
     pool.query<RawRow>(
       `SELECT ${LIST_COLUMNS} FROM backtests
-       WHERE user_id = $1
+       ${where}
        ORDER BY created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
     ),
-    pool.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM backtests WHERE user_id = $1`, [
-      userId,
-    ]),
+    pool.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM backtests ${where}`, params),
   ])
   return { data: rowsRes.rows.map(fromRow), total: Number(countRes.rows[0].c) }
 }

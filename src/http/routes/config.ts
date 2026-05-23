@@ -1,27 +1,38 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
-import { getUserConfig } from './users.js'
+import { getUserMarketConfig } from './users.js'
 import { getPool } from '../../db.js'
 import { getEngine } from '../../engine/EngineService.js'
+import { MARKET_CODES } from '../../markets/registry.js'
 
 const router = Router()
 router.use(requireAuth)
 
-// GET /api/config
+function resolveMarket(req: import('express').Request): string {
+  const m = (req.query.market as string | undefined) ?? 'NYSE'
+  if (!MARKET_CODES.includes(m)) {
+    throw Object.assign(new Error(`Unknown market: ${m}`), { status: 400 })
+  }
+  return m
+}
+
+// GET /api/config?market=NYSE
 router.get('/', async (req, res, next) => {
   try {
-    const cfg = await getUserConfig(req.user!.userId)
+    const market = resolveMarket(req)
+    const cfg = await getUserMarketConfig(req.user!.userId, market)
     if (!cfg) return res.status(404).json({ error: 'Config not found' })
-    res.json({ ...cfg, tradeIntervalS: cfg.tradeIntervalMs / 1000 })
+    res.json({ ...cfg, market, tradeIntervalS: cfg.tradeIntervalMs / 1000 })
   } catch (err) {
     next(err)
   }
 })
 
-// PUT /api/config
+// PUT /api/config?market=NYSE
 router.put('/', async (req, res, next) => {
   try {
     const userId = req.user!.userId
+    const market = resolveMarket(req)
     const body = req.body as Record<string, unknown>
     const pool = getPool()
 
@@ -108,22 +119,22 @@ router.put('/', async (req, res, next) => {
     }
 
     const setClauses = Object.keys(updates)
-      .map((k, i) => `${k} = $${i + 2}`)
+      .map((k, i) => `${k} = $${i + 3}`)
       .join(', ')
     await pool.query(
-      `UPDATE user_configs SET ${setClauses}, updated_at = NOW() WHERE user_id = $1`,
-      [userId, ...Object.values(updates)]
+      `UPDATE user_market_configs SET ${setClauses}, updated_at = NOW() WHERE user_id = $1 AND market_code = $2`,
+      [userId, market, ...Object.values(updates)]
     )
 
-    // Propagate to running engine if active
-    const engine = getEngine(userId)
+    // Propagate to running engine if active for this market
+    const engine = getEngine(userId, market)
     if (engine) {
-      const cfg = await getUserConfig(userId)
+      const cfg = await getUserMarketConfig(userId, market)
       if (cfg) engine.updateConfig(cfg)
     }
 
-    const cfg = await getUserConfig(userId)
-    res.json({ ...cfg, tradeIntervalS: cfg!.tradeIntervalMs / 1000 })
+    const cfg = await getUserMarketConfig(userId, market)
+    res.json({ ...cfg, market, tradeIntervalS: cfg!.tradeIntervalMs / 1000 })
   } catch (err) {
     next(err)
   }

@@ -159,6 +159,83 @@ function AccordionSection({
   )
 }
 
+function SecretInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  const [show, setShow] = useState(false)
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type={show ? 'text' : 'password'}
+        className="input"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{ paddingRight: 36 }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        style={{
+          position: 'absolute',
+          right: 8,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: 'var(--color-text-muted)',
+          display: 'flex',
+          padding: 2,
+        }}
+      >
+        {show ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  )
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={value}
+      onClick={() => onChange(!value)}
+      style={{
+        width: 36,
+        height: 20,
+        borderRadius: 9999,
+        background: value ? 'var(--color-accent)' : 'var(--color-bg-raised)',
+        border: '0.5px solid var(--color-border)',
+        position: 'relative',
+        cursor: 'pointer',
+        transition: 'background 120ms ease',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          left: value ? 18 : 2,
+          top: 1,
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          background: 'white',
+          transition: 'left 120ms ease',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+        }}
+      />
+    </button>
+  )
+}
+
 export default function Profile() {
   const { user } = useAuth()
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -172,6 +249,20 @@ export default function Profile() {
 
   const [addressOpen, setAddressOpen] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
+  const [credentialsOpen, setCredentialsOpen] = useState(false)
+
+  // Credentials state — shared across all markets (T212 account + Anthropic key)
+  const [t212Mode, setT212Mode] = useState<'demo' | 'live'>('demo')
+  const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
+  const [hasT212Key, setHasT212Key] = useState(false)
+  const [anthropicKey, setAnthropicKey] = useState('')
+  const [t212Form, setT212Form] = useState({
+    keyId: '',
+    keySecret: '',
+    mode: 'demo' as 'demo' | 'live',
+  })
+  const [savingAnthropic, setSavingAnthropic] = useState(false)
+  const [savingT212, setSavingT212] = useState(false)
 
   useEffect(() => {
     api.users
@@ -194,7 +285,54 @@ export default function Profile() {
       })
       .catch((err) => pushToast((err as Error).message, 'error'))
       .finally(() => setLoading(false))
+
+    api.users
+      .getApiKeys()
+      .then((keys) => {
+        setT212Mode(keys.t212Mode as 'demo' | 'live')
+        setHasAnthropicKey(keys.hasAnthropicKey)
+        setHasT212Key(keys.hasT212Key)
+        setT212Form((f) => ({ ...f, mode: keys.t212Mode as 'demo' | 'live' }))
+      })
+      .catch(() => {})
   }, [])
+
+  const t212Changed = !!t212Form.keyId || !!t212Form.keySecret || t212Form.mode !== t212Mode
+
+  async function saveAnthropicKey() {
+    if (!anthropicKey) return
+    setSavingAnthropic(true)
+    try {
+      await api.users.updateApiKeys({ anthropicApiKey: anthropicKey })
+      setHasAnthropicKey(true)
+      setAnthropicKey('')
+      pushToast('Anthropic key updated', 'info')
+    } catch (err) {
+      pushToast((err as Error).message, 'error')
+    } finally {
+      setSavingAnthropic(false)
+    }
+  }
+
+  async function saveT212() {
+    if (!t212Changed) return
+    setSavingT212(true)
+    try {
+      await api.users.updateApiKeys({
+        t212KeyId: t212Form.keyId || undefined,
+        t212KeySecret: t212Form.keySecret || undefined,
+        t212Mode: t212Form.mode,
+      })
+      if (t212Form.keyId) setHasT212Key(true)
+      setT212Mode(t212Form.mode)
+      setT212Form((f) => ({ ...f, keyId: '', keySecret: '' }))
+      pushToast('T212 credentials updated', 'info')
+    } catch (err) {
+      pushToast((err as Error).message, 'error')
+    } finally {
+      setSavingT212(false)
+    }
+  }
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault()
@@ -455,6 +593,162 @@ export default function Profile() {
               {savingProfile ? 'Saving…' : 'Save address'}
             </button>
           </form>
+        </AccordionSection>
+
+        {/* Credentials — collapsible (T212 + Anthropic, shared across markets) */}
+        <AccordionSection
+          label="api credentials"
+          open={credentialsOpen}
+          onToggle={() => setCredentialsOpen((o) => !o)}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 16,
+              alignItems: 'start',
+            }}
+          >
+            {/* Anthropic */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <div className="section-label">Anthropic</div>
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    background: hasAnthropicKey ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
+                    color: hasAnthropicKey ? '#16a34a' : '#dc2626',
+                  }}
+                >
+                  {hasAnthropicKey ? 'configured' : 'not set'}
+                </span>
+              </div>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: 'var(--color-text-muted)',
+                  margin: 0,
+                  lineHeight: 1.5,
+                }}
+              >
+                Powers AI trade decisions across all markets. Encrypted with AES-256-GCM.
+              </p>
+              <Field label="API key">
+                <SecretInput
+                  value={anthropicKey}
+                  onChange={setAnthropicKey}
+                  placeholder={hasAnthropicKey ? '(leave blank to keep existing)' : 'sk-ant-…'}
+                />
+              </Field>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={saveAnthropicKey}
+                disabled={savingAnthropic || !anthropicKey}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                {savingAnthropic ? 'Saving…' : 'Update key'}
+              </button>
+            </div>
+
+            {/* Trading 212 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+              >
+                <div className="section-label">Trading 212</div>
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    background: hasT212Key ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
+                    color: hasT212Key ? '#16a34a' : '#dc2626',
+                  }}
+                >
+                  {hasT212Key ? 'configured' : 'not set'}
+                </span>
+              </div>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: 'var(--color-text-muted)',
+                  margin: 0,
+                  lineHeight: 1.5,
+                }}
+              >
+                Executes orders across all enabled markets. Encrypted with AES-256-GCM.
+              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 12px',
+                  background: 'var(--color-bg-surface)',
+                  borderRadius: 6,
+                  border: '0.5px solid var(--color-border)',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 2 }}>
+                    Account mode
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    {t212Form.mode === 'live'
+                      ? 'Real money — orders execute on your live account'
+                      : 'Demo account — no real orders placed'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background:
+                        t212Form.mode === 'live' ? 'rgba(220,38,38,0.1)' : 'rgba(22,163,74,0.12)',
+                      color: t212Form.mode === 'live' ? '#dc2626' : '#16a34a',
+                    }}
+                  >
+                    {t212Form.mode.toUpperCase()}
+                  </span>
+                  <Toggle
+                    value={t212Form.mode === 'live'}
+                    onChange={(v) => setT212Form((f) => ({ ...f, mode: v ? 'live' : 'demo' }))}
+                  />
+                </div>
+              </div>
+              <Field label="API key ID">
+                <SecretInput
+                  value={t212Form.keyId}
+                  onChange={(v) => setT212Form((f) => ({ ...f, keyId: v }))}
+                  placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key ID'}
+                />
+              </Field>
+              <Field label="API key secret">
+                <SecretInput
+                  value={t212Form.keySecret}
+                  onChange={(v) => setT212Form((f) => ({ ...f, keySecret: v }))}
+                  placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key secret'}
+                />
+              </Field>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={saveT212}
+                disabled={savingT212 || !t212Changed}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                {savingT212 ? 'Saving…' : 'Update credentials'}
+              </button>
+            </div>
+          </div>
         </AccordionSection>
 
         {/* Password — collapsible */}

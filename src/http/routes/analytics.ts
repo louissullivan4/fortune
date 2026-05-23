@@ -17,19 +17,30 @@ import { getUserApiKeys } from './users.js'
 import { getOrCreateT212Client } from '../../api/trading212.js'
 import { generateReport, validateReportRange } from '../../analytics/report.js'
 import { getPool } from '../../db.js'
+import { MARKET_CODES } from '../../markets/registry.js'
 
 const router = Router()
 router.use(requireAuth)
 
-// GET /api/analytics/summary
+function getMarketFilter(req: import('express').Request): string | undefined {
+  const m = req.query.market as string | undefined
+  if (m === undefined || m === '') return undefined
+  if (!MARKET_CODES.includes(m)) {
+    throw Object.assign(new Error(`Unknown market: ${m}`), { status: 400 })
+  }
+  return m
+}
+
+// GET /api/analytics/summary?market=NYSE
 router.get('/summary', async (req, res, next) => {
   try {
     const userId = req.user!.userId
+    const market = getMarketFilter(req)
     const [stats, portfolioConfig, closed, aiUsage] = await Promise.all([
-      getAllTimeStats(userId),
+      getAllTimeStats(userId, market),
       getAiPortfolioConfig(userId),
-      getClosedAiPositions(userId),
-      getAiUsageSummary(userId),
+      getClosedAiPositions(userId, market),
+      getAiUsageSummary(userId, market),
     ])
     // Prefer the EUR-denominated value (post-013); fall back to native
     // realized_pnl on rows that pre-date the migration backfill.
@@ -54,13 +65,14 @@ router.get('/summary', async (req, res, next) => {
   }
 })
 
-// GET /api/analytics/ai-cost
+// GET /api/analytics/ai-cost?market=NYSE
 router.get('/ai-cost', async (req, res, next) => {
   try {
     const userId = req.user!.userId
+    const market = getMarketFilter(req)
     const [summary, byDay] = await Promise.all([
-      getAiUsageSummary(userId),
-      getAiUsageByDay(userId, 365),
+      getAiUsageSummary(userId, market),
+      getAiUsageByDay(userId, 365, market),
     ])
     res.json({ summary, byDay: byDay.reverse() })
   } catch (err) {
@@ -68,46 +80,50 @@ router.get('/ai-cost', async (req, res, next) => {
   }
 })
 
-// GET /api/analytics/daily-stats?limit=365
+// GET /api/analytics/daily-stats?limit=365&market=NYSE
 router.get('/daily-stats', async (req, res, next) => {
   try {
     const limit = Math.min(365, Math.max(1, parseInt(req.query.limit as string) || 365))
-    const data = await getDailyStatsRange(req.user!.userId, limit)
+    const market = getMarketFilter(req)
+    const data = await getDailyStatsRange(req.user!.userId, limit, market)
     res.json({ data })
   } catch (err) {
     next(err)
   }
 })
 
-// GET /api/analytics/intraday?hours=1
+// GET /api/analytics/intraday?hours=1&market=NYSE
 router.get('/intraday', async (req, res, next) => {
   try {
     const hours = Math.min(48, Math.max(1, parseInt(req.query.hours as string) || 24))
-    const data = await getIntradayValues(req.user!.userId, hours)
+    const market = getMarketFilter(req)
+    const data = await getIntradayValues(req.user!.userId, hours, market)
     res.json({ data, hours })
   } catch (err) {
     next(err)
   }
 })
 
-// GET /api/analytics/snapshots?limit=90
+// GET /api/analytics/snapshots?limit=90&market=NYSE
 router.get('/snapshots', async (req, res, next) => {
   try {
     const limit = Math.min(365, Math.max(1, parseInt(req.query.limit as string) || 90))
-    const data = await getDailyValues(req.user!.userId, limit)
+    const market = getMarketFilter(req)
+    const data = await getDailyValues(req.user!.userId, limit, market)
     res.json({ data })
   } catch (err) {
     next(err)
   }
 })
 
-// GET /api/analytics/positions
+// GET /api/analytics/positions?market=NYSE
 router.get('/positions', async (req, res, next) => {
   try {
     const userId = req.user!.userId
+    const market = getMarketFilter(req)
     const [open, closed] = await Promise.all([
-      getOpenAiPositions(userId),
-      getClosedAiPositions(userId),
+      getOpenAiPositions(userId, market),
+      getClosedAiPositions(userId, market),
     ])
     res.json({ open, closed })
   } catch (err) {
@@ -115,14 +131,15 @@ router.get('/positions', async (req, res, next) => {
   }
 })
 
-// GET /api/analytics/performance
+// GET /api/analytics/performance?market=NYSE
 router.get('/performance', async (req, res, next) => {
   try {
     const userId = req.user!.userId
+    const market = getMarketFilter(req)
     const [closed, open, stats] = await Promise.all([
-      getClosedAiPositions(userId),
-      getOpenAiPositions(userId),
-      getAllTimeStats(userId),
+      getClosedAiPositions(userId, market),
+      getOpenAiPositions(userId, market),
+      getAllTimeStats(userId, market),
     ])
     const pnlOf = (p: { realizedPnlEur: number | null; realizedPnl: number | null }) =>
       p.realizedPnlEur ?? p.realizedPnl ?? 0
@@ -171,7 +188,7 @@ function estimateFxCost(
   return (buyValue + sellValue) * T212_FX_FEE_RATE
 }
 
-// GET /api/analytics/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD
+// GET /api/analytics/pnl?from=YYYY-MM-DD&to=YYYY-MM-DD&market=NYSE
 // Returns AI-only closed positions enriched with T212 actual fill prices where
 // available, FX cost estimates, and net P&L. Excludes personal portfolio positions.
 router.get('/pnl', async (req, res, next) => {
@@ -179,8 +196,9 @@ router.get('/pnl', async (req, res, next) => {
     const userId = req.user!.userId
     const from = req.query.from as string | undefined
     const to = req.query.to as string | undefined
+    const market = getMarketFilter(req)
 
-    const positions = await getClosedAiPositionsWithOrders(userId, from, to)
+    const positions = await getClosedAiPositionsWithOrders(userId, from, to, market)
 
     const t212FillMap = new Map<string, number>()
     try {

@@ -8,6 +8,7 @@ import {
   deleteBacktest,
 } from '../../backtest/journal.js'
 import { enqueueBacktest } from '../../backtest/runner.js'
+import { MARKET_CODES } from '../../markets/registry.js'
 
 const router = Router()
 router.use(requireAuth, requireAdminOrAccountant)
@@ -57,6 +58,11 @@ function validateConfig(
     }
   }
 
+  const market = body.market ?? 'NYSE'
+  if (!MARKET_CODES.includes(market)) {
+    return { ok: false, error: `market must be one of: ${MARKET_CODES.join(', ')}` }
+  }
+
   const cfg: BacktestConfig = {
     name: body.name.trim(),
     startDate: body.startDate,
@@ -75,6 +81,7 @@ function validateConfig(
     softStopEnabled: body.softStopEnabled ?? true,
     softStopHoldMinutes: body.softStopHoldMinutes!,
     softStopDrawdownPct: body.softStopDrawdownPct!,
+    market,
     // Backtests always run the shared deterministic picker; these fields are
     // captured in the config snapshot for parity but ignored by the simulator.
     decisionMode: 'deterministic',
@@ -84,12 +91,16 @@ function validateConfig(
   return { ok: true, cfg }
 }
 
-// GET /api/backtests?page=1&limit=20
+// GET /api/backtests?page=1&limit=20&market=NYSE
 router.get('/', async (req, res, next) => {
   try {
     const page = Math.max(1, parseInt(req.query.page as string) || 1)
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20))
-    const { data, total } = await listBacktests(req.user!.userId, page, limit)
+    const market = req.query.market as string | undefined
+    if (market !== undefined && !MARKET_CODES.includes(market)) {
+      return res.status(400).json({ error: `Unknown market: ${market}` })
+    }
+    const { data, total } = await listBacktests(req.user!.userId, page, limit, market)
     res.json({ data, total, page, limit, totalPages: Math.ceil(total / limit) })
   } catch (err) {
     next(err)

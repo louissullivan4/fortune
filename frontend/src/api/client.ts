@@ -85,7 +85,6 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
         headers,
       })
     } else {
-      // Refresh failed — clear token and let the error propagate
       _accessToken = null
       throw new Error('Session expired — please log in again')
     }
@@ -95,7 +94,23 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
     const body = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error((body as { error?: string }).error ?? res.statusText)
   }
+  // 204 No Content (and other empty bodies) have nothing to parse — req<void>
+  // callers like DELETE rely on this so they don't crash on JSON.parse.
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return undefined as T
+  }
   return res.json() as Promise<T>
+}
+
+// ── Query string helper ────────────────────────────────────────────────────
+
+function qs(params: Record<string, string | number | undefined>): string {
+  const parts: string[] = []
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === '') continue
+    parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+  }
+  return parts.length ? `?${parts.join('&')}` : ''
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -139,6 +154,14 @@ export interface Invitation {
   invited_by_username: string | null
 }
 
+export type MarketCode = string
+
+export interface UserMarketStatus {
+  code: MarketCode
+  enabled: boolean
+  autoStart: boolean
+}
+
 export interface EngineStatus {
   running: boolean
   startedAt: string | null
@@ -148,6 +171,8 @@ export interface EngineStatus {
   marketOpen: boolean
   mode: string
   intervalMs: number
+  userId?: string
+  market: MarketCode
   pendingSettlement: number
 }
 
@@ -220,6 +245,7 @@ export interface SignalsResponse {
   data: TickerSignal[]
   computedAt: string
   cached: boolean
+  market?: MarketCode
 }
 
 export interface Decision {
@@ -234,6 +260,7 @@ export interface Decision {
   portfolioJson: string
   orderStatus: string | null
   orderId: string | null
+  market: MarketCode
   signals?: unknown[]
   portfolio?: unknown
 }
@@ -248,6 +275,7 @@ export interface Order {
   timestamp: string
   ticker: string | null
   action: string
+  market: MarketCode
 }
 
 export interface Paginated<T> {
@@ -284,6 +312,7 @@ export interface AiPosition {
   exitPrice: number | null
   realizedPnl: number | null
   status: 'open' | 'closed'
+  market?: MarketCode
 }
 
 export interface PnlPosition {
@@ -413,6 +442,7 @@ export interface Config {
   decisionMode: DecisionMode
   aiCostBudgetMonthlyUsd: number
   autoStartOnRestart: boolean
+  market?: MarketCode
 }
 
 export interface Instrument {
@@ -445,6 +475,7 @@ export interface BacktestConfig {
   softStopHoldMinutes: number
   softStopDrawdownPct: number
   autoStartOnRestart: boolean
+  market?: MarketCode
 }
 
 export interface BacktestClosedTrade {
@@ -510,6 +541,7 @@ export interface Backtest {
   createdAt: string
   startedAt: string | null
   completedAt: string | null
+  market?: MarketCode
 }
 
 // ── API functions ─────────────────────────────────────────────────────────
@@ -566,9 +598,12 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(body),
       }),
-    getConfig: () => req<Config>('/users/me/config'),
-    updateConfig: (body: Partial<Config>) =>
-      req<Config>('/users/me/config', { method: 'PUT', body: JSON.stringify(body) }),
+    getConfig: (market: MarketCode = 'NYSE') => req<Config>(`/users/me/config${qs({ market })}`),
+    updateConfig: (body: Partial<Config>, market: MarketCode = 'NYSE') =>
+      req<Config>(`/users/me/config${qs({ market })}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
 
     // Admin
     list: () => req<UserProfile[]>('/users'),
@@ -593,54 +628,73 @@ export const api = {
       }),
   },
 
+  markets: {
+    list: () => req<{ markets: UserMarketStatus[] }>('/users/me/markets'),
+    enable: (code: MarketCode) =>
+      req<{ ok: boolean; code: MarketCode; enabled: boolean }>(
+        `/users/me/markets/${encodeURIComponent(code)}`,
+        { method: 'PUT' }
+      ),
+    disable: (code: MarketCode) =>
+      req<{ ok: boolean; code: MarketCode; enabled: boolean }>(
+        `/users/me/markets/${encodeURIComponent(code)}`,
+        { method: 'DELETE' }
+      ),
+  },
+
   health: () =>
     req<{ status: string; uptime: number; wsConnections: number }>('/health'.replace('/api', '')),
 
   engine: {
-    status: () => req<EngineStatus>('/engine/status'),
-    start: () => req<EngineStatus>('/engine/start', { method: 'POST' }),
-    stop: () => req<EngineStatus>('/engine/stop', { method: 'POST' }),
-    cycle: () => req<EngineStatus>('/engine/cycle', { method: 'POST' }),
+    status: () => req<{ statuses: EngineStatus[] }>('/engine/status'),
+    statusForMarket: (market: MarketCode) =>
+      req<EngineStatus>(`/engine/${encodeURIComponent(market)}/status`),
+    start: (market: MarketCode = 'NYSE') =>
+      req<EngineStatus>(`/engine/${encodeURIComponent(market)}/start`, { method: 'POST' }),
+    stop: (market: MarketCode = 'NYSE') =>
+      req<EngineStatus>(`/engine/${encodeURIComponent(market)}/stop`, { method: 'POST' }),
+    cycle: (market: MarketCode = 'NYSE') =>
+      req<EngineStatus>(`/engine/${encodeURIComponent(market)}/cycle`, { method: 'POST' }),
   },
 
   portfolio: {
-    get: () => req<Portfolio>('/portfolio'),
+    get: (market?: MarketCode) => req<Portfolio>(`/portfolio${qs({ market })}`),
   },
 
   signals: {
-    get: () => req<SignalsResponse>('/signals'),
-    refresh: () => req<SignalsResponse>('/signals/refresh', { method: 'POST' }),
-    ticker: (t: string) => req<{ data: TickerSignal; computedAt: string }>(`/signals/${t}`),
+    get: (market: MarketCode = 'NYSE') => req<SignalsResponse>(`/signals${qs({ market })}`),
+    refresh: (market: MarketCode = 'NYSE') =>
+      req<SignalsResponse>(`/signals/refresh${qs({ market })}`, { method: 'POST' }),
+    ticker: (t: string, market: MarketCode = 'NYSE') =>
+      req<{ data: TickerSignal; computedAt: string }>(`/signals/${t}${qs({ market })}`),
   },
 
   decisions: {
-    list: (page = 1, limit = 20) =>
-      req<Paginated<Decision>>(`/decisions?page=${page}&limit=${limit}`),
+    list: (page = 1, limit = 20, market?: MarketCode) =>
+      req<Paginated<Decision>>(`/decisions${qs({ page, limit, market })}`),
     get: (id: number) => req<Decision>(`/decisions/${id}`),
   },
 
   orders: {
-    list: (page = 1, limit = 20) => req<Paginated<Order>>(`/orders?page=${page}&limit=${limit}`),
+    list: (page = 1, limit = 20, market?: MarketCode) =>
+      req<Paginated<Order>>(`/orders${qs({ page, limit, market })}`),
   },
 
   analytics: {
-    summary: () => req<Summary>('/analytics/summary'),
-    snapshots: (limit = 90) =>
-      req<{ data: DailySnapshot[] }>(`/analytics/snapshots?limit=${limit}`),
-    intraday: (hours: number) =>
-      req<{ data: IntradayPoint[]; hours: number }>(`/analytics/intraday?hours=${hours}`),
-    aiCost: () => req<AiCostResponse>('/analytics/ai-cost'),
-    positions: () => req<{ open: AiPosition[]; closed: AiPosition[] }>('/analytics/positions'),
-    performance: () => req<Performance>('/analytics/performance'),
-    dailyStats: (limit = 365) =>
-      req<{ data: DailyStatsPoint[] }>(`/analytics/daily-stats?limit=${limit}`),
-    pnl: (from?: string, to?: string) => {
-      const params = new URLSearchParams()
-      if (from) params.set('from', from)
-      if (to) params.set('to', to)
-      const qs = params.toString()
-      return req<PnlResponse>(`/analytics/pnl${qs ? `?${qs}` : ''}`)
-    },
+    summary: (market?: MarketCode) => req<Summary>(`/analytics/summary${qs({ market })}`),
+    snapshots: (limit = 90, market?: MarketCode) =>
+      req<{ data: DailySnapshot[] }>(`/analytics/snapshots${qs({ limit, market })}`),
+    intraday: (hours: number, market?: MarketCode) =>
+      req<{ data: IntradayPoint[]; hours: number }>(`/analytics/intraday${qs({ hours, market })}`),
+    aiCost: (market?: MarketCode) => req<AiCostResponse>(`/analytics/ai-cost${qs({ market })}`),
+    positions: (market?: MarketCode) =>
+      req<{ open: AiPosition[]; closed: AiPosition[] }>(`/analytics/positions${qs({ market })}`),
+    performance: (market?: MarketCode) =>
+      req<Performance>(`/analytics/performance${qs({ market })}`),
+    dailyStats: (limit = 365, market?: MarketCode) =>
+      req<{ data: DailyStatsPoint[] }>(`/analytics/daily-stats${qs({ limit, market })}`),
+    pnl: (from?: string, to?: string, market?: MarketCode) =>
+      req<PnlResponse>(`/analytics/pnl${qs({ from, to, market })}`),
     positionDetails: (id: number) => req<PositionDetails>(`/analytics/positions/${id}/details`),
     reportUsers: () => req<ReportUser[]>('/analytics/report-users'),
     report: (params: { userId?: string; from: string; to: string }) =>
@@ -651,9 +705,9 @@ export const api = {
   },
 
   config: {
-    get: () => req<Config>('/config'),
-    update: (body: Partial<Config>) =>
-      req<Config>('/config', { method: 'PUT', body: JSON.stringify(body) }),
+    get: (market: MarketCode = 'NYSE') => req<Config>(`/config${qs({ market })}`),
+    update: (body: Partial<Config>, market: MarketCode = 'NYSE') =>
+      req<Config>(`/config${qs({ market })}`, { method: 'PUT', body: JSON.stringify(body) }),
   },
 
   instruments: {
@@ -672,8 +726,8 @@ export const api = {
   },
 
   backtests: {
-    list: (page = 1, limit = 20) =>
-      req<Paginated<Backtest>>(`/backtests?page=${page}&limit=${limit}`),
+    list: (page = 1, limit = 20, market?: MarketCode) =>
+      req<Paginated<Backtest>>(`/backtests${qs({ page, limit, market })}`),
     get: (id: number) => req<Backtest>(`/backtests/${id}`),
     create: (body: BacktestConfig) =>
       req<Backtest>('/backtests', { method: 'POST', body: JSON.stringify(body) }),

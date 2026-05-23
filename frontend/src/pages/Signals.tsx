@@ -3,6 +3,7 @@ import { RefreshCw, ChevronDown, ChevronRight, Search, Copy, Check } from 'lucid
 import { api, type TickerSignal, type Decision, type Order, type Paginated } from '../api/client'
 import SignalBadge from '../components/SignalBadge'
 import type { SignalType } from '../api/client'
+import { useMarketFilter } from '../hooks/useMarketFilter'
 
 type DecisionFilter = 'all' | 'actions' | 'holds'
 type SignalFilter = 'all' | SignalType
@@ -271,6 +272,7 @@ const SIGNAL_ORDER: Record<string, number> = {
 }
 
 export default function SignalsAndTrades() {
+  const { market } = useMarketFilter()
   const [activeTab, setActiveTab] = useState<'signals' | 'decisions' | 'orders'>('signals')
 
   const [signals, setSignals] = useState<TickerSignal[]>([])
@@ -292,37 +294,52 @@ export default function SignalsAndTrades() {
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null)
   const [tabLoading, setTabLoading] = useState(false)
 
-  const loadSignals = useCallback(async (refresh = false) => {
-    setSignalsLoading(true)
-    setSignalsError(null)
-    try {
-      const res = refresh ? await api.signals.refresh() : await api.signals.get()
-      setSignals(res.data)
-      setComputedAt(res.computedAt)
-    } catch (e) {
-      setSignalsError((e as Error).message)
-    } finally {
-      setSignalsLoading(false)
-    }
-  }, [])
+  // Signals are inherently per-market (different universes); when filter = ALL
+  // default to NYSE so the page never falls back to an empty signals universe.
+  const signalsMarket = market ?? 'NYSE'
 
-  const loadDecisions = useCallback(async (page: number) => {
-    setTabLoading(true)
-    try {
-      setDecisions(await api.decisions.list(page, 50))
-    } finally {
-      setTabLoading(false)
-    }
-  }, [])
+  const loadSignals = useCallback(
+    async (refresh = false) => {
+      setSignalsLoading(true)
+      setSignalsError(null)
+      try {
+        const res = refresh
+          ? await api.signals.refresh(signalsMarket)
+          : await api.signals.get(signalsMarket)
+        setSignals(res.data)
+        setComputedAt(res.computedAt)
+      } catch (e) {
+        setSignalsError((e as Error).message)
+      } finally {
+        setSignalsLoading(false)
+      }
+    },
+    [signalsMarket]
+  )
 
-  const loadOrders = useCallback(async (page: number) => {
-    setTabLoading(true)
-    try {
-      setOrders(await api.orders.list(page, 20))
-    } finally {
-      setTabLoading(false)
-    }
-  }, [])
+  const loadDecisions = useCallback(
+    async (page: number) => {
+      setTabLoading(true)
+      try {
+        setDecisions(await api.decisions.list(page, 50, market ?? undefined))
+      } finally {
+        setTabLoading(false)
+      }
+    },
+    [market]
+  )
+
+  const loadOrders = useCallback(
+    async (page: number) => {
+      setTabLoading(true)
+      try {
+        setOrders(await api.orders.list(page, 20, market ?? undefined))
+      } finally {
+        setTabLoading(false)
+      }
+    },
+    [market]
+  )
 
   useEffect(() => {
     loadSignals()

@@ -4,6 +4,8 @@ import { api, type EngineStatus, type Portfolio, type Summary } from '../api/cli
 import { useAuth } from '../context/AuthContext'
 import MarketClock from '../components/MarketClock'
 import ExportReportModal from '../components/ExportReportModal'
+import { useMarketFilter } from '../hooks/useMarketFilter'
+import { getMarketSpec, NYSE } from '../markets/registry'
 
 function fmt(n: number | null | undefined, decimals = 2, prefix = '') {
   if (n == null) return '—'
@@ -18,6 +20,7 @@ function _fmtPct(n: number | null | undefined) {
 
 function EngineCard({
   status,
+  marketCode,
   onStart,
   onStop,
   onCycle,
@@ -25,12 +28,19 @@ function EngineCard({
   loading,
 }: {
   status: EngineStatus | null
+  marketCode: string
   onStart: () => void
   onStop: () => void
   onCycle: () => void
   onExport: () => void
   loading: boolean
 }) {
+  let spec
+  try {
+    spec = getMarketSpec(marketCode)
+  } catch {
+    spec = NYSE
+  }
   return (
     <div className="card" style={{ marginBottom: 24 }}>
       {/* Top row: engine state + controls */}
@@ -97,7 +107,7 @@ function EngineCard({
       </div>
 
       {/* Market clock */}
-      <MarketClock />
+      <MarketClock spec={spec} />
 
       {/* Cycle timestamps */}
       {(status?.lastCycleAt || status?.nextCycleAt) && (
@@ -156,7 +166,8 @@ function EngineCard({
 
 export default function Overview() {
   const { user } = useAuth()
-  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null)
+  const { market } = useMarketFilter()
+  const [engineStatuses, setEngineStatuses] = useState<EngineStatus[]>([])
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
   const [_maxBudget, setMaxBudget] = useState<number | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
@@ -171,6 +182,12 @@ export default function Overview() {
   useEffect(() => {
     instrumentNamesRef.current = instrumentNames
   }, [instrumentNames])
+
+  // When filter = ALL, engine card targets the first running engine, falling
+  // back to NYSE so the controls always have a destination.
+  const engineMarket =
+    market ?? engineStatuses.find((s) => s.running)?.market ?? engineStatuses[0]?.market ?? 'NYSE'
+  const engineStatus = engineStatuses.find((s) => s.market === engineMarket) ?? null
 
   const fetchMissingNames = useCallback(async (tickers: string[]) => {
     const unknown = tickers.filter((t) => !(t in instrumentNamesRef.current))
@@ -199,7 +216,7 @@ export default function Overview() {
   const loadPositions = useCallback(async () => {
     setPositionsRefreshing(true)
     try {
-      const port = await api.portfolio.get()
+      const port = await api.portfolio.get(market ?? undefined)
       setPortfolio(port)
       await fetchMissingNames([
         ...port.aiPositions.map((p) => p.ticker),
@@ -210,19 +227,20 @@ export default function Overview() {
     } finally {
       setPositionsRefreshing(false)
     }
-  }, [fetchMissingNames])
+  }, [fetchMissingNames, market])
 
   const loadData = useCallback(async () => {
     try {
       const [status, port, cfg, sum] = await Promise.all([
         api.engine.status(),
-        api.portfolio.get(),
-        api.config.get(),
-        api.analytics.summary(),
+        api.portfolio.get(market ?? undefined),
+        // Config is per-market; default to NYSE when filter = ALL.
+        api.config.get(market ?? 'NYSE').catch(() => null),
+        api.analytics.summary(market ?? undefined),
       ])
-      setEngineStatus(status)
+      setEngineStatuses(status.statuses)
       setPortfolio(port)
-      setMaxBudget(cfg.maxBudgetEur)
+      if (cfg) setMaxBudget(cfg.maxBudgetEur)
       setSummary(sum)
       fetchMissingNames([
         ...port.aiPositions.map((p) => p.ticker),
@@ -231,16 +249,26 @@ export default function Overview() {
     } catch (e) {
       setError((e as Error).message)
     }
-  }, [fetchMissingNames])
+  }, [fetchMissingNames, market])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
+  const replaceEngineStatus = (next: EngineStatus) => {
+    setEngineStatuses((prev) => {
+      const i = prev.findIndex((s) => s.market === next.market)
+      if (i < 0) return [...prev, next]
+      const copy = prev.slice()
+      copy[i] = next
+      return copy
+    })
+  }
+
   const handleStart = async () => {
     setLoading(true)
     try {
-      setEngineStatus(await api.engine.start())
+      replaceEngineStatus(await api.engine.start(engineMarket))
     } finally {
       setLoading(false)
     }
@@ -248,7 +276,7 @@ export default function Overview() {
   const handleStop = async () => {
     setLoading(true)
     try {
-      setEngineStatus(await api.engine.stop())
+      replaceEngineStatus(await api.engine.stop(engineMarket))
     } finally {
       setLoading(false)
     }
@@ -256,7 +284,7 @@ export default function Overview() {
   const handleCycle = async () => {
     setLoading(true)
     try {
-      setEngineStatus(await api.engine.cycle())
+      replaceEngineStatus(await api.engine.cycle(engineMarket))
       await loadData()
     } finally {
       setLoading(false)
@@ -299,6 +327,7 @@ export default function Overview() {
 
       <EngineCard
         status={engineStatus}
+        marketCode={engineMarket}
         onStart={handleStart}
         onStop={handleStop}
         onCycle={handleCycle}

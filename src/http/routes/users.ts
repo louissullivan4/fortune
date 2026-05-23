@@ -6,6 +6,8 @@ import { encrypt, decrypt } from '../../services/encryption.js'
 import { sendInviteEmail } from '../../services/email.js'
 import { requireAuth, requireAdmin } from '../middleware/auth.js'
 import { evictT212Client } from '../../api/trading212.js'
+import { MARKET_CODES } from '../../markets/registry.js'
+import type { UserConfig } from '../../types/user.js'
 
 const router = Router()
 
@@ -40,28 +42,28 @@ export async function getUserApiKeys(userId: string): Promise<{
   }
 }
 
-export async function getUserConfig(userId: string) {
-  const pool = getPool()
-  const result = await pool.query<{
-    trade_universe: string
-    trade_interval_ms: number
-    max_budget_eur: number
-    max_position_pct: number
-    daily_loss_limit_pct: number
-    stop_loss_pct: number
-    take_profit_pct: number
-    stagnant_exit_enabled: boolean
-    stagnant_time_minutes: number
-    stagnant_range_pct: number
-    soft_stop_enabled: boolean
-    soft_stop_hold_minutes: number
-    soft_stop_drawdown_pct: number
-    decision_mode: string
-    ai_cost_budget_monthly_usd: number
-    auto_start_on_restart: boolean
-  }>('SELECT * FROM user_configs WHERE user_id = $1', [userId])
-  const row = result.rows[0]
-  if (!row) return null
+// ── Helper: get user trading config for a specific market ──────────────────
+
+interface UserMarketConfigRow {
+  trade_universe: string
+  trade_interval_ms: number
+  max_budget_eur: number
+  max_position_pct: number
+  daily_loss_limit_pct: number
+  stop_loss_pct: number
+  take_profit_pct: number
+  stagnant_exit_enabled: boolean
+  stagnant_time_minutes: number
+  stagnant_range_pct: number
+  soft_stop_enabled: boolean
+  soft_stop_hold_minutes: number
+  soft_stop_drawdown_pct: number
+  decision_mode: string
+  ai_cost_budget_monthly_usd: number
+  auto_start_on_restart: boolean
+}
+
+function mapUserConfigRow(row: UserMarketConfigRow): UserConfig {
   return {
     tradeUniverse: row.trade_universe
       .split(',')
@@ -83,6 +85,46 @@ export async function getUserConfig(userId: string) {
     aiCostBudgetMonthlyUsd: Number(row.ai_cost_budget_monthly_usd),
     autoStartOnRestart: Boolean(row.auto_start_on_restart),
   }
+}
+
+export async function getUserMarketConfig(
+  userId: string,
+  market: string
+): Promise<UserConfig | null> {
+  const pool = getPool()
+  const result = await pool.query<UserMarketConfigRow>(
+    'SELECT * FROM user_market_configs WHERE user_id = $1 AND market_code = $2',
+    [userId, market]
+  )
+  const row = result.rows[0]
+  if (!row) return null
+  return mapUserConfigRow(row)
+}
+
+/** Backwards-compat shim — defaults to NYSE. Prefer getUserMarketConfig. */
+export async function getUserConfig(userId: string): Promise<UserConfig | null> {
+  return getUserMarketConfig(userId, 'NYSE')
+}
+
+export interface UserMarketStatus {
+  code: string
+  enabled: boolean
+  autoStart: boolean
+}
+
+/** List every catalog market + enabled flag for the given user. */
+export async function listUserMarkets(userId: string): Promise<UserMarketStatus[]> {
+  const pool = getPool()
+  const result = await pool.query<{ market_code: string; auto_start_on_restart: boolean }>(
+    'SELECT market_code, auto_start_on_restart FROM user_market_configs WHERE user_id = $1',
+    [userId]
+  )
+  const enabled = new Map(result.rows.map((r) => [r.market_code, Boolean(r.auto_start_on_restart)]))
+  return MARKET_CODES.map((code) => ({
+    code,
+    enabled: enabled.has(code),
+    autoStart: enabled.get(code) ?? false,
+  }))
 }
 
 // ── GET /api/users/me — own full profile ───────────────────────────────────
@@ -286,20 +328,22 @@ router.put('/me/api-keys', async (req, res, next) => {
   }
 })
 
-// ── GET /api/users/me/config — user trading config ─────────────────────────
+// ── GET /api/users/me/config?market=NYSE — per-market trading config ───────
 router.get('/me/config', async (req, res, next) => {
   try {
-    const cfg = await getUserConfig(req.user!.userId)
-    if (!cfg) return res.status(404).json({ error: 'Config not found — reseed the account' })
-    res.json({ ...cfg, tradeIntervalS: cfg.tradeIntervalMs / 1000 })
+    const market = (req.query.market as string | undefined) ?? 'NYSE'
+    const cfg = await getUserMarketConfig(req.user!.userId, market)
+    if (!cfg) return res.status(404).json({ error: 'Config not found for market' })
+    res.json({ ...cfg, market, tradeIntervalS: cfg.tradeIntervalMs / 1000 })
   } catch (err) {
     next(err)
   }
 })
 
-// ── PUT /api/users/me/config — update user trading config ─────────────────
+// ── PUT /api/users/me/config?market=NYSE — update per-market trading config
 router.put('/me/config', async (req, res, next) => {
   try {
+    const market = (req.query.market as string | undefined) ?? 'NYSE'
     const body = req.body as Record<string, unknown>
     const pool = getPool()
 
@@ -355,15 +399,77 @@ router.put('/me/config', async (req, res, next) => {
     }
 
     const setClauses = Object.keys(updates)
-      .map((k, i) => `${k} = $${i + 2}`)
+      .map((k, i) => `${k} = $${i + 3}`)
       .join(', ')
     await pool.query(
-      `UPDATE user_configs SET ${setClauses}, updated_at = NOW() WHERE user_id = $1`,
-      [req.user!.userId, ...Object.values(updates)]
+      `UPDATE user_market_configs SET ${setClauses}, updated_at = NOW() WHERE user_id = $1 AND market_code = $2`,
+      [req.user!.userId, market, ...Object.values(updates)]
     )
 
-    const cfg = await getUserConfig(req.user!.userId)
-    res.json({ ...cfg, tradeIntervalS: cfg!.tradeIntervalMs / 1000 })
+    const cfg = await getUserMarketConfig(req.user!.userId, market)
+    res.json({ ...cfg, market, tradeIntervalS: cfg!.tradeIntervalMs / 1000 })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── GET /api/users/me/markets — list enabled/available markets ─────────────
+router.get('/me/markets', async (req, res, next) => {
+  try {
+    const markets = await listUserMarkets(req.user!.userId)
+    res.json({ markets })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── PUT /api/users/me/markets/:code — enable a market ───────────────────────
+router.put('/me/markets/:code', async (req, res, next) => {
+  try {
+    const code = req.params.code
+    if (!MARKET_CODES.includes(code)) {
+      return res.status(400).json({ error: `Unknown market: ${code}` })
+    }
+    const pool = getPool()
+    await pool.query(
+      `INSERT INTO user_market_configs (user_id, market_code) VALUES ($1, $2)
+       ON CONFLICT (user_id, market_code) DO NOTHING`,
+      [req.user!.userId, code]
+    )
+    res.json({ ok: true, code, enabled: true })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// ── DELETE /api/users/me/markets/:code — disable a market ──────────────────
+// Refuses if any open positions exist for that market — user must close first
+// so we don't orphan positions whose managing engine has been disabled.
+router.delete('/me/markets/:code', async (req, res, next) => {
+  try {
+    const code = req.params.code
+    if (!MARKET_CODES.includes(code)) {
+      return res.status(400).json({ error: `Unknown market: ${code}` })
+    }
+    const pool = getPool()
+    const openCount = await pool.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM ai_positions WHERE user_id = $1 AND market_code = $2 AND status = 'open'`,
+      [req.user!.userId, code]
+    )
+    const n = Number(openCount.rows[0].c)
+    if (n > 0) {
+      return res.status(409).json({
+        error: `Cannot disable ${code}: ${n} open position(s) — close them first.`,
+      })
+    }
+    // Stop any running engine for this market before removing the config.
+    const { stopEngineIfRunning } = await import('../../engine/EngineService.js')
+    stopEngineIfRunning(req.user!.userId, code)
+    await pool.query('DELETE FROM user_market_configs WHERE user_id = $1 AND market_code = $2', [
+      req.user!.userId,
+      code,
+    ])
+    res.json({ ok: true, code, enabled: false })
   } catch (err) {
     next(err)
   }

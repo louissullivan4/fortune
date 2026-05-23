@@ -28,6 +28,7 @@ const baseConfig: BacktestConfig = {
   decisionMode: 'ai',
   aiCostBudgetMonthlyUsd: 5,
   autoStartOnRestart: false,
+  market: 'NYSE',
 }
 
 function makeBars(startMs: number, closes: number[]): OHLCV[] {

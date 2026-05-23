@@ -8,6 +8,9 @@ export interface BacktestConfig extends UserConfig {
   endDate: string
   /** Starting EUR balance for the simulation. */
   initialCash: number
+  /** Target market for this backtest (e.g. 'NYSE', 'XETRA'). Per the design,
+   * one backtest = one market — runs that combine markets are not supported. */
+  market: string
 }
 
 export interface ClosedTrade {

@@ -257,9 +257,10 @@ router.post('/create-account', async (req, res, next) => {
     )
     const userId = userResult.rows[0].user_id
 
-    // Seed per-user config and api_keys rows
+    // Seed per-user api_keys and an initial NYSE market config row.
+    // Additional markets are enabled later via POST /api/users/me/markets/:code.
     await pool.query(
-      `INSERT INTO user_configs (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,
+      `INSERT INTO user_market_configs (user_id, market_code) VALUES ($1, 'NYSE') ON CONFLICT (user_id, market_code) DO NOTHING`,
       [userId]
     )
     await pool.query(

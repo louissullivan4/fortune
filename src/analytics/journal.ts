@@ -11,6 +11,7 @@ export interface DecisionRecord {
   signalsJson: string
   portfolioJson: string
   userId: string
+  market: string
 }
 
 export interface OrderRecord {
@@ -22,6 +23,7 @@ export interface OrderRecord {
   fillQuantity: number | null
   timestamp: string
   userId: string
+  market: string
 }
 
 // ── Decisions ──────────────────────────────────────────────────────────────
@@ -29,8 +31,8 @@ export interface OrderRecord {
 export async function logDecision(record: Omit<DecisionRecord, 'id'>): Promise<number> {
   const pool = getPool()
   const result = await pool.query<{ id: number }>(
-    `INSERT INTO decisions (timestamp, action, ticker, quantity, estimated_price, reasoning, signals_json, portfolio_json, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO decisions (timestamp, action, ticker, quantity, estimated_price, reasoning, signals_json, portfolio_json, user_id, market_code)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id`,
     [
       record.timestamp,
@@ -42,6 +44,7 @@ export async function logDecision(record: Omit<DecisionRecord, 'id'>): Promise<n
       record.signalsJson,
       record.portfolioJson,
       record.userId,
+      record.market,
     ]
   )
   return result.rows[0].id
@@ -52,8 +55,8 @@ export async function logDecision(record: Omit<DecisionRecord, 'id'>): Promise<n
 export async function logOrder(record: Omit<OrderRecord, 'id'>): Promise<number> {
   const pool = getPool()
   const result = await pool.query<{ id: number }>(
-    `INSERT INTO orders (decision_id, t212_order_id, status, fill_price, fill_quantity, timestamp, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO orders (decision_id, t212_order_id, status, fill_price, fill_quantity, timestamp, user_id, market_code)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id`,
     [
       record.decisionId,
@@ -63,9 +66,18 @@ export async function logOrder(record: Omit<OrderRecord, 'id'>): Promise<number>
       record.fillQuantity,
       record.timestamp,
       record.userId,
+      record.market,
     ]
   )
   return result.rows[0].id
+}
+
+// ── Helper: build optional market WHERE clause ─────────────────────────────
+// For read queries that accept an optional market filter: pass `market` to
+// scope to a single market, or undefined to span all markets.
+function marketClause(market: string | undefined, paramIndex: number, prefix = ''): string {
+  if (market === undefined) return ''
+  return ` AND ${prefix}market_code = $${paramIndex}`
 }
 
 // ── Daily snapshots ────────────────────────────────────────────────────────
@@ -74,14 +86,15 @@ export async function upsertDailySnapshot(
   date: string,
   openValue: number,
   aiOpenValue: number,
-  userId: string
+  userId: string,
+  market: string
 ): Promise<void> {
   const pool = getPool()
   await pool.query(
-    `INSERT INTO daily_snapshots (date, open_value, ai_open_value, user_id)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (user_id, date) WHERE user_id IS NOT NULL DO NOTHING`,
-    [date, openValue, aiOpenValue, userId]
+    `INSERT INTO daily_snapshots (date, open_value, ai_open_value, user_id, market_code)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, market_code, date) WHERE user_id IS NOT NULL DO NOTHING`,
+    [date, openValue, aiOpenValue, userId, market]
   )
 }
 
@@ -90,50 +103,60 @@ export async function updateDailyClose(
   closeValue: number,
   pnl: number,
   userId: string,
+  market: string,
   aiCloseValue?: number
 ): Promise<void> {
   const pool = getPool()
   const res = await pool.query<{ c: string }>(
-    `SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND timestamp::date = $1::date AND user_id = $2`,
-    [date, userId]
+    `SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND timestamp::date = $1::date AND user_id = $2 AND market_code = $3`,
+    [date, userId, market]
   )
   const tradesCount = Number(res.rows[0].c)
   await pool.query(
     `UPDATE daily_snapshots
      SET close_value = $1, pnl = $2, trades_count = $3, ai_close_value = COALESCE($4, ai_close_value)
-     WHERE date = $5 AND user_id = $6`,
-    [closeValue, pnl, tradesCount, aiCloseValue ?? null, date, userId]
+     WHERE date = $5 AND user_id = $6 AND market_code = $7`,
+    [closeValue, pnl, tradesCount, aiCloseValue ?? null, date, userId, market]
   )
 }
 
-export async function getDailyOpenValue(date: string, userId: string): Promise<number | null> {
+export async function getDailyOpenValue(
+  date: string,
+  userId: string,
+  market: string
+): Promise<number | null> {
   const pool = getPool()
   const res = await pool.query<{ open_value: number }>(
-    'SELECT open_value FROM daily_snapshots WHERE date = $1 AND user_id = $2',
-    [date, userId]
+    'SELECT open_value FROM daily_snapshots WHERE date = $1 AND user_id = $2 AND market_code = $3',
+    [date, userId, market]
   )
   return res.rows[0]?.open_value ?? null
 }
 
-export async function getDailyAiOpenValue(date: string, userId: string): Promise<number | null> {
+export async function getDailyAiOpenValue(
+  date: string,
+  userId: string,
+  market: string
+): Promise<number | null> {
   const pool = getPool()
   const res = await pool.query<{ ai_open_value: number }>(
-    'SELECT ai_open_value FROM daily_snapshots WHERE date = $1 AND user_id = $2',
-    [date, userId]
+    'SELECT ai_open_value FROM daily_snapshots WHERE date = $1 AND user_id = $2 AND market_code = $3',
+    [date, userId, market]
   )
   return res.rows[0]?.ai_open_value ?? null
 }
 
 export async function getPreviousDayAiOpenValue(
   date: string,
-  userId: string
+  userId: string,
+  market: string
 ): Promise<number | null> {
   const pool = getPool()
   const res = await pool.query<{ ai_open_value: number }>(
     `SELECT ai_open_value FROM daily_snapshots
-     WHERE date < $1 AND user_id = $2 AND ai_open_value IS NOT NULL
+     WHERE date < $1 AND user_id = $2 AND market_code = $3 AND ai_open_value IS NOT NULL
      ORDER BY date DESC LIMIT 1`,
-    [date, userId]
+    [date, userId, market]
   )
   return res.rows[0]?.ai_open_value ?? null
 }
@@ -146,16 +169,29 @@ export interface RecentDecision {
   reasoning: string
 }
 
-export async function getRecentDecisions(userId: string, limit = 5): Promise<RecentDecision[]> {
+export async function getRecentDecisions(
+  userId: string,
+  limit = 5,
+  market?: string
+): Promise<RecentDecision[]> {
   const pool = getPool()
+  const params: unknown[] = [userId]
+  let where = 'WHERE user_id = $1'
+  if (market !== undefined) {
+    params.push(market)
+    where += ` AND market_code = $${params.length}`
+  }
+  params.push(limit)
   const res = await pool.query<RecentDecision>(
-    'SELECT timestamp, action, ticker, quantity, reasoning FROM decisions WHERE user_id = $1 ORDER BY id DESC LIMIT $2',
-    [userId, limit]
+    `SELECT timestamp, action, ticker, quantity, reasoning FROM decisions ${where} ORDER BY id DESC LIMIT $${params.length}`,
+    params
   )
   return res.rows
 }
 
 // ── AI Portfolio ───────────────────────────────────────────────────────────
+// Note: ai_portfolio_config is user-level, not per-market — kept that way
+// because it tracks the user's overall start date and isn't load-bearing.
 
 export interface AiPortfolioConfig {
   startedAt: string
@@ -204,6 +240,7 @@ export interface AiPosition {
   realizedPnlEur: number | null
   /** Instrument trading currency (USD, EUR, GBX, …). Audit metadata. */
   currencyCode: string | null
+  market: string
   status: 'open' | 'closed'
 }
 
@@ -221,6 +258,7 @@ function mapAiPosition(r: {
   realized_pnl: number | null
   realized_pnl_eur?: number | null
   currency_code?: string | null
+  market_code?: string | null
   status: string
 }): AiPosition {
   return {
@@ -237,6 +275,7 @@ function mapAiPosition(r: {
     realizedPnl: r.realized_pnl != null ? Number(r.realized_pnl) : null,
     realizedPnlEur: r.realized_pnl_eur != null ? Number(r.realized_pnl_eur) : null,
     currencyCode: r.currency_code ?? null,
+    market: r.market_code ?? 'NYSE',
     status: r.status as 'open' | 'closed',
   }
 }
@@ -247,15 +286,26 @@ export async function openAiPosition(
   entryPrice: number | null,
   openedAt: string,
   userId: string,
+  market: string,
   entryPriceEur: number | null = null,
   currencyCode: string | null = null
 ): Promise<number> {
   const pool = getPool()
   const result = await pool.query<{ id: number }>(
-    `INSERT INTO ai_positions (ticker, opened_at, quantity, entry_price, entry_price_eur, high_water_mark, currency_code, status, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8)
+    `INSERT INTO ai_positions (ticker, opened_at, quantity, entry_price, entry_price_eur, high_water_mark, currency_code, status, user_id, market_code)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'open', $8, $9)
      RETURNING id`,
-    [ticker, openedAt, quantity, entryPrice, entryPriceEur, entryPrice, currencyCode, userId]
+    [
+      ticker,
+      openedAt,
+      quantity,
+      entryPrice,
+      entryPriceEur,
+      entryPrice,
+      currencyCode,
+      userId,
+      market,
+    ]
   )
   return result.rows[0].id
 }
@@ -263,15 +313,16 @@ export async function openAiPosition(
 export async function updateHighWaterMark(
   ticker: string,
   price: number,
-  userId: string
+  userId: string,
+  market: string
 ): Promise<void> {
   const pool = getPool()
   await pool.query(
     `UPDATE ai_positions
      SET high_water_mark = $1
-     WHERE ticker = $2 AND status = 'open' AND user_id = $3
+     WHERE ticker = $2 AND status = 'open' AND user_id = $3 AND market_code = $4
        AND (high_water_mark IS NULL OR $1 > high_water_mark)`,
-    [price, ticker, userId]
+    [price, ticker, userId, market]
   )
 }
 
@@ -280,6 +331,7 @@ export async function closeAiPosition(
   exitPrice: number | null,
   closedAt: string,
   userId: string,
+  market: string,
   exitPriceEur: number | null = null
 ): Promise<void> {
   const pool = getPool()
@@ -290,9 +342,9 @@ export async function closeAiPosition(
     entry_price_eur: number | null
   }>(
     `SELECT id, quantity, entry_price, entry_price_eur FROM ai_positions
-     WHERE ticker = $1 AND status = 'open' AND user_id = $2
+     WHERE ticker = $1 AND status = 'open' AND user_id = $2 AND market_code = $3
      ORDER BY opened_at DESC LIMIT 1`,
-    [ticker, userId]
+    [ticker, userId, market]
   )
   const open = res.rows[0]
   if (!open) return
@@ -321,6 +373,7 @@ export async function closeAllAiPositions(
   exitPrice: number | null,
   closedAt: string,
   userId: string,
+  market: string,
   exitPriceEur: number | null = null
 ): Promise<void> {
   const pool = getPool()
@@ -331,8 +384,8 @@ export async function closeAllAiPositions(
     entry_price_eur: number | null
   }>(
     `SELECT id, quantity, entry_price, entry_price_eur FROM ai_positions
-     WHERE ticker = $1 AND status = 'open' AND user_id = $2`,
-    [ticker, userId]
+     WHERE ticker = $1 AND status = 'open' AND user_id = $2 AND market_code = $3`,
+    [ticker, userId, market]
   )
   for (const open of res.rows) {
     const realizedPnl =
@@ -358,6 +411,7 @@ export async function updateEntryPrice(
   ticker: string,
   newEntryPrice: number,
   userId: string,
+  market: string,
   newEntryPriceEur: number | null = null
 ): Promise<void> {
   const pool = getPool()
@@ -366,17 +420,21 @@ export async function updateEntryPrice(
      SET entry_price = $1,
          entry_price_eur = COALESCE($2, entry_price_eur),
          high_water_mark = CASE WHEN high_water_mark < $1 THEN $1 ELSE high_water_mark END
-     WHERE ticker = $3 AND status = 'open' AND user_id = $4`,
-    [newEntryPrice, newEntryPriceEur, ticker, userId]
+     WHERE ticker = $3 AND status = 'open' AND user_id = $4 AND market_code = $5`,
+    [newEntryPrice, newEntryPriceEur, ticker, userId, market]
   )
 }
 
-export async function getOpenAiPositions(userId: string): Promise<AiPosition[]> {
+export async function getOpenAiPositions(userId: string, market?: string): Promise<AiPosition[]> {
   const pool = getPool()
-  const res = await pool.query(
-    `SELECT * FROM ai_positions WHERE status = 'open' AND user_id = $1 ORDER BY opened_at ASC`,
-    [userId]
-  )
+  const params: unknown[] = [userId]
+  let sql = `SELECT * FROM ai_positions WHERE status = 'open' AND user_id = $1`
+  if (market !== undefined) {
+    params.push(market)
+    sql += ` AND market_code = $2`
+  }
+  sql += ` ORDER BY opened_at ASC`
+  const res = await pool.query(sql, params)
   return res.rows.map(mapAiPosition)
 }
 
@@ -389,29 +447,37 @@ export async function getOpenAiPositions(userId: string): Promise<AiPosition[]> 
 export async function getRecentTickerLossCount(
   userId: string,
   ticker: string,
-  days: number
+  days: number,
+  market?: string
 ): Promise<number> {
   const pool = getPool()
-  const res = await pool.query<{ c: string }>(
-    `SELECT COUNT(*) AS c
+  const params: unknown[] = [userId, ticker, days]
+  let sql = `SELECT COUNT(*) AS c
      FROM ai_positions
      WHERE user_id = $1
        AND ticker = $2
        AND status = 'closed'
        AND realized_pnl IS NOT NULL
        AND realized_pnl < 0
-       AND closed_at::timestamptz >= NOW() - ($3 || ' days')::interval`,
-    [userId, ticker, days]
-  )
+       AND closed_at::timestamptz >= NOW() - ($3 || ' days')::interval`
+  if (market !== undefined) {
+    params.push(market)
+    sql += ` AND market_code = $4`
+  }
+  const res = await pool.query<{ c: string }>(sql, params)
   return Number(res.rows[0].c)
 }
 
-export async function getClosedAiPositions(userId: string): Promise<AiPosition[]> {
+export async function getClosedAiPositions(userId: string, market?: string): Promise<AiPosition[]> {
   const pool = getPool()
-  const res = await pool.query(
-    `SELECT * FROM ai_positions WHERE status = 'closed' AND user_id = $1 ORDER BY closed_at DESC`,
-    [userId]
-  )
+  const params: unknown[] = [userId]
+  let sql = `SELECT * FROM ai_positions WHERE status = 'closed' AND user_id = $1`
+  if (market !== undefined) {
+    params.push(market)
+    sql += ` AND market_code = $2`
+  }
+  sql += ` ORDER BY closed_at DESC`
+  const res = await pool.query(sql, params)
   return res.rows.map(mapAiPosition)
 }
 
@@ -498,7 +564,8 @@ export async function getAiPositionDetails(
 export async function getClosedAiPositionsWithOrders(
   userId: string,
   from?: string,
-  to?: string
+  to?: string,
+  market?: string
 ): Promise<AiPositionWithOrders[]> {
   const pool = getPool()
   const conditions = ["ap.status = 'closed'", 'ap.user_id = $1']
@@ -512,6 +579,10 @@ export async function getClosedAiPositionsWithOrders(
     params.push(`${to}T23:59:59.999`)
     conditions.push(`ap.closed_at <= $${params.length}`)
   }
+  if (market !== undefined) {
+    params.push(market)
+    conditions.push(`ap.market_code = $${params.length}`)
+  }
 
   const res = await pool.query(
     `SELECT
@@ -520,7 +591,7 @@ export async function getClosedAiPositionsWithOrders(
        ap.high_water_mark,
        ap.exit_price, ap.exit_price_eur,
        ap.realized_pnl, ap.realized_pnl_eur,
-       ap.currency_code, ap.status,
+       ap.currency_code, ap.market_code, ap.status,
        buy_o.t212_order_id  AS buy_t212_id,
        sell_o.t212_order_id AS sell_t212_id
      FROM ai_positions ap
@@ -556,6 +627,7 @@ export async function getClosedAiPositionsWithOrders(
       realized_pnl: r.realized_pnl,
       realized_pnl_eur: r.realized_pnl_eur,
       currency_code: r.currency_code,
+      market_code: r.market_code,
       status: r.status,
     }),
     buyT212OrderId: r.buy_t212_id ?? null,
@@ -563,7 +635,10 @@ export async function getClosedAiPositionsWithOrders(
   }))
 }
 
-export async function reconcileAiPositions(userId: string): Promise<{ inserted: number }> {
+export async function reconcileAiPositions(
+  userId: string,
+  market: string
+): Promise<{ inserted: number }> {
   const pool = getPool()
 
   // Only reconcile decisions that actually placed an order at T212. Without
@@ -584,18 +659,19 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
        WHERE d.action IN ('buy', 'sell')
          AND d.ticker IS NOT NULL
          AND d.user_id = $1
+         AND d.market_code = $2
          AND o.status NOT LIKE 'blocked%'
          AND o.status NOT LIKE 'error%'
        ORDER BY d.id ASC`,
-      [userId]
+      [userId, market]
     )
   ).rows
 
   const existing = new Set(
     (
       await pool.query<{ key: string }>(
-        `SELECT ticker || '|' || opened_at AS key FROM ai_positions WHERE user_id = $1`,
-        [userId]
+        `SELECT ticker || '|' || opened_at AS key FROM ai_positions WHERE user_id = $1 AND market_code = $2`,
+        [userId, market]
       )
     ).rows.map((r) => r.key)
   )
@@ -604,8 +680,8 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
     (
       await pool.query<{ key: string }>(
         `SELECT ticker || '|' || closed_at AS key FROM ai_positions
-         WHERE status = 'closed' AND user_id = $1`,
-        [userId]
+         WHERE status = 'closed' AND user_id = $1 AND market_code = $2`,
+        [userId, market]
       )
     ).rows.map((r) => r.key)
   )
@@ -615,13 +691,13 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
     if (t.action === 'buy') {
       const key = `${t.ticker}|${t.timestamp}`
       if (existing.has(key)) continue
-      await openAiPosition(t.ticker, t.quantity, t.estimated_price, t.timestamp, userId)
+      await openAiPosition(t.ticker, t.quantity, t.estimated_price, t.timestamp, userId, market)
       existing.add(key)
       inserted++
     } else {
       const closeKey = `${t.ticker}|${t.timestamp}`
       if (alreadyClosed.has(closeKey)) continue
-      await closeAiPosition(t.ticker, t.estimated_price, t.timestamp, userId)
+      await closeAiPosition(t.ticker, t.estimated_price, t.timestamp, userId, market)
       alreadyClosed.add(closeKey)
       inserted++
     }
@@ -632,18 +708,25 @@ export async function reconcileAiPositions(userId: string): Promise<{ inserted: 
 // ── Analytics queries ──────────────────────────────────────────────────────
 
 export async function getAllTimeStats(
-  userId: string
+  userId: string,
+  market?: string
 ): Promise<{ totalDecisions: number; totalTrades: number; daysTraded: number }> {
   const pool = getPool()
+  const mc = marketClause(market, 2)
+  const params: unknown[] = market !== undefined ? [userId, market] : [userId]
   const [d, t, s] = await Promise.all([
-    pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM decisions WHERE user_id = $1', [userId]),
     pool.query<{ c: string }>(
-      "SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND user_id = $1",
-      [userId]
+      `SELECT COUNT(*) AS c FROM decisions WHERE user_id = $1${mc}`,
+      params
     ),
-    pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM daily_snapshots WHERE user_id = $1', [
-      userId,
-    ]),
+    pool.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM decisions WHERE action != 'hold' AND user_id = $1${mc}`,
+      params
+    ),
+    pool.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM daily_snapshots WHERE user_id = $1${mc}`,
+      params
+    ),
   ])
   return {
     totalDecisions: Number(d.rows[0].c),
@@ -654,32 +737,51 @@ export async function getAllTimeStats(
 
 export async function getDailyValues(
   userId: string,
-  limit = 30
+  limit = 30,
+  market?: string
 ): Promise<Array<{ date: string; value: number }>> {
   const pool = getPool()
+  // When market is omitted, sum per date across all markets so the equity
+  // curve shows the combined EUR value the user holds.
+  if (market === undefined) {
+    const res = await pool.query<{ date: string; value: number }>(
+      `SELECT date,
+         SUM(COALESCE(ai_close_value, ai_open_value, close_value, open_value)) AS value
+       FROM daily_snapshots
+       WHERE user_id = $1
+       GROUP BY date
+       ORDER BY date DESC
+       LIMIT $2`,
+      [userId, limit]
+    )
+    return res.rows.reverse().map((r) => ({ date: r.date, value: Number(r.value) }))
+  }
   const res = await pool.query<{ date: string; value: number }>(
     `SELECT date,
        COALESCE(ai_close_value, ai_open_value, close_value, open_value) AS value
      FROM daily_snapshots
-     WHERE user_id = $1
+     WHERE user_id = $1 AND market_code = $2
      ORDER BY date DESC
-     LIMIT $2`,
-    [userId, limit]
+     LIMIT $3`,
+    [userId, market, limit]
   )
-  return res.rows.reverse()
+  return res.rows.reverse().map((r) => ({ date: r.date, value: Number(r.value) }))
 }
 
 export async function getIntradayValues(
   userId: string,
-  hours: number
+  hours: number,
+  market?: string
 ): Promise<Array<{ timestamp: string; value: number }>> {
   const pool = getPool()
+  const mc = marketClause(market, 3)
+  const params: unknown[] = market !== undefined ? [userId, hours, market] : [userId, hours]
   const res = await pool.query<{ timestamp: string; portfolio_json: string }>(
     `SELECT timestamp, portfolio_json
      FROM decisions
-     WHERE user_id = $1 AND timestamp::timestamptz >= NOW() - ($2 || ' hours')::interval
+     WHERE user_id = $1 AND timestamp::timestamptz >= NOW() - ($2 || ' hours')::interval${mc}
      ORDER BY timestamp ASC`,
-    [userId, hours]
+    params
   )
   return res.rows.flatMap((r) => {
     try {
@@ -707,13 +809,14 @@ export interface DecisionRow {
   portfolioJson: string
   orderStatus: string | null
   orderId: string | null
+  market: string
 }
 
 export async function getDecisionsPaginated(
   userId: string,
   page: number,
   limit: number,
-  filters: { action?: string; ticker?: string; period?: string } = {}
+  filters: { action?: string; ticker?: string; period?: string; market?: string } = {}
 ): Promise<{ data: DecisionRow[]; total: number }> {
   const pool = getPool()
   const offset = (page - 1) * limit
@@ -721,6 +824,10 @@ export async function getDecisionsPaginated(
   const conditions: string[] = ['d.user_id = $1']
   const params: unknown[] = [userId]
 
+  if (filters.market) {
+    params.push(filters.market)
+    conditions.push(`d.market_code = $${params.length}`)
+  }
   if (filters.action) {
     params.push(filters.action)
     conditions.push(`d.action = $${params.length}`)
@@ -752,11 +859,13 @@ export async function getDecisionsPaginated(
       portfoliojson: string
       orderstatus: string | null
       orderid: string | null
+      marketcode: string
     }>(
       `SELECT d.id, d.timestamp, d.action, d.ticker, d.quantity,
               d.estimated_price AS estimatedprice, d.reasoning,
               d.signals_json AS signalsjson, d.portfolio_json AS portfoliojson,
-              o.status AS orderstatus, o.t212_order_id AS orderid
+              o.status AS orderstatus, o.t212_order_id AS orderid,
+              d.market_code AS marketcode
        FROM decisions d
        LEFT JOIN orders o ON o.decision_id = d.id
        ${where}
@@ -778,6 +887,7 @@ export async function getDecisionsPaginated(
     portfolioJson: r.portfoliojson,
     orderStatus: r.orderstatus,
     orderId: r.orderid,
+    market: r.marketcode,
   }))
   return { data, total }
 }
@@ -796,11 +906,13 @@ export async function getDecisionById(id: number, userId: string): Promise<Decis
     portfoliojson: string
     orderstatus: string | null
     orderid: string | null
+    marketcode: string
   }>(
     `SELECT d.id, d.timestamp, d.action, d.ticker, d.quantity,
             d.estimated_price AS estimatedprice, d.reasoning,
             d.signals_json AS signalsjson, d.portfolio_json AS portfoliojson,
-            o.status AS orderstatus, o.t212_order_id AS orderid
+            o.status AS orderstatus, o.t212_order_id AS orderid,
+            d.market_code AS marketcode
      FROM decisions d
      LEFT JOIN orders o ON o.decision_id = d.id
      WHERE d.id = $1 AND d.user_id = $2`,
@@ -820,6 +932,7 @@ export async function getDecisionById(id: number, userId: string): Promise<Decis
     portfolioJson: r.portfoliojson,
     orderStatus: r.orderstatus,
     orderId: r.orderid,
+    market: r.marketcode,
   }
 }
 
@@ -833,17 +946,25 @@ export interface OrderRow {
   timestamp: string
   ticker: string | null
   action: string
+  market: string
 }
 
 export async function getOrdersPaginated(
   userId: string,
   page: number,
-  limit: number
+  limit: number,
+  market?: string
 ): Promise<{ data: OrderRow[]; total: number }> {
   const pool = getPool()
   const offset = (page - 1) * limit
+  const params: unknown[] = [userId]
+  let where = `WHERE o.user_id = $1`
+  if (market !== undefined) {
+    params.push(market)
+    where += ` AND o.market_code = $${params.length}`
+  }
   const [countRes, dataRes] = await Promise.all([
-    pool.query<{ c: string }>('SELECT COUNT(*) AS c FROM orders WHERE user_id = $1', [userId]),
+    pool.query<{ c: string }>(`SELECT COUNT(*) AS c FROM orders o ${where}`, params),
     pool.query<{
       id: number
       decisionid: number
@@ -854,16 +975,17 @@ export async function getOrdersPaginated(
       timestamp: string
       ticker: string | null
       action: string
+      marketcode: string
     }>(
       `SELECT o.id, o.decision_id AS decisionid, o.t212_order_id AS t212orderid,
               o.status, o.fill_price AS fillprice, o.fill_quantity AS fillquantity,
-              o.timestamp, d.ticker, d.action
+              o.timestamp, d.ticker, d.action, o.market_code AS marketcode
        FROM orders o
        JOIN decisions d ON d.id = o.decision_id
-       WHERE o.user_id = $1
+       ${where}
        ORDER BY o.id DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
     ),
   ])
   const total = Number(countRes.rows[0].c)
@@ -877,6 +999,7 @@ export async function getOrdersPaginated(
     timestamp: r.timestamp,
     ticker: r.ticker,
     action: r.action,
+    market: r.marketcode,
   }))
   return { data, total }
 }
@@ -893,14 +1016,15 @@ export interface AiUsageRecord {
   outputCostUsd: number
   totalCostUsd: number
   userId: string
+  market: string
 }
 
 export async function logAiUsage(record: AiUsageRecord): Promise<void> {
   const pool = getPool()
   await pool.query(
     `INSERT INTO ai_usage
-       (decision_id, timestamp, model, input_tokens, output_tokens, input_cost_usd, output_cost_usd, total_cost_usd, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+       (decision_id, timestamp, model, input_tokens, output_tokens, input_cost_usd, output_cost_usd, total_cost_usd, user_id, market_code)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       record.decisionId,
       record.timestamp,
@@ -911,6 +1035,7 @@ export async function logAiUsage(record: AiUsageRecord): Promise<void> {
       record.outputCostUsd,
       record.totalCostUsd,
       record.userId,
+      record.market,
     ]
   )
 }
@@ -923,8 +1048,10 @@ export interface AiUsageSummary {
   avgCostPerCallUsd: number
 }
 
-export async function getAiUsageSummary(userId: string): Promise<AiUsageSummary> {
+export async function getAiUsageSummary(userId: string, market?: string): Promise<AiUsageSummary> {
   const pool = getPool()
+  const mc = marketClause(market, 2)
+  const params: unknown[] = market !== undefined ? [userId, market] : [userId]
   const res = await pool.query<{
     totalinputtokens: string
     totaloutputtokens: string
@@ -936,8 +1063,8 @@ export async function getAiUsageSummary(userId: string): Promise<AiUsageSummary>
        COALESCE(SUM(output_tokens),   0) AS totaloutputtokens,
        COALESCE(SUM(total_cost_usd),  0) AS totalcostusd,
        COUNT(*)                          AS callcount
-     FROM ai_usage WHERE user_id = $1`,
-    [userId]
+     FROM ai_usage WHERE user_id = $1${mc}`,
+    params
   )
   const r = res.rows[0]
   const callCount = Number(r.callcount)
@@ -958,6 +1085,7 @@ export async function getAiUsageSummary(userId: string): Promise<AiUsageSummary>
  */
 export async function getMonthToDateAiCostUsd(
   userId: string,
+  market: string,
   now: Date = new Date()
 ): Promise<number> {
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
@@ -965,8 +1093,8 @@ export async function getMonthToDateAiCostUsd(
   const res = await pool.query<{ cost: string }>(
     `SELECT COALESCE(SUM(total_cost_usd), 0) AS cost
      FROM ai_usage
-     WHERE user_id = $1 AND timestamp >= $2`,
-    [userId, monthStart.toISOString()]
+     WHERE user_id = $1 AND market_code = $2 AND timestamp >= $3`,
+    [userId, market, monthStart.toISOString()]
   )
   return Number(res.rows[0]?.cost ?? 0)
 }
@@ -982,8 +1110,14 @@ export interface AiTrade {
 }
 
 /** Returns all non-hold decisions for a user (legacy dashboard/performance compat). */
-export async function getAiTrades(userId: string): Promise<AiTrade[]> {
+export async function getAiTrades(userId: string, market?: string): Promise<AiTrade[]> {
   const pool = getPool()
+  const params: unknown[] = [userId]
+  let mc = ''
+  if (market !== undefined) {
+    params.push(market)
+    mc = ' AND market_code = $2'
+  }
   const res = await pool.query<{
     action: string
     ticker: string | null
@@ -994,9 +1128,9 @@ export async function getAiTrades(userId: string): Promise<AiTrade[]> {
   }>(
     `SELECT action, ticker, estimated_price, quantity, order_status, timestamp
      FROM decisions
-     WHERE user_id = $1 AND action != 'hold'
+     WHERE user_id = $1 AND action != 'hold'${mc}
      ORDER BY timestamp ASC`,
-    [userId]
+    params
   )
   return res.rows.map((r) => ({
     action: r.action,
@@ -1010,9 +1144,10 @@ export async function getAiTrades(userId: string): Promise<AiTrade[]> {
 
 /** Net positions view (ticker + net quantity from decisions). Legacy compat. */
 export async function getAiNetPositions(
-  userId: string
+  userId: string,
+  market?: string
 ): Promise<Array<{ ticker: string; netQuantity: number }>> {
-  const positions = await getOpenAiPositions(userId)
+  const positions = await getOpenAiPositions(userId, market)
   return positions.map((p) => ({ ticker: p.ticker, netQuantity: p.quantity }))
 }
 
@@ -1024,24 +1159,40 @@ export interface DailyStats {
   tradesCount: number
 }
 
-export async function getDailyStats(date: string, userId?: string): Promise<DailyStats | null> {
+export async function getDailyStats(
+  date: string,
+  userId?: string,
+  market?: string
+): Promise<DailyStats | null> {
   const pool = getPool()
   const params: (string | undefined)[] = [date]
   const userClause = userId ? 'AND user_id = $2' : 'AND user_id IS NULL'
   if (userId) params.push(userId)
+  let mc = ''
+  if (userId && market !== undefined) {
+    params.push(market)
+    mc = ` AND market_code = $${params.length}`
+  }
   const res = await pool.query<{
     date: string
     open_value: number
     close_value: number | null
   }>(
-    `SELECT date, open_value, close_value FROM daily_snapshots WHERE date = $1 ${userClause} LIMIT 1`,
+    `SELECT date, open_value, close_value FROM daily_snapshots WHERE date = $1 ${userClause}${mc} LIMIT 1`,
     params
   )
   if (!res.rows[0]) return null
   const row = res.rows[0]
+  const tradeParams: (string | undefined)[] = [date]
+  if (userId) tradeParams.push(userId)
+  let tradeMc = ''
+  if (userId && market !== undefined) {
+    tradeParams.push(market)
+    tradeMc = ` AND market_code = $${tradeParams.length}`
+  }
   const tradesRes = await pool.query<{ c: string }>(
-    `SELECT COUNT(*) AS c FROM decisions WHERE timestamp::date = $1 AND action != 'hold'${userId ? ' AND user_id = $2' : ' AND user_id IS NULL'}`,
-    params
+    `SELECT COUNT(*) AS c FROM decisions WHERE timestamp::date = $1 AND action != 'hold'${userId ? ' AND user_id = $2' : ' AND user_id IS NULL'}${tradeMc}`,
+    tradeParams
   )
   const openValue = Number(row.open_value)
   const closeValue = row.close_value != null ? Number(row.close_value) : null
@@ -1063,11 +1214,20 @@ export interface OrderForDay {
   reasoning: string
 }
 
-export async function getOrdersForDay(date: string, userId?: string): Promise<OrderForDay[]> {
+export async function getOrdersForDay(
+  date: string,
+  userId?: string,
+  market?: string
+): Promise<OrderForDay[]> {
   const pool = getPool()
   const params: (string | undefined)[] = [date]
   const userClause = userId ? 'AND d.user_id = $2' : 'AND d.user_id IS NULL'
   if (userId) params.push(userId)
+  let mc = ''
+  if (userId && market !== undefined) {
+    params.push(market)
+    mc = ` AND d.market_code = $${params.length}`
+  }
   const res = await pool.query<{
     action: string | null
     ticker: string | null
@@ -1079,7 +1239,7 @@ export async function getOrdersForDay(date: string, userId?: string): Promise<Or
     `SELECT d.action, d.ticker, d.quantity, o.fill_price, o.status, d.reasoning
      FROM decisions d
      LEFT JOIN orders o ON o.decision_id = d.id
-     WHERE d.timestamp::date = $1 ${userClause}
+     WHERE d.timestamp::date = $1 ${userClause}${mc}
      ORDER BY d.timestamp ASC`,
     params
   )
@@ -1093,10 +1253,24 @@ export async function getOrdersForDay(date: string, userId?: string): Promise<Or
   }))
 }
 
-export async function resetDailySnapshot(date: string, userId?: string): Promise<void> {
+export async function resetDailySnapshot(
+  date: string,
+  userId?: string,
+  market?: string
+): Promise<void> {
   const pool = getPool()
   if (userId) {
-    await pool.query('DELETE FROM daily_snapshots WHERE date = $1 AND user_id = $2', [date, userId])
+    if (market !== undefined) {
+      await pool.query(
+        'DELETE FROM daily_snapshots WHERE date = $1 AND user_id = $2 AND market_code = $3',
+        [date, userId, market]
+      )
+    } else {
+      await pool.query('DELETE FROM daily_snapshots WHERE date = $1 AND user_id = $2', [
+        date,
+        userId,
+      ])
+    }
   } else {
     await pool.query('DELETE FROM daily_snapshots WHERE date = $1 AND user_id IS NULL', [date])
   }
@@ -1104,16 +1278,36 @@ export async function resetDailySnapshot(date: string, userId?: string): Promise
 
 export async function getDailyStatsRange(
   userId: string,
-  limit: number
+  limit: number,
+  market?: string
 ): Promise<Array<{ date: string; pnl: number | null; tradesCount: number }>> {
   const pool = getPool()
+  if (market === undefined) {
+    // Aggregate per date across all markets
+    const res = await pool.query<{ date: string; pnl: string | null; trades_count: string }>(
+      `SELECT date,
+              SUM(pnl)::numeric AS pnl,
+              SUM(COALESCE(trades_count, 0))::numeric AS trades_count
+       FROM daily_snapshots
+       WHERE user_id = $1
+       GROUP BY date
+       ORDER BY date DESC
+       LIMIT $2`,
+      [userId, limit]
+    )
+    return res.rows.reverse().map((r) => ({
+      date: r.date,
+      pnl: r.pnl != null ? Number(Number(r.pnl).toFixed(2)) : null,
+      tradesCount: Number(r.trades_count),
+    }))
+  }
   const res = await pool.query<{ date: string; pnl: string | null; trades_count: string }>(
     `SELECT date, pnl, COALESCE(trades_count, 0) AS trades_count
      FROM daily_snapshots
-     WHERE user_id = $1
+     WHERE user_id = $1 AND market_code = $2
      ORDER BY date DESC
-     LIMIT $2`,
-    [userId, limit]
+     LIMIT $3`,
+    [userId, market, limit]
   )
   return res.rows.reverse().map((r) => ({
     date: r.date,
@@ -1124,19 +1318,23 @@ export async function getDailyStatsRange(
 
 export async function getAiUsageByDay(
   userId: string,
-  limit = 365
+  limit = 365,
+  market?: string
 ): Promise<Array<{ date: string; costUsd: number; calls: number }>> {
   const pool = getPool()
+  const mc = marketClause(market, 2)
+  const params: unknown[] = market !== undefined ? [userId, market, limit] : [userId, limit]
+  const limitIdx = market !== undefined ? 3 : 2
   const res = await pool.query<{ date: string; costusd: string; calls: string }>(
     `SELECT timestamp::date AS date,
             COALESCE(SUM(total_cost_usd), 0) AS costusd,
             COUNT(*) AS calls
      FROM ai_usage
-     WHERE user_id = $1
+     WHERE user_id = $1${mc}
      GROUP BY timestamp::date
      ORDER BY date DESC
-     LIMIT $2`,
-    [userId, limit]
+     LIMIT $${limitIdx}`,
+    params
   )
   return res.rows.map((r) => ({ date: r.date, costUsd: Number(r.costusd), calls: Number(r.calls) }))
 }

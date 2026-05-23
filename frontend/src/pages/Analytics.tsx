@@ -24,6 +24,7 @@ import StatCard from '../components/StatCard'
 import PositionDrawer from '../components/PositionDrawer'
 import { Download, ChevronDown } from 'lucide-react'
 import ExportReportModal from '../components/ExportReportModal'
+import { useMarketFilter } from '../hooks/useMarketFilter'
 
 const CHART_HEIGHT = 160
 const CHART_HEIGHT_HERO = 220
@@ -189,6 +190,7 @@ function Empty() {
 const PAGE_SIZE = 10
 
 export default function Performance() {
+  const { market } = useMarketFilter()
   const [posPage, setPosPage] = useState(1)
   const [pnlData, setPnlData] = useState<PnlResponse | null>(null)
   const [aiCost, setAiCost] = useState<AiCostResponse | null>(null)
@@ -210,7 +212,12 @@ export default function Performance() {
   }
 
   useEffect(() => {
-    Promise.all([api.analytics.pnl(), api.analytics.aiCost(), api.analytics.summary()])
+    setLoading(true)
+    Promise.all([
+      api.analytics.pnl(undefined, undefined, market ?? undefined),
+      api.analytics.aiCost(market ?? undefined),
+      api.analytics.summary(market ?? undefined),
+    ])
       .then(([pnl, ai, sum]) => {
         setPnlData(pnl)
         setAiCost(ai)
@@ -218,7 +225,7 @@ export default function Performance() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [])
+  }, [market])
 
   const closedPositions = useMemo(() => pnlData?.positions ?? [], [pnlData])
   const isHourlyMode = range === 'Today' || pickedDate !== null

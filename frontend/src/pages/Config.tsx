@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Plus, Search, AlertTriangle, Eye, EyeOff } from 'lucide-react'
-import { api, type Config, type Instrument } from '../api/client'
+import { X, Plus, Search, AlertTriangle } from 'lucide-react'
+import { api, type Config, type Instrument, type UserMarketStatus } from '../api/client'
 import { pushToast } from '../components/Toasts'
+import { useMarketFilter } from '../hooks/useMarketFilter'
+import { getMarketSpec } from '../markets/registry'
 
 type TimeUnit = 'seconds' | 'minutes' | 'hours'
-type Tab = 'universe' | 'config' | 'credentials'
+type Tab = 'universe' | 'config'
 
 const POSITION_SIZE_MIN = 0.05
 const POSITION_SIZE_MAX = 0.5
@@ -257,72 +259,22 @@ function ToggleRow({
   )
 }
 
-function SecretInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-}) {
-  const [show, setShow] = useState(false)
-  return (
-    <div style={{ position: 'relative' }}>
-      <input
-        type={show ? 'text' : 'password'}
-        className="input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        autoComplete="new-password"
-        style={{ paddingRight: 36 }}
-      />
-      <button
-        type="button"
-        onClick={() => setShow((s) => !s)}
-        style={{
-          position: 'absolute',
-          right: 8,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--color-text-muted)',
-          display: 'flex',
-          padding: 2,
-        }}
-      >
-        {show ? <EyeOff size={14} /> : <Eye size={14} />}
-      </button>
-    </div>
-  )
-}
-
 const TABS: { id: Tab; label: string }[] = [
   { id: 'universe', label: 'Trade Universe' },
   { id: 'config', label: 'Configuration' },
-  { id: 'credentials', label: 'Credentials' },
 ]
 
 export default function ConfigPage() {
+  const { market, setMarket } = useMarketFilter()
   const [tab, setTab] = useState<Tab>('universe')
   const [cfg, setCfg] = useState<Config | null>(null)
   const [draft, setDraft] = useState<Config | null>(null)
   const [saving, setSaving] = useState(false)
+  const [markets, setMarkets] = useState<UserMarketStatus[]>([])
+  const [enabling, setEnabling] = useState(false)
 
-  const [t212Mode, setT212Mode] = useState<'demo' | 'live'>('demo')
-  const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
-  const [hasT212Key, setHasT212Key] = useState(false)
-  const [anthropicKey, setAnthropicKey] = useState('')
-  const [t212Form, setT212Form] = useState({
-    keyId: '',
-    keySecret: '',
-    mode: 'demo' as 'demo' | 'live',
-  })
-  const [savingAnthropic, setSavingAnthropic] = useState(false)
-  const [savingT212, setSavingT212] = useState(false)
+  // Config is always per-market — never "ALL". Use the URL market, defaulting to NYSE.
+  const selectedMarket = market ?? 'NYSE'
 
   const [instMeta, setInstMeta] = useState<Map<string, Instrument>>(new Map())
   const [filterQ, setFilterQ] = useState('')
@@ -333,35 +285,46 @@ export default function ConfigPage() {
   const [searching, setSearching] = useState(false)
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Load enabled markets so we can render the market-tab strip.
   useEffect(() => {
-    Promise.all([api.config.get(), api.users.getApiKeys()])
-      .then(async ([c, keys]) => {
+    api.markets
+      .list()
+      .then(({ markets }) => setMarkets(markets))
+      .catch(console.error)
+  }, [])
+
+  // Reload config whenever the selected market changes.
+  useEffect(() => {
+    api.config
+      .get(selectedMarket)
+      .then(async (c) => {
         setCfg(c)
         setDraft(c)
-        setT212Mode(keys.t212Mode as 'demo' | 'live')
-        setHasAnthropicKey(keys.hasAnthropicKey)
-        setHasT212Key(keys.hasT212Key)
-        setT212Form((f) => ({ ...f, mode: keys.t212Mode as 'demo' | 'live' }))
-
         if (c.tradeUniverse.length > 0) {
           const resolved = await api.instruments.resolve(c.tradeUniverse).catch(() => ({}))
           const meta = new Map<string, Instrument>(
             Object.entries(resolved) as [string, Instrument][]
           )
           setInstMeta(meta)
+        } else {
+          setInstMeta(new Map())
         }
       })
-      .catch(console.error)
-  }, [])
+      .catch((err) => {
+        // Market not enabled yet or other error — clear stale state.
+        setCfg(null)
+        setDraft(null)
+        console.error(err)
+      })
+  }, [selectedMarket])
 
   const configChanged = JSON.stringify(cfg) !== JSON.stringify(draft)
-  const t212Changed = !!t212Form.keyId || !!t212Form.keySecret || t212Form.mode !== t212Mode
 
   async function saveConfig(d = draft) {
     if (!d) return
     setSaving(true)
     try {
-      const updated = await api.config.update(d)
+      const updated = await api.config.update(d, selectedMarket)
       setCfg(updated)
       setDraft(updated)
       pushToast('Configuration saved', 'info')
@@ -372,38 +335,34 @@ export default function ConfigPage() {
     }
   }
 
-  async function saveAnthropicKey() {
-    if (!anthropicKey) return
-    setSavingAnthropic(true)
+  async function handleEnableMarket(code: string) {
+    setEnabling(true)
     try {
-      await api.users.updateApiKeys({ anthropicApiKey: anthropicKey })
-      setHasAnthropicKey(true)
-      setAnthropicKey('')
-      pushToast('Anthropic key updated', 'info')
+      await api.markets.enable(code)
+      const { markets } = await api.markets.list()
+      setMarkets(markets)
+      setMarket(code)
     } catch (err) {
       pushToast((err as Error).message, 'error')
     } finally {
-      setSavingAnthropic(false)
+      setEnabling(false)
     }
   }
 
-  async function saveT212() {
-    if (!t212Changed) return
-    setSavingT212(true)
+  async function handleDisableMarket(code: string) {
+    if (!confirm(`Disable ${code}? This stops its engine. Open positions must be closed first.`))
+      return
     try {
-      await api.users.updateApiKeys({
-        t212KeyId: t212Form.keyId || undefined,
-        t212KeySecret: t212Form.keySecret || undefined,
-        t212Mode: t212Form.mode,
-      })
-      if (t212Form.keyId) setHasT212Key(true)
-      setT212Mode(t212Form.mode)
-      setT212Form((f) => ({ ...f, keyId: '', keySecret: '' }))
-      pushToast('T212 credentials updated', 'info')
+      await api.markets.disable(code)
+      const { markets } = await api.markets.list()
+      setMarkets(markets)
+      // Switch to another enabled market if we just disabled the current one.
+      if (selectedMarket === code) {
+        const first = markets.find((m) => m.enabled)
+        setMarket(first ? first.code : null)
+      }
     } catch (err) {
       pushToast((err as Error).message, 'error')
-    } finally {
-      setSavingT212(false)
     }
   }
 
@@ -440,10 +399,109 @@ export default function ConfigPage() {
     await saveConfig(updated)
   }
 
-  if (!draft)
-    return <div style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>Loading...</div>
+  // Render the market tab strip — always visible, even if the current market is
+  // not yet enabled (so users have a way to enable it).
+  function renderMarketTabs() {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '8px 0 12px',
+          flexWrap: 'wrap',
+        }}
+      >
+        {markets.map((m) => {
+          let label = m.code
+          try {
+            label = getMarketSpec(m.code).displayName
+          } catch {
+            /* unknown */
+          }
+          const isSelected = selectedMarket === m.code
+          return (
+            <div
+              key={m.code}
+              style={{
+                display: 'flex',
+                alignItems: 'stretch',
+                borderRadius: 6,
+                overflow: 'hidden',
+                border: `0.5px solid ${isSelected ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                background: m.enabled ? 'var(--color-bg-raised)' : 'transparent',
+              }}
+            >
+              <button
+                onClick={() => (m.enabled ? setMarket(m.code) : handleEnableMarket(m.code))}
+                disabled={enabling}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: '6px 12px',
+                  fontSize: 13,
+                  fontWeight: isSelected ? 500 : 400,
+                  color: isSelected
+                    ? 'var(--color-accent)'
+                    : m.enabled
+                      ? 'var(--color-text-primary)'
+                      : 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {!m.enabled && <Plus size={11} />}
+                {label}
+              </button>
+              {m.enabled && (
+                <button
+                  onClick={() => handleDisableMarket(m.code)}
+                  title={`Disable ${label}`}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    borderLeft: '0.5px solid var(--color-border)',
+                    padding: '0 8px',
+                    fontSize: 12,
+                    color: 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
 
-  const isLive = t212Form.mode === 'live'
+  if (!draft) {
+    // Selected market is not enabled — let the user enable it.
+    const m = markets.find((x) => x.code === selectedMarket)
+    return (
+      <div>
+        {renderMarketTabs()}
+        <div className="card" style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 13, color: 'var(--color-text-muted)', margin: '6px 0 12px' }}>
+            {selectedMarket} is not enabled yet for your account.
+          </p>
+          {m && !m.enabled && (
+            <button
+              className="btn btn-primary"
+              onClick={() => handleEnableMarket(selectedMarket)}
+              disabled={enabling}
+            >
+              <Plus size={13} /> Enable {selectedMarket}
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   const filteredUniverse = draft.tradeUniverse.filter((ticker) => {
     if (!filterQ) return true
@@ -474,11 +532,14 @@ export default function ConfigPage() {
           paddingBottom: 0,
         }}
       >
-        <div style={{ paddingBottom: 14 }}>
+        <div style={{ paddingBottom: 6 }}>
           <h1 style={{ fontSize: 20, fontWeight: 500, margin: 0 }}>Settings</h1>
         </div>
 
-        {/* Tab bar */}
+        {/* Per-market tab strip */}
+        {renderMarketTabs()}
+
+        {/* Sub-tab bar (universe / configuration) */}
         <div style={{ display: 'flex', borderBottom: '0.5px solid var(--color-border)' }}>
           {TABS.map(({ id, label }) => (
             <button
@@ -1117,177 +1178,6 @@ export default function ConfigPage() {
                 disabled={!configChanged || saving}
               >
                 {saving ? 'Saving...' : 'Save changes'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Credentials ────────────────────────────────────────────────── */}
-        {tab === 'credentials' && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 12,
-              alignItems: 'start',
-            }}
-          >
-            {/* Anthropic */}
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <div className="section-label">Anthropic</div>
-                <span
-                  style={{
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    borderRadius: 4,
-                    background: hasAnthropicKey ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
-                    color: hasAnthropicKey ? '#16a34a' : '#dc2626',
-                  }}
-                >
-                  {hasAnthropicKey ? 'configured' : 'not set'}
-                </span>
-              </div>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: 'var(--color-text-muted)',
-                  margin: 0,
-                  lineHeight: 1.6,
-                }}
-              >
-                Powers AI trade analysis and decision-making. Encrypted at rest with AES-256-GCM.
-              </p>
-              <Field
-                label="API key"
-                hint={hasAnthropicKey ? 'Leave blank to keep the existing key' : undefined}
-              >
-                <SecretInput
-                  value={anthropicKey}
-                  onChange={setAnthropicKey}
-                  placeholder={hasAnthropicKey ? '(leave blank to keep existing)' : 'sk-ant-…'}
-                />
-              </Field>
-              <button
-                className="btn btn-primary"
-                onClick={saveAnthropicKey}
-                disabled={savingAnthropic || !anthropicKey}
-                style={{ alignSelf: 'flex-start' }}
-              >
-                {savingAnthropic ? 'Saving…' : 'Update key'}
-              </button>
-            </div>
-
-            {/* Trading 212 */}
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-              >
-                <div className="section-label">Trading 212</div>
-                <span
-                  style={{
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    borderRadius: 4,
-                    background: hasT212Key ? 'rgba(22,163,74,0.12)' : 'rgba(220,38,38,0.1)',
-                    color: hasT212Key ? '#16a34a' : '#dc2626',
-                  }}
-                >
-                  {hasT212Key ? 'configured' : 'not set'}
-                </span>
-              </div>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: 'var(--color-text-muted)',
-                  margin: 0,
-                  lineHeight: 1.6,
-                }}
-              >
-                Executes trades on your T212 account. Encrypted at rest with AES-256-GCM.
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Mode toggle */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 12px',
-                    background: 'var(--color-bg-surface)',
-                    borderRadius: 6,
-                    border: '0.5px solid var(--color-border)',
-                  }}
-                >
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: 'var(--color-text-muted)',
-                        letterSpacing: '0.03em',
-                        marginBottom: 2,
-                      }}
-                    >
-                      Account mode
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-                      {isLive
-                        ? 'Real money — orders execute on your live T212 account'
-                        : 'Demo account — no real orders placed'}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 500,
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        background: isLive ? 'rgba(220,38,38,0.1)' : 'rgba(22,163,74,0.12)',
-                        color: isLive ? '#dc2626' : '#16a34a',
-                      }}
-                    >
-                      {isLive ? 'LIVE' : 'DEMO'}
-                    </span>
-                    <Toggle
-                      value={isLive}
-                      onChange={(v) => setT212Form((f) => ({ ...f, mode: v ? 'live' : 'demo' }))}
-                    />
-                  </div>
-                </div>
-
-                <Field
-                  label="API key ID"
-                  hint={hasT212Key ? 'Leave blank to keep the existing key' : undefined}
-                >
-                  <SecretInput
-                    value={t212Form.keyId}
-                    onChange={(v) => setT212Form((f) => ({ ...f, keyId: v }))}
-                    placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key ID'}
-                  />
-                </Field>
-                <Field
-                  label="API key secret"
-                  hint={hasT212Key ? 'Leave blank to keep the existing key' : undefined}
-                >
-                  <SecretInput
-                    value={t212Form.keySecret}
-                    onChange={(v) => setT212Form((f) => ({ ...f, keySecret: v }))}
-                    placeholder={hasT212Key ? '(leave blank to keep existing)' : 'Key secret'}
-                  />
-                </Field>
-              </div>
-
-              <button
-                className="btn btn-primary"
-                onClick={saveT212}
-                disabled={savingT212 || !t212Changed}
-                style={{ alignSelf: 'flex-start' }}
-              >
-                {savingT212 ? 'Saving…' : 'Update credentials'}
               </button>
             </div>
           </div>

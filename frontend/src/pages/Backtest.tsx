@@ -3,6 +3,7 @@ import { Plus, ChevronDown, ChevronRight, RefreshCw, Trash2, Copy } from 'lucide
 import { api, type Backtest, type BacktestConfig } from '../api/client'
 import NewBacktestModal from '../components/NewBacktestModal'
 import { pushToast } from '../components/Toasts'
+import { useMarketFilter } from '../hooks/useMarketFilter'
 
 function fmtPct(v: number | null | undefined, decimals = 2): string {
   if (v == null) return '—'
@@ -325,8 +326,32 @@ function Metric({ label, value, positive }: { label: string; value: string; posi
   )
 }
 
+const PAGE_SIZE = 20
+
+// "Xerta" → "Xerta (2)", "Xerta (2)" → "Xerta (3)". Also normalises legacy
+// "Foo (rerun) (rerun)" chains down to "Foo (2)" so they don't grow forever.
+// Picks the next N by scanning rows currently visible — we don't fetch all
+// pages, so if you have "Foo (5)" buried on page 3 you'll still get a fresh
+// "(2)". The user can always edit before submitting.
+function nextRerunName(sourceName: string, rows: Backtest[]): string {
+  const base = sourceName.replace(/(\s*\((?:rerun|\d+)\))+\s*$/i, '').trim() || sourceName
+  let maxN = rows.some((r) => r.name === base) ? 1 : 0
+  const numbered = new RegExp(
+    `^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\((\\d+)\\)\\s*$`
+  )
+  for (const r of rows) {
+    const m = r.name.match(numbered)
+    if (m) maxN = Math.max(maxN, parseInt(m[1], 10))
+  }
+  return maxN === 0 ? base : `${base} (${maxN + 1})`
+}
+
 export default function BacktestPage() {
+  const { market } = useMarketFilter()
   const [rows, setRows] = useState<Backtest[]>([])
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [rerunPrefill, setRerunPrefill] = useState<Partial<BacktestConfig> | undefined>()
@@ -335,18 +360,31 @@ export default function BacktestPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.backtests.list(1, 50)
+      const res = await api.backtests.list(page, PAGE_SIZE, market ?? undefined)
       setRows(res.data)
+      setTotalPages(Math.max(1, res.totalPages))
+      setTotal(res.total)
+      // If the current page is past the end (e.g. after a delete shrank the
+      // list), step back so the user doesn't stare at an empty page.
+      if (res.data.length === 0 && page > 1 && res.totalPages >= 1) {
+        setPage(Math.min(page - 1, res.totalPages))
+      }
     } catch (err) {
       pushToast((err as Error).message, 'error')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [market, page])
 
   useEffect(() => {
     load()
   }, [load])
+
+  // Reset to page 1 when the market filter changes so we don't land on a page
+  // that no longer exists for the new market.
+  useEffect(() => {
+    setPage(1)
+  }, [market])
 
   // Poll while any row is pending/running
   useEffect(() => {
@@ -364,7 +402,7 @@ export default function BacktestPage() {
   }
 
   function handleRerun(cfg: BacktestConfig) {
-    setRerunPrefill({ ...cfg, name: `${cfg.name} (rerun)` })
+    setRerunPrefill({ ...cfg, name: nextRerunName(cfg.name, rows) })
     setModalOpen(true)
   }
 
@@ -380,10 +418,6 @@ export default function BacktestPage() {
       >
         <div>
           <h1 style={{ margin: 0, fontSize: 18, fontWeight: 500 }}>Backtest</h1>
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            Replay the trading algorithm against historical hourly data — no Claude AI calls,
-            deterministic decisions.
-          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
@@ -455,6 +489,40 @@ export default function BacktestPage() {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: 12,
+          }}
+        >
+          <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+            {total} total {total === 1 ? 'backtest' : 'backtests'}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              className="btn btn-ghost"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage(page - 1)}
+            >
+              ←
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
+              {page} / {totalPages}
+            </span>
+            <button
+              className="btn btn-ghost"
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage(page + 1)}
+            >
+              →
+            </button>
+          </div>
+        </div>
+      )}
 
       {modalOpen && (
         <NewBacktestModal

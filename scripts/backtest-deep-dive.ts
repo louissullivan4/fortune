@@ -19,10 +19,10 @@ async function main() {
     connectionTimeoutMillis: 15000,
   })
   try {
-    // Focus on run #2 — the only one with positive return, gives us the cleanest signal
+    const targetId = parseInt(process.argv[2] ?? '13', 10)
     const r = await pool.query<{
       metrics_json: { trades: Trade[]; equityCurve: Array<{ t: number; value: number }> }
-    }>(`SELECT metrics_json FROM backtests WHERE id = $1`, [2])
+    }>(`SELECT metrics_json FROM backtests WHERE id = $1`, [targetId])
     const m = r.rows[0].metrics_json
     const trades = m.trades
 

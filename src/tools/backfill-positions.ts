@@ -10,14 +10,15 @@ if (!userId) {
   console.error('USER_ID env var is required (set to your user_id UUID)')
   process.exit(1)
 }
+const market = process.env.MARKET ?? 'NYSE'
 
 async function main() {
   await runMigrations()
 
-  console.log('\nBackfilling AI positions from trade history...\n')
-  const { inserted } = await reconcileAiPositions(userId)
+  console.log(`\nBackfilling AI positions from trade history (market: ${market})...\n`)
+  const { inserted } = await reconcileAiPositions(userId, market)
 
-  const open = await getOpenAiPositions(userId)
+  const open = await getOpenAiPositions(userId, market)
   console.log(`\nDone: ${inserted} inserted/updated`)
   console.log(`\nOpen AI positions (${open.length}):`)
   for (const p of open) {

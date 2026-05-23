@@ -4,7 +4,8 @@ import { runMigrations, getPool } from './db.js'
 import { createHttpServer } from './server.js'
 import { createEngine } from './engine/EngineService.js'
 import { getOrCreateT212Client } from './api/trading212.js'
-import { getUserApiKeys, getUserConfig } from './http/routes/users.js'
+import { getUserApiKeys, getUserMarketConfig } from './http/routes/users.js'
+import { getMarketSpec } from './markets/registry.js'
 
 process.on('unhandledRejection', (reason) => {
   console.error('[server] Unhandled promise rejection:', reason)
@@ -17,25 +18,36 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10)
 
 async function autoStartEngines(): Promise<void> {
   const pool = getPool()
-  const result = await pool.query<{ user_id: string }>(
-    'SELECT user_id FROM user_configs WHERE auto_start_on_restart = true'
+  const result = await pool.query<{ user_id: string; market_code: string }>(
+    'SELECT user_id, market_code FROM user_market_configs WHERE auto_start_on_restart = true'
   )
   if (result.rows.length === 0) return
 
-  console.log(`[server] Auto-starting engines for ${result.rows.length} user(s)`)
-  for (const { user_id } of result.rows) {
+  console.log(
+    `[server] Auto-starting engines for ${result.rows.length} (user, market) combination(s)`
+  )
+  for (const { user_id, market_code } of result.rows) {
     try {
-      const [keys, cfg] = await Promise.all([getUserApiKeys(user_id), getUserConfig(user_id)])
+      const [keys, cfg] = await Promise.all([
+        getUserApiKeys(user_id),
+        getUserMarketConfig(user_id, market_code),
+      ])
       if (!keys?.t212KeyId || !keys?.t212KeySecret || !keys?.anthropicApiKey || !cfg) {
-        console.warn(`[server] Auto-start skipped for ${user_id} — API keys not configured`)
+        console.warn(
+          `[server] Auto-start skipped for ${user_id}/${market_code} — API keys not configured`
+        )
         continue
       }
       const t212 = getOrCreateT212Client(user_id, keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
-      const engine = createEngine(user_id, t212, keys.anthropicApiKey, cfg)
+      const spec = getMarketSpec(market_code)
+      const engine = createEngine(user_id, spec, t212, keys.anthropicApiKey, cfg)
       await engine.start()
-      console.log(`[server] Engine auto-started for user ${user_id}`)
+      console.log(`[server] Engine auto-started for user ${user_id} / ${market_code}`)
     } catch (err) {
-      console.error(`[server] Auto-start failed for ${user_id}:`, (err as Error).message)
+      console.error(
+        `[server] Auto-start failed for ${user_id}/${market_code}:`,
+        (err as Error).message
+      )
     }
   }
 }

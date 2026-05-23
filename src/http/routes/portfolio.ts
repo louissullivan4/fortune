@@ -4,6 +4,7 @@ import { getUserApiKeys } from './users.js'
 import { getOrCreateT212Client, type Trading212Client } from '../../api/trading212.js'
 import { getOpenAiPositions, closeAllAiPositions } from '../../analytics/journal.js'
 import { hub } from '../../ws/hub.js'
+import { MARKET_CODES } from '../../markets/registry.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -16,13 +17,18 @@ async function getT212(userId: string): Promise<Trading212Client> {
   return getOrCreateT212Client(userId, keys.t212KeyId, keys.t212KeySecret, keys.t212Mode)
 }
 
-// GET /api/portfolio
+// GET /api/portfolio?market=NYSE  (omit market for all markets)
 router.get('/', async (req, res, next) => {
   try {
-    const t212 = await getT212(req.user!.userId)
+    const market = req.query.market as string | undefined
+    if (market !== undefined && !MARKET_CODES.includes(market)) {
+      return res.status(400).json({ error: `Unknown market: ${market}` })
+    }
+    const userId = req.user!.userId
+    const t212 = await getT212(userId)
     const [snapshot, openAiPositions] = await Promise.all([
       t212.getPortfolioSnapshot(),
-      getOpenAiPositions(req.user!.userId),
+      getOpenAiPositions(userId, market),
     ])
 
     const brokerTickers = new Set(snapshot.positions.map((p) => p.ticker))
@@ -31,25 +37,26 @@ router.get('/', async (req, res, next) => {
 
     if (soldPositions.length > 0) {
       const orderHistory = await t212.getOrderHistory()
-      const soldTickers = new Set(soldPositions.map((p) => p.ticker))
       const exitPriceByTicker = new Map<string, number | null>()
 
-      for (const ticker of soldTickers) {
+      for (const p of soldPositions) {
         const fillPrice =
           orderHistory
-            .filter((o) => o.ticker === ticker && o.quantity < 0 && o.filledPrice != null)
+            .filter((o) => o.ticker === p.ticker && o.quantity < 0 && o.filledPrice != null)
             .sort((a, b) => new Date(b.dateModified).getTime() - new Date(a.dateModified).getTime())
             .at(0)?.filledPrice ?? null
-        exitPriceByTicker.set(ticker, fillPrice)
+        exitPriceByTicker.set(p.ticker, fillPrice)
       }
 
+      // Each orphaned position knows its own market — close per (ticker, market)
       await Promise.all(
         soldPositions.map((p) =>
           closeAllAiPositions(
             p.ticker,
             exitPriceByTicker.get(p.ticker) ?? null,
             now,
-            req.user!.userId
+            userId,
+            p.market
           )
         )
       )

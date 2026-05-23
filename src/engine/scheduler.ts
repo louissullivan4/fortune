@@ -1,53 +1,12 @@
-const NYSE_HOLIDAYS = new Set([
-  '2025-01-01',
-  '2025-01-20',
-  '2025-02-17',
-  '2025-04-18',
-  '2025-05-26',
-  '2025-06-19',
-  '2025-07-04',
-  '2025-09-01',
-  '2025-11-27',
-  '2025-12-25',
-  '2026-01-01',
-  '2026-01-19',
-  '2026-02-16',
-  '2026-04-03',
-  '2026-05-25',
-  '2026-06-19',
-  '2026-07-03',
-  '2026-09-07',
-  '2026-11-26',
-  '2026-12-25',
-  '2027-01-01',
-  '2027-01-18',
-  '2027-02-15',
-  '2027-03-26',
-  '2027-05-31',
-  '2027-06-18',
-  '2027-07-05',
-  '2027-09-06',
-  '2027-11-25',
-  '2027-12-24',
-])
+import { type MarketSpec, NYSE } from '../markets/registry.js'
 
-const NYSE_OPEN_EASTERN_MINS = 9 * 60 + 30
-const NYSE_CLOSE_EASTERN_MINS = 16 * 60
-
-function nyDateString(date: Date): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-  }).format(date)
+function localDateString(spec: MarketSpec, date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: spec.timezone }).format(date)
 }
 
-/** NYSE trading-day identifier (YYYY-MM-DD in America/New_York) for `date` (defaults to now). */
-export function nyseTradingDateStr(date: Date = new Date()): string {
-  return nyDateString(date)
-}
-
-function nyMinutesOfDay(date: Date): number {
+function localMinutesOfDay(spec: MarketSpec, date: Date): number {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
+    timeZone: spec.timezone,
     hour: 'numeric',
     minute: 'numeric',
     hourCycle: 'h23',
@@ -57,48 +16,64 @@ function nyMinutesOfDay(date: Date): number {
   return hour * 60 + minute
 }
 
-function nyIsWeekday(date: Date): boolean {
+function localIsWeekday(spec: MarketSpec, date: Date): boolean {
   const day = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
+    timeZone: spec.timezone,
     weekday: 'short',
   }).format(date)
   return day !== 'Sun' && day !== 'Sat'
 }
 
-function nyIsHoliday(date: Date): boolean {
-  return NYSE_HOLIDAYS.has(nyDateString(date))
+function localIsHoliday(spec: MarketSpec, date: Date): boolean {
+  return spec.holidays.has(localDateString(spec, date))
 }
 
-function nyseOpenUtcTime(date: Date): Date {
-  const dateStr = nyDateString(date)
+/**
+ * Compute the UTC `Date` corresponding to a local-time minute-of-day boundary
+ * on the same trading day as `date` (interpreted in spec.timezone). Used to
+ * compute milliseconds-until-open / -until-close without a DST-aware library.
+ */
+function localBoundaryUtcTime(spec: MarketSpec, date: Date, localMinutesOfDay: number): Date {
+  const dateStr = localDateString(spec, date)
+  // Find the spec.timezone UTC offset for this date by formatting a noon-UTC
+  // reference and reading back the local hour. Works across DST boundaries
+  // because the formatter uses the right offset for the supplied date.
   const ref = new Date(`${dateStr}T17:00:00Z`)
-  const refEasternHour =
+  const refLocalHour =
     parseInt(
       new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
+        timeZone: spec.timezone,
         hour: '2-digit',
         hourCycle: 'h23',
       })
         .formatToParts(ref)
         .find((p) => p.type === 'hour')?.value ?? '13'
     ) % 24
-  const offsetHours = 17 - refEasternHour
+  const offsetHours = 17 - refLocalHour
+  const sign = offsetHours >= 0 ? '-' : '+'
+  const absOff = Math.abs(offsetHours)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return new Date(`${dateStr}T09:30:00-${pad(offsetHours)}:00`)
+  const hh = pad(Math.floor(localMinutesOfDay / 60))
+  const mm = pad(localMinutesOfDay % 60)
+  return new Date(`${dateStr}T${hh}:${mm}:00${sign}${pad(absOff)}:00`)
 }
 
-export function isMarketOpen(): boolean {
-  const now = new Date()
-  if (!nyIsWeekday(now) || nyIsHoliday(now)) return false
-  const mins = nyMinutesOfDay(now)
-  return mins >= NYSE_OPEN_EASTERN_MINS && mins < NYSE_CLOSE_EASTERN_MINS
+/** YYYY-MM-DD trading-date identifier in the market's local timezone. */
+export function tradingDateStr(spec: MarketSpec, date: Date = new Date()): string {
+  return localDateString(spec, date)
 }
 
-export function nextOpenMs(): number {
-  const now = new Date()
+/** True when the given market is currently in its regular trading hours. */
+export function isMarketOpenSpec(spec: MarketSpec, now: Date = new Date()): boolean {
+  if (!localIsWeekday(spec, now) || localIsHoliday(spec, now)) return false
+  const mins = localMinutesOfDay(spec, now)
+  return mins >= spec.openMinutesLocal && mins < spec.closeMinutesLocal
+}
 
-  if (nyIsWeekday(now) && !nyIsHoliday(now)) {
-    const openTime = nyseOpenUtcTime(now)
+/** Milliseconds from `now` until the next time the market opens. */
+export function nextOpenMsSpec(spec: MarketSpec, now: Date = new Date()): number {
+  if (localIsWeekday(spec, now) && !localIsHoliday(spec, now)) {
+    const openTime = localBoundaryUtcTime(spec, now, spec.openMinutesLocal)
     if (openTime.getTime() > now.getTime()) {
       return openTime.getTime() - now.getTime()
     }
@@ -107,8 +82,32 @@ export function nextOpenMs(): number {
   const next = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 12, 0, 0)
   )
-  while (!nyIsWeekday(next) || nyIsHoliday(next)) {
+  while (!localIsWeekday(spec, next) || localIsHoliday(spec, next)) {
     next.setUTCDate(next.getUTCDate() + 1)
   }
-  return nyseOpenUtcTime(next).getTime() - now.getTime()
+  return localBoundaryUtcTime(spec, next, spec.openMinutesLocal).getTime() - now.getTime()
+}
+
+/** Milliseconds from `now` until the market closes today (positive when open). */
+export function msUntilCloseSpec(spec: MarketSpec, now: Date = new Date()): number {
+  return localBoundaryUtcTime(spec, now, spec.closeMinutesLocal).getTime() - now.getTime()
+}
+
+// ── Backwards-compat NYSE wrappers ────────────────────────────────────────
+// Existing callers (routes, MarketClock duplicate) still use the zero-arg
+// shape. Keep them functioning until Phase 5 rewires the frontend and routes.
+
+/** NYSE-only convenience wrapper. Prefer `isMarketOpenSpec(spec)`. */
+export function isMarketOpen(now: Date = new Date()): boolean {
+  return isMarketOpenSpec(NYSE, now)
+}
+
+/** NYSE-only convenience wrapper. Prefer `nextOpenMsSpec(spec)`. */
+export function nextOpenMs(now: Date = new Date()): number {
+  return nextOpenMsSpec(NYSE, now)
+}
+
+/** NYSE-only convenience wrapper. Prefer `tradingDateStr(spec)`. */
+export function nyseTradingDateStr(date: Date = new Date()): string {
+  return tradingDateStr(NYSE, date)
 }

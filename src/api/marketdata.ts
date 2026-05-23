@@ -1,4 +1,5 @@
 // Uses Yahoo Finance chart API directly (no package dependency on historical data)
+import { inferMarketFromTicker } from '../markets/registry.js'
 
 export interface OHLCV {
   date: Date
@@ -14,10 +15,16 @@ export interface TickerHistory {
   bars: OHLCV[]
 }
 
-// T212 tickers use suffixes like _l (LSE). Yahoo uses .L for LSE, no suffix for US.
+// Map a T212 ticker to the Yahoo Finance symbol used for OHLCV history.
+// Strategy: ask the markets registry for a per-market mapping first (this is
+// where new markets register their suffix → Yahoo conversion); only fall back
+// to legacy generic stripping when no market claims the ticker.
 function toYahooSymbol(t212Ticker: string): string {
+  const spec = inferMarketFromTicker(t212Ticker)
+  if (spec) return spec.toYahooSymbol(t212Ticker)
+  // Legacy fallbacks for tickers without a registered market (e.g. LSE which
+  // we haven't catalogued yet).
   if (t212Ticker.endsWith('_l')) return t212Ticker.slice(0, -2) + '.L'
-  // Strip trailing exchange suffixes like _US_EQ or _EQ → keep base
   return t212Ticker.replace(/_[A-Z]+_[A-Z]+$/, '').replace(/_[A-Z]+$/, '')
 }
 
