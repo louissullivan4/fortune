@@ -262,7 +262,8 @@ export class EngineService {
             closedAt,
             this.userId,
             this.market,
-            exitPriceEur
+            exitPriceEur,
+            'manual'
           )
           console.log(
             `${tag} ${pos.ticker} not in T212 — marked closed${exitPrice != null ? ` at ${exitPrice} (T212 fill)` : ' (no fill found)'}`
@@ -429,6 +430,19 @@ export class EngineService {
       const mode: 'partial' | 'full' = split ? 'partial' : 'full'
       const sellQty = split ? split.partialQty : live.quantity
 
+      const exitType =
+        mode === 'partial'
+          ? 'partial'
+          : isStopLoss
+            ? hasPartial
+              ? 'breakeven'
+              : 'stop_loss'
+            : isTakeProfit
+              ? 'take_profit'
+              : isTrailingStop
+                ? 'trailing'
+                : 'soft_stop'
+
       const reason =
         mode === 'partial'
           ? `Partial take-profit: scaling out ${(partialExitPct * 100).toFixed(0)}% (${sellQty}) at +${pctFromEntry.toFixed(2)}% from entry ${pos.entryPrice.toFixed(2)} — trailing stop tightens on remaining ${split!.remainingQty}`
@@ -495,7 +509,8 @@ export class EngineService {
             timestamp,
             this.userId,
             this.market,
-            currentPriceEur
+            currentPriceEur,
+            exitType
           )
           this._recordTickerClose(pos.ticker)
         }
@@ -644,7 +659,8 @@ export class EngineService {
           timestamp,
           this.userId,
           this.market,
-          currentPriceEur
+          currentPriceEur,
+          'stagnant'
         )
         this._recordTickerClose(pos.ticker)
         this.t212.invalidatePortfolioCache()
@@ -1167,7 +1183,8 @@ export class EngineService {
             timestamp,
             this.userId,
             this.market,
-            estimatedPriceEur
+            estimatedPriceEur,
+            'ai_sell'
           )
           this._recordTickerClose(decision.ticker)
         }
@@ -1194,7 +1211,8 @@ export class EngineService {
             timestamp,
             this.userId,
             this.market,
-            estimatedPriceEur
+            estimatedPriceEur,
+            'error_recovery'
           )
         }
         await logOrder({

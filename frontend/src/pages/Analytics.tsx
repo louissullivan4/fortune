@@ -645,6 +645,217 @@ export default function Performance() {
         />
       </div>
 
+      {/* Row 2b: Attribution cards */}
+      {filteredClosedPositions.length > 0 &&
+        (() => {
+          const pnlOf = (p: PnlPosition) => p.netPnl ?? 0
+          const wins = filteredClosedPositions.filter((p) => pnlOf(p) > 0)
+          const losses = filteredClosedPositions.filter((p) => pnlOf(p) < 0)
+          const avgWin = wins.length > 0 ? wins.reduce((s, p) => s + pnlOf(p), 0) / wins.length : 0
+          const avgLoss =
+            losses.length > 0 ? losses.reduce((s, p) => s + pnlOf(p), 0) / losses.length : 0
+          const grossWins = wins.reduce((s, p) => s + pnlOf(p), 0)
+          const grossLosses = Math.abs(losses.reduce((s, p) => s + pnlOf(p), 0))
+          const profitFactor =
+            grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0
+
+          const exitGroups: Record<string, { count: number; totalPnl: number }> = {}
+          for (const p of filteredClosedPositions) {
+            const t = p.exitType ?? 'unknown'
+            if (!exitGroups[t]) exitGroups[t] = { count: 0, totalPnl: 0 }
+            exitGroups[t].count++
+            exitGroups[t].totalPnl += pnlOf(p)
+          }
+          const exitRows = Object.entries(exitGroups)
+            .map(([type, { count, totalPnl }]) => ({
+              type,
+              count,
+              totalPnl,
+              avgPnl: count > 0 ? totalPnl / count : 0,
+            }))
+            .sort((a, b) => b.count - a.count)
+
+          const LABEL: Record<string, string> = {
+            stop_loss: 'Stop-loss',
+            take_profit: 'Take-profit',
+            trailing: 'Trailing stop',
+            partial: 'Partial TP',
+            breakeven: 'Breakeven',
+            soft_stop: 'Soft stop',
+            stagnant: 'Stagnant',
+            ai_sell: 'AI sell',
+            manual: 'Manual',
+            error_recovery: 'Error',
+            unknown: 'Unknown',
+          }
+
+          const tickerGroups: Record<
+            string,
+            { wins: number; losses: number; totalPnl: number; count: number }
+          > = {}
+          for (const p of filteredClosedPositions) {
+            if (!tickerGroups[p.ticker])
+              tickerGroups[p.ticker] = { wins: 0, losses: 0, totalPnl: 0, count: 0 }
+            const g = tickerGroups[p.ticker]
+            g.count++
+            g.totalPnl += pnlOf(p)
+            if (pnlOf(p) > 0) g.wins++
+            else if (pnlOf(p) < 0) g.losses++
+          }
+          const tickerRows = Object.entries(tickerGroups)
+            .map(([ticker, g]) => ({
+              ticker,
+              ...g,
+              winRate: g.wins + g.losses > 0 ? (g.wins / (g.wins + g.losses)) * 100 : null,
+              avgPnl: g.count > 0 ? g.totalPnl / g.count : 0,
+            }))
+            .sort((a, b) => b.totalPnl - a.totalPnl)
+
+          return (
+            <>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <StatCard
+                  label="Avg win"
+                  value={avgWin > 0 ? `+€${avgWin.toFixed(2)}` : '—'}
+                  sub={`${wins.length} winning trades`}
+                  positive={avgWin > 0}
+                />
+                <StatCard
+                  label="Avg loss"
+                  value={avgLoss < 0 ? `€${avgLoss.toFixed(2)}` : '—'}
+                  sub={`${losses.length} losing trades`}
+                  negative={avgLoss < 0}
+                />
+                <StatCard
+                  label="Profit factor"
+                  value={
+                    profitFactor === Infinity
+                      ? '∞'
+                      : profitFactor > 0
+                        ? profitFactor.toFixed(2)
+                        : '—'
+                  }
+                  sub={profitFactor >= 1 ? 'wins > losses' : 'losses > wins'}
+                  positive={profitFactor >= 1}
+                  negative={profitFactor > 0 && profitFactor < 1}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 2fr',
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                {/* Exit-type breakdown */}
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px 8px' }}>
+                    <div className="section-label">exit-type breakdown</div>
+                  </div>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th style={{ textAlign: 'right' }}>Count</th>
+                        <th style={{ textAlign: 'right' }}>Total P&L</th>
+                        <th style={{ textAlign: 'right' }}>Avg P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exitRows.map((r) => (
+                        <tr key={r.type}>
+                          <td>{LABEL[r.type] ?? r.type}</td>
+                          <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                            {r.count}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontFamily: 'var(--font-code)',
+                              color: r.totalPnl >= 0 ? COLOR_GREEN : COLOR_RED,
+                            }}
+                          >
+                            {r.totalPnl >= 0 ? '+' : ''}€{r.totalPnl.toFixed(2)}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontFamily: 'var(--font-code)',
+                              color: r.avgPnl >= 0 ? COLOR_GREEN : COLOR_RED,
+                            }}
+                          >
+                            {r.avgPnl >= 0 ? '+' : ''}€{r.avgPnl.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Per-ticker breakdown */}
+                <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px 8px' }}>
+                    <div className="section-label">per-ticker breakdown</div>
+                  </div>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th style={{ textAlign: 'right' }}>Trades</th>
+                        <th style={{ textAlign: 'right' }}>Win rate</th>
+                        <th style={{ textAlign: 'right' }}>Total P&L</th>
+                        <th style={{ textAlign: 'right' }}>Avg P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tickerRows.map((r) => (
+                        <tr key={r.ticker}>
+                          <td style={{ fontFamily: 'var(--font-code)', fontWeight: 500 }}>
+                            {r.ticker}
+                          </td>
+                          <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                            {r.count}
+                          </td>
+                          <td style={{ textAlign: 'right', fontFamily: 'var(--font-code)' }}>
+                            {r.winRate != null ? `${r.winRate.toFixed(0)}%` : '—'}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontFamily: 'var(--font-code)',
+                              color: r.totalPnl >= 0 ? COLOR_GREEN : COLOR_RED,
+                            }}
+                          >
+                            {r.totalPnl >= 0 ? '+' : ''}€{r.totalPnl.toFixed(2)}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontFamily: 'var(--font-code)',
+                              color: r.avgPnl >= 0 ? COLOR_GREEN : COLOR_RED,
+                            }}
+                          >
+                            {r.avgPnl >= 0 ? '+' : ''}€{r.avgPnl.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )
+        })()}
+
       {/* Row 3: Cumulative P&L hero (2/3) + Win/Loss donut (1/3) */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12, marginBottom: 12 }}>
         <ChartCard title="cumulative P&L" sub={periodLabel}>

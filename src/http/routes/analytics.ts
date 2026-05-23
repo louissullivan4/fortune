@@ -267,6 +267,7 @@ router.get('/pnl', async (req, res, next) => {
         grossPnl,
         fxCost,
         netPnl,
+        exitType: p.exitType ?? null,
         hasActualFill:
           (p.buyT212OrderId != null && t212FillMap.has(p.buyT212OrderId)) ||
           (p.sellT212OrderId != null && t212FillMap.has(p.sellT212OrderId)),

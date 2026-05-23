@@ -326,6 +326,7 @@ export interface PnlPosition {
   grossPnl: number | null
   fxCost: number
   netPnl: number | null
+  exitType: string | null
   hasActualFill: boolean
 }
 
