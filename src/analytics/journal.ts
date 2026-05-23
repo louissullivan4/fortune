@@ -849,7 +849,7 @@ export async function getAllTimeStats(
   if (reset) {
     params.push(reset)
     tsClause = ` AND timestamp >= $${params.length}`
-    dateClause = ` AND date >= ($${params.length})::date`
+    dateClause = ` AND date::date >= ($${params.length})::date`
   }
   const [d, t, s] = await Promise.all([
     pool.query<{ c: string }>(
@@ -886,7 +886,7 @@ export async function getDailyValues(
     let resetClause = ''
     if (reset) {
       params.push(reset)
-      resetClause = ` AND date >= ($${params.length})::date`
+      resetClause = ` AND date::date >= ($${params.length})::date`
     }
     params.push(limit)
     const res = await pool.query<{ date: string; value: number }>(
@@ -905,7 +905,7 @@ export async function getDailyValues(
   let resetClause = ''
   if (reset) {
     params.push(reset)
-    resetClause = ` AND date >= ($${params.length})::date`
+    resetClause = ` AND date::date >= ($${params.length})::date`
   }
   params.push(limit)
   const res = await pool.query<{ date: string; value: number }>(
@@ -1460,7 +1460,7 @@ export async function getDailyStatsRange(
     let resetClause = ''
     if (reset) {
       params.push(reset)
-      resetClause = ` AND date >= ($${params.length})::date`
+      resetClause = ` AND date::date >= ($${params.length})::date`
     }
     params.push(limit)
     // Aggregate per date across all markets
@@ -1485,7 +1485,7 @@ export async function getDailyStatsRange(
   let resetClause = ''
   if (reset) {
     params.push(reset)
-    resetClause = ` AND date >= ($${params.length})::date`
+    resetClause = ` AND date::date >= ($${params.length})::date`
   }
   params.push(limit)
   const res = await pool.query<{ date: string; pnl: string | null; trades_count: string }>(
