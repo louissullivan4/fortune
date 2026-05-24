@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { NavLink, Routes, Route, Navigate } from 'react-router-dom'
+import { NavLink, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   History as HistoryIcon,
@@ -42,8 +42,20 @@ interface Props {
 
 export default function Layout({ wsConnected: _wsConnected }: Props) {
   const { user, logout } = useAuth()
+  const location = useLocation()
   const [_statuses, setStatuses] = useState<EngineStatus[]>([])
   const [_markets, setMarkets] = useState<UserMarketStatus[]>([])
+
+  // On every route change, nudge the scroll position so iOS Safari collapses
+  // its URL bar / bottom toolbar — without this the chrome reappears on every
+  // tab switch and the layout jumps.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+    const id = window.setTimeout(() => {
+      if (window.scrollY === 0) window.scrollTo(0, 1)
+    }, 0)
+    return () => window.clearTimeout(id)
+  }, [location.pathname])
 
   useEffect(() => {
     const load = async () => {
