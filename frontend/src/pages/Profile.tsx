@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Eye, EyeOff, ChevronDown, LogOut } from 'lucide-react'
+import { Eye, EyeOff, ChevronDown } from 'lucide-react'
 import { api, type UserProfile } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { pushToast } from '../components/Toasts'
@@ -237,7 +237,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
 }
 
 export default function Profile() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -390,7 +390,7 @@ export default function Profile() {
   return (
     <div className="grid-profile" style={{ alignItems: 'start' }}>
       {/* Left: identity card */}
-      <div className="profile-identity">
+      <div className="profile-identity" style={{ marginTop: 40 }}>
         <div
           className="card"
           style={{
@@ -467,8 +467,6 @@ export default function Profile() {
 
       {/* Right: forms */}
       <div>
-        <h1 style={{ fontSize: 20, fontWeight: 500, margin: '0 0 16px' }}>Profile</h1>
-
         {/* Personal information */}
         <div className="card" style={{ marginBottom: 12 }}>
           <div className="section-label" style={{ marginBottom: 20 }}>
@@ -788,21 +786,6 @@ export default function Profile() {
             </button>
           </form>
         </AccordionSection>
-
-        {/* Mobile sign-out */}
-        <button
-          className="btn btn-secondary show-mobile"
-          onClick={() => logout()}
-          style={{
-            width: '100%',
-            justifyContent: 'center',
-            marginTop: 16,
-            gap: 8,
-          }}
-        >
-          <LogOut size={14} />
-          Sign out
-        </button>
       </div>
     </div>
   )

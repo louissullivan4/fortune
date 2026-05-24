@@ -589,7 +589,7 @@ export default function Performance() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid-kpi" style={{ marginBottom: 16 }}>
+      <div className="grid-kpi" style={{ marginBottom: 16, marginTop: 50 }}>
         <StatCard
           label="Gross P&L"
           value={fmtEur(filteredStats.grossPnl)}

@@ -557,7 +557,7 @@ export default function ConfigPage() {
         </div>
       </div>
 
-      <div style={{ paddingTop: 20 }}>
+      <div style={{ paddingTop: 20, marginTop: 40 }}>
         {/* ── Trade Universe ─────────────────────────────────────────────── */}
         {tab === 'universe' && (
           <div>
