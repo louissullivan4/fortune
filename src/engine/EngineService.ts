@@ -1,6 +1,11 @@
 import { isMarketOpenSpec, nextOpenMsSpec, tradingDateStr } from './scheduler.js'
 import { decide, type TradeDecision } from './brain.js'
-import { sizePartialExit, validateOrder, TICKER_BLOCK_LOOKBACK_DAYS } from './riskmanager.js'
+import {
+  computeBuyQuantity,
+  sizePartialExit,
+  validateOrder,
+  TICKER_BLOCK_LOOKBACK_DAYS,
+} from './riskmanager.js'
 import {
   reconcileAiPositions,
   getOpenAiPositions,
@@ -972,6 +977,41 @@ export class EngineService {
           fallbackReason = err instanceof Error ? err.message : String(err)
           console.error(`${tag} AI call failed — using deterministic fallback: ${fallbackReason}`)
           aiDecision = pickDecision(pickerInput)
+        }
+      }
+    }
+
+    if (aiDecision.action === 'buy' && aiDecision.ticker && aiDecision.quantity == null) {
+      const signal = signals.find((s) => s.ticker === aiDecision.ticker)
+      const price = aiDecision.estimatedPrice ?? signal?.indicators.currentPrice ?? 0
+      if (price > 0) {
+        const instruments = await this.t212.getInstruments()
+        const minQty = instruments.get(aiDecision.ticker)?.minTradeQuantity ?? 0.01
+        const currency = instruments.get(aiDecision.ticker)?.currencyCode ?? 'EUR'
+        const fxRate =
+          currency === 'EUR'
+            ? 1
+            : (botSnapshot.positions.find((p) => p.currencyCode === currency)?.fxRate ?? 1)
+        const qty = computeBuyQuantity(
+          aiDecision.ticker,
+          price,
+          botSnapshot,
+          this.userConfig,
+          minQty,
+          0.5,
+          fxRate
+        )
+        if (qty > 0) {
+          aiDecision = { ...aiDecision, quantity: qty, estimatedPrice: price }
+        } else {
+          aiDecision = {
+            ...aiDecision,
+            action: 'hold',
+            ticker: null,
+            quantity: null,
+            estimatedPrice: null,
+            reasoning: `${aiDecision.reasoning} [overridden to hold: position cap reached or insufficient cash]`,
+          }
         }
       }
     }
