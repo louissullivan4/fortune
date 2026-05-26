@@ -58,8 +58,8 @@ const MIN_DEPLOYABLE_EUR = 6
 // trading day. Prevents chasing the same setup back into a losing re-entry
 // (e.g. FCX bought → sold → bought again 2h later → stopped out overnight).
 const GAP_REJECT_COOLDOWN_MS = 30 * 60 * 1_000
-const TRAIL_ACTIVATION_PCT = 0.8
-const TRAIL_STOP_PCT = 0.4
+const TRAIL_ACTIVATION_PCT = 3.0
+const TRAIL_STOP_PCT = 1.5
 const CASH_COMMITMENT_TTL_MS = 90_000
 const MAX_FINGERPRINT_SKIPS = 4
 // Reject a buy if the live intraday price differs from the signal (daily close)
