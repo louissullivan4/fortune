@@ -32,6 +32,7 @@ import { Trading212Client, type PortfolioSnapshot, type T212Position } from '../
 import { getAllHistories, getLivePrice } from '../api/marketdata.js'
 import { generateSignals } from '../strategy/signals.js'
 import type { TickerSignal } from '../strategy/signals.js'
+import { resolveFxRates } from '../api/fx.js'
 import { hub } from '../ws/hub.js'
 import type { UserConfig } from '../types/user.js'
 import type { MarketSpec } from '../markets/registry.js'
@@ -254,12 +255,25 @@ export class EngineService {
           const exitPrice = lastSellFill?.filledPrice ?? null
           const closedAt = lastSellFill?.dateModified ?? new Date().toISOString()
           const inferredCurrency = pos.ticker.endsWith('_US_EQ') ? 'USD' : null
-          const fxRate =
-            inferredCurrency === null
-              ? 1
-              : (liveSnapshot.positions.find(
-                  (p) => p.currencyCode === inferredCurrency && Number.isFinite(p.fxRate)
-                )?.fxRate ?? null)
+          const fxRate = await (async () => {
+            if (inferredCurrency === null) return 1 as number | null
+            const sameCurrency = liveSnapshot.positions.find(
+              (p) =>
+                p.currencyCode === inferredCurrency && Number.isFinite(p.fxRate) && p.fxRate > 0
+            )
+            if (sameCurrency) return sameCurrency.fxRate
+            const rates = await resolveFxRates([
+              {
+                currencyCode: inferredCurrency,
+                currentPrice: exitPrice ?? 0,
+                averagePrice: exitPrice ?? 0,
+                quantity: 1,
+                ppl: 0,
+                fxPpl: null,
+              },
+            ])
+            return rates.get(inferredCurrency) ?? null
+          })()
           const exitPriceEur = exitPrice != null && fxRate != null ? exitPrice * fxRate : null
           await closeAiPosition(
             pos.ticker,
@@ -988,10 +1002,24 @@ export class EngineService {
         const instruments = await this.t212.getInstruments()
         const minQty = instruments.get(aiDecision.ticker)?.minTradeQuantity ?? 0.01
         const currency = instruments.get(aiDecision.ticker)?.currencyCode ?? 'EUR'
-        const fxRate =
-          currency === 'EUR'
-            ? 1
-            : (botSnapshot.positions.find((p) => p.currencyCode === currency)?.fxRate ?? 1)
+        const fxRate = await (async () => {
+          if (currency === 'EUR') return 1
+          const sameCurrency = botSnapshot.positions.find(
+            (p) => p.currencyCode === currency && Number.isFinite(p.fxRate) && p.fxRate > 0
+          )
+          if (sameCurrency) return sameCurrency.fxRate
+          const rates = await resolveFxRates([
+            {
+              currencyCode: currency,
+              currentPrice: price,
+              averagePrice: price,
+              quantity: aiDecision.quantity ?? 1,
+              ppl: 0,
+              fxPpl: null,
+            },
+          ])
+          return rates.get(currency) ?? 1
+        })()
         const qty = computeBuyQuantity(
           aiDecision.ticker,
           price,
@@ -1139,13 +1167,27 @@ export class EngineService {
       }
 
       const livePosition = snapshot.positions.find((p) => p.ticker === decision.ticker)
-      const fxRate =
-        livePosition?.fxRate ??
-        (() => {
-          const currency = livePosition?.currencyCode
-          if (!currency || currency === 'EUR') return 1
-          return snapshot.positions.find((p) => p.currencyCode === currency)?.fxRate ?? 1
-        })()
+      const fxRate = await (async () => {
+        if (livePosition?.fxRate) return livePosition.fxRate
+        const ticker = decision.ticker!
+        const currency = livePosition?.currencyCode ?? (ticker.endsWith('_US_EQ') ? 'USD' : null)
+        if (!currency || currency === 'EUR') return 1
+        const sameCurrency = snapshot.positions.find(
+          (p) => p.currencyCode === currency && Number.isFinite(p.fxRate) && p.fxRate > 0
+        )
+        if (sameCurrency) return sameCurrency.fxRate
+        const rates = await resolveFxRates([
+          {
+            currencyCode: currency,
+            currentPrice: estimatedPriceNative,
+            averagePrice: estimatedPriceNative,
+            quantity: decision.quantity ?? 1,
+            ppl: 0,
+            fxPpl: null,
+          },
+        ])
+        return rates.get(currency) ?? 1
+      })()
       const estimatedPriceEur = estimatedPriceNative * fxRate
 
       const recentLossCount =
