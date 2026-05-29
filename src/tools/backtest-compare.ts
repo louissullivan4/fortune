@@ -5,13 +5,18 @@
 // Used to gather evidence for the 27/28-May performance retune. Run with:
 //   npx tsx src/tools/backtest-compare.ts
 //
-// NOTE on fidelity: the simulator shares generateSignals()/pickDecision() with
-// the live engine but reimplements exits with FIXED trail constants and does
-// NOT model partial take-profits. So partialExitPct / trailPullbackAfterPartialPct
-// are NOT reflected here — only SL/TP, stagnant, soft-stop and sizing are.
+// NOTE on fidelity: the simulator mirrors the live deterministic engine —
+// close-sampled exits with the same trail constants (3.0% arm / 1.5% pullback),
+// partial take-profits (partialExitPct / trailPullbackAfterPartialPct), the
+// strong_buy-gated stagnant rotation, same-day re-entry cooldown, the rolling
+// 45-day indicator window, and historical FX for non-EUR sizing. Residual,
+// data-bound gaps: cadence is fixed at the 1h bar (live polls every
+// tradeIntervalMs) and there is no intraday gap-guard — both need sub-hourly
+// prices we don't have here.
 
 import { getAllHistoriesRange, type TickerHistory } from '../api/marketdata.js'
-import { runBacktest } from '../backtest/simulator.js'
+import { runBacktest, currencyOf, type FxRateResolver } from '../backtest/simulator.js'
+import { buildFxResolver } from '../backtest/fx-history.js'
 import type { BacktestConfig } from '../backtest/types.js'
 import { DEFAULT_USER_CONFIG } from '../types/user.js'
 
@@ -117,7 +122,8 @@ function num(n: number | null, dp = 2): string {
 async function runMarket(
   name: string,
   base: BacktestConfig,
-  histories: Map<string, TickerHistory>
+  histories: Map<string, TickerHistory>,
+  fxRateAt: FxRateResolver
 ) {
   console.log(`\n${'='.repeat(110)}\n${name}  (${START} → ${END})\n${'='.repeat(110)}`)
   console.log(
@@ -132,7 +138,7 @@ async function runMarket(
       'exit-reasons'
   )
   for (const cfg of variants(base)) {
-    const m = await runBacktest(cfg, histories)
+    const m = await runBacktest(cfg, histories, () => {}, fxRateAt)
     const byReason = m.trades.reduce<Record<string, number>>((acc, t) => {
       acc[t.exitReason] = (acc[t.exitReason] ?? 0) + 1
       return acc
@@ -164,7 +170,12 @@ async function main() {
       console.log(`[fetch] No data for ${base.market} — skipping`)
       continue
     }
-    await runMarket(base.market, base, histories)
+    const fxRateAt = await buildFxResolver(
+      base.tradeUniverse.map(currencyOf),
+      WARMUP_FROM,
+      WINDOW_END
+    )
+    await runMarket(base.market, base, histories, fxRateAt)
   }
 }
 

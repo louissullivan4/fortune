@@ -32,6 +32,8 @@ export interface ClosedTrade {
   exitReason:
     | 'stop_loss'
     | 'take_profit'
+    | 'partial'
+    | 'breakeven'
     | 'trailing_stop'
     | 'soft_stop'
     | 'stagnant_rotation'

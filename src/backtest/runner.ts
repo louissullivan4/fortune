@@ -1,6 +1,7 @@
 import { getAllHistoriesRange } from '../api/marketdata.js'
 import { hub } from '../ws/hub.js'
-import { runBacktest } from './simulator.js'
+import { runBacktest, currencyOf } from './simulator.js'
+import { buildFxResolver } from './fx-history.js'
 import {
   getBacktest,
   updateBacktestProgress,
@@ -73,13 +74,21 @@ async function execute(id: number, variantBConfig?: BacktestConfig): Promise<voi
     )
   }
 
+  // Historical EUR-per-currency rates so non-EUR tickers size/cap like live.
+  const fxRateAt = await buildFxResolver([...allTickers].map(currencyOf), warmup, end)
+
   let lastReportedPct = 0
-  const metrics = await runBacktest(config, histories, (pct) => {
-    if (pct === lastReportedPct) return
-    lastReportedPct = pct
-    void updateBacktestProgress(id, pct).catch(() => {})
-    hub.broadcast('backtest_progress', { id, progressPct: pct })
-  })
+  const metrics = await runBacktest(
+    config,
+    histories,
+    (pct) => {
+      if (pct === lastReportedPct) return
+      lastReportedPct = pct
+      void updateBacktestProgress(id, pct).catch(() => {})
+      hub.broadcast('backtest_progress', { id, progressPct: pct })
+    },
+    fxRateAt
+  )
 
   await completeBacktest(id, metrics)
   hub.broadcast('backtest_done', { id, status: 'completed' })
@@ -90,10 +99,15 @@ async function execute(id: number, variantBConfig?: BacktestConfig): Promise<voi
     await updateBacktestProgress(variantRow.id, 0)
     hub.broadcast('backtest_progress', { id: variantRow.id, progressPct: 0 })
 
-    const variantMetrics = await runBacktest(variantBConfig, histories, (pct) => {
-      void updateBacktestProgress(variantRow.id, pct).catch(() => {})
-      hub.broadcast('backtest_progress', { id: variantRow.id, progressPct: pct })
-    })
+    const variantMetrics = await runBacktest(
+      variantBConfig,
+      histories,
+      (pct) => {
+        void updateBacktestProgress(variantRow.id, pct).catch(() => {})
+        hub.broadcast('backtest_progress', { id: variantRow.id, progressPct: pct })
+      },
+      fxRateAt
+    )
 
     await completeBacktest(variantRow.id, variantMetrics)
     hub.broadcast('backtest_done', { id: variantRow.id, status: 'completed' })

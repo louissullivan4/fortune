@@ -38,7 +38,12 @@ export async function validateOrder(
   aiOpenValue?: number,
   // Recent losing trades on this ticker — engine fetches via the journal so
   // the risk manager stays DB-free (and trivially testable).
-  recentTickerLossCount?: number
+  recentTickerLossCount?: number,
+  // Deterministic FX override (EUR per native unit). The backtester passes this
+  // so budget/position checks use the same historical rate as the simulator and
+  // never hit the network. Live omits it → unchanged same-currency / Frankfurter
+  // resolution below.
+  fxRateOverride?: number
 ): Promise<RiskDecision> {
   const { maxBudgetEur, maxPositionPct, dailyLossLimitPct } = userConfig
 
@@ -86,22 +91,28 @@ export async function validateOrder(
     // new ticker — sample a same-currency live position when possible (cheap,
     // already derived), otherwise fall back to resolveFxRates.
     const currencyCode = instrument?.currencyCode ?? 'EUR'
-    const samePositionFx = snapshot.positions.find(
-      (p) => p.currencyCode === currencyCode && Number.isFinite(p.fxRate) && p.fxRate > 0
-    )?.fxRate
-    let fxRate = samePositionFx ?? (currencyCode === 'EUR' ? 1 : null)
-    if (fxRate === null) {
-      const rates = await resolveFxRates([
-        {
-          currencyCode,
-          currentPrice: order.estimatedPrice,
-          averagePrice: order.estimatedPrice,
-          quantity: order.quantity,
-          ppl: 0,
-          fxPpl: null,
-        },
-      ])
-      fxRate = rates.get(currencyCode) ?? 1
+    let fxRate: number
+    if (fxRateOverride !== undefined) {
+      fxRate = fxRateOverride
+    } else {
+      const samePositionFx = snapshot.positions.find(
+        (p) => p.currencyCode === currencyCode && Number.isFinite(p.fxRate) && p.fxRate > 0
+      )?.fxRate
+      let resolved = samePositionFx ?? (currencyCode === 'EUR' ? 1 : null)
+      if (resolved === null) {
+        const rates = await resolveFxRates([
+          {
+            currencyCode,
+            currentPrice: order.estimatedPrice,
+            averagePrice: order.estimatedPrice,
+            quantity: order.quantity,
+            ppl: 0,
+            fxPpl: null,
+          },
+        ])
+        resolved = rates.get(currencyCode) ?? 1
+      }
+      fxRate = resolved
     }
 
     const orderCostEur = order.quantity * order.estimatedPrice * fxRate

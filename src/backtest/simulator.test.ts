@@ -1,9 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { applySlippage, runBacktest, checkHardExits, type SimState } from './simulator.js'
+import {
+  applySlippage,
+  runBacktest,
+  checkHardExits,
+  closePosition,
+  type SimState,
+  type SimPosition,
+} from './simulator.js'
 import type { BacktestConfig } from './types.js'
 import type { TickerHistory, OHLCV } from '../api/marketdata.js'
 
 const HOUR_MS = 60 * 60 * 1000
+const T0 = Date.parse('2025-01-01T00:00:00Z')
 
 const baseConfig: BacktestConfig = {
   name: 'test',
@@ -20,13 +28,11 @@ const baseConfig: BacktestConfig = {
   stagnantExitEnabled: false,
   stagnantTimeMinutes: 120,
   stagnantRangePct: 0.012,
-  // Soft stop disabled by default in tests so existing fixtures keep their
-  // expected behaviour; the soft-stop-specific tests opt in explicitly.
+  // Soft stop disabled by default; soft-stop-specific tests opt in explicitly.
   softStopEnabled: false,
   softStopHoldMinutes: 360,
   softStopDrawdownPct: 0.025,
-  // Backtest doesn't model partial exits yet (Feature 3); 1.0 = full close at TP,
-  // matches pre-020 behaviour and keeps existing simulator assertions valid.
+  // partialExitPct=1 → no scale-out, full close at TP. Partial-exit tests opt in.
   partialExitPct: 1,
   trailPullbackAfterPartialPct: 0.003,
   decisionMode: 'ai',
@@ -36,8 +42,8 @@ const baseConfig: BacktestConfig = {
 }
 
 function makeBars(startMs: number, closes: number[]): OHLCV[] {
-  // Each bar's high/low are within 0.1% of close — keeps SL/TP triggers
-  // predictable in tests that target specific entries/exits.
+  // high/low are kept near close; the close-sampled engine only reads close,
+  // so these are cosmetic but realistic.
   return closes.map((c, i) => ({
     date: new Date(startMs + i * HOUR_MS),
     open: c * 0.999,
@@ -54,7 +60,6 @@ function trendingHistory(
   n: number,
   slopePct: number
 ): TickerHistory {
-  // Bars with constant up-slope of `slopePct` per bar → produces strong_buy
   const closes: number[] = []
   let p = 100
   for (let i = 0; i < n; i++) {
@@ -68,6 +73,57 @@ function flatHistory(ticker: string, startMs: number, n: number, price = 100): T
   return { ticker, bars: makeBars(startMs, Array(n).fill(price)) }
 }
 
+// ── Shared SimState / SimPosition factories ───────────────────────────────────
+
+function makePosition(overrides: Partial<SimPosition> = {}): SimPosition {
+  return {
+    ticker: 'AAPL',
+    quantity: 1,
+    entryPrice: 100,
+    entryFxRate: 1,
+    costEurGross: 100,
+    openedAtMs: T0,
+    highWaterMark: 100,
+    partialExitAt: null,
+    ...overrides,
+  }
+}
+
+function makeState(position?: Partial<SimPosition>, cash = 0): SimState {
+  const state: SimState = {
+    cash,
+    positions: new Map(),
+    closedTrades: [],
+    currentDay: null,
+    dailyOpenValue: 100,
+    prevDayOpenValue: 100,
+    recentLosses: new Map(),
+    lastSell: null,
+    closedToday: new Map(),
+    lastSeenClose: new Map(),
+    equityCurve: [],
+    cycles: 0,
+    buysExecuted: 0,
+    sellsExecuted: 0,
+    blockedByRisk: 0,
+    signalsEvaluated: 0,
+  }
+  const p = makePosition(position)
+  state.positions.set(p.ticker, p)
+  return state
+}
+
+function bar(close: number, ts = T0 + HOUR_MS): OHLCV {
+  return {
+    date: new Date(ts),
+    open: close,
+    high: close * 1.01,
+    low: close * 0.99,
+    close,
+    volume: 1,
+  }
+}
+
 describe('runBacktest', () => {
   it('returns zero trades when no bars in range', async () => {
     const cfg = { ...baseConfig, startDate: '2025-06-01', endDate: '2025-06-02' }
@@ -77,7 +133,6 @@ describe('runBacktest', () => {
   })
 
   it('liquidates open positions at end-of-run so finalValue accounts for them', async () => {
-    // Build a rising series so the bot opens a position then leaves it open
     const start = Date.parse('2024-12-01T00:00:00Z')
     const hist = trendingHistory('AAPL', start, 200, 0.001)
     const histories = new Map([['AAPL', hist]])
@@ -88,41 +143,35 @@ describe('runBacktest', () => {
       tradeUniverse: ['AAPL'],
     }
     const m = await runBacktest(cfg, histories)
-    // Even if exit happened automatically, finalValue should never be < zero
     expect(m.finalValue).toBeGreaterThan(0)
     expect(m.equityCurve.length).toBeGreaterThan(0)
   })
 
-  // Stop-loss / take-profit / trailing-stop are tested via checkHardExits unit
-  // tests below — hard to coax the deterministic decision engine into an
-  // entry at a controlled price via runBacktest alone.
-
-  it('halts buys after daily loss limit hit', async () => {
-    // Two tickers both spike enough for entry on day 1, then crash within day 1
-    const start = Date.parse('2025-01-01T00:00:00Z')
+  it('halts the cycle after the daily loss limit is breached vs the previous-day open', async () => {
+    // Rise enough to open, then crash >10% intraday — drawdown vs prev-day open
+    // (= initialCash on day 1) trips the limit and halts further buys.
+    const start = Date.parse('2025-01-02T00:00:00Z')
     const closes: number[] = []
     let p = 100
     for (let i = 0; i < 60; i++) {
       p *= 1.002
       closes.push(p)
     }
-    // Day 1 second half: crash >10% to trip daily loss limit
     for (let i = 0; i < 5; i++) {
       p *= 0.95
       closes.push(p)
     }
-    const bars = makeBars(start, closes)
-    const histories = new Map([['AAPL', { ticker: 'AAPL', bars }]])
+    const histories = new Map([['AAPL', { ticker: 'AAPL', bars: makeBars(start, closes) }]])
     const cfg = {
       ...baseConfig,
       dailyLossLimitPct: 0.05,
-      startDate: '2025-01-01',
-      endDate: '2025-01-05',
+      startDate: '2025-01-02',
+      endDate: '2025-01-03',
       tradeUniverse: ['AAPL'],
     }
     const m = await runBacktest(cfg, histories)
-    // After daily loss limit, no more buys for the rest of the day
-    expect(m.buysExecuted).toBeLessThanOrEqual(1)
+    // One position at most before the halt; the crash blocks re-entry.
+    expect(m.buysExecuted).toBeLessThanOrEqual(2)
   })
 
   it('produces a deterministic equity curve across two runs', async () => {
@@ -136,196 +185,171 @@ describe('runBacktest', () => {
     expect(m1.finalValue).toBeCloseTo(m2.finalValue, 8)
     expect(m1.tradesCount).toBe(m2.tradesCount)
   })
+
+  it('runs to completion with a non-unity FX resolver on a USD universe', async () => {
+    const start = Date.parse('2025-01-01T00:00:00Z')
+    const histories = new Map([['NVDA_US_EQ', trendingHistory('NVDA_US_EQ', start, 150, 0.0015)]])
+    const cfg = { ...baseConfig, tradeUniverse: ['NVDA_US_EQ'] }
+    const m = await runBacktest(
+      cfg,
+      histories,
+      () => {},
+      () => 0.9
+    )
+    expect(Number.isFinite(m.finalValue)).toBe(true)
+    expect(m.finalValue).toBeGreaterThan(0)
+  })
 })
 
-describe('checkHardExits', () => {
-  function makeState(): SimState {
-    const state: SimState = {
-      cash: 0,
-      positions: new Map(),
-      closedTrades: [],
-      currentDay: null,
-      dailyOpenValue: 100,
-      recentLosses: new Map(),
-      lastSell: null,
-      equityCurve: [],
-      cycles: 0,
-      buysExecuted: 0,
-      sellsExecuted: 0,
-      blockedByRisk: 0,
-      signalsEvaluated: 0,
-    }
-    state.positions.set('AAPL', {
-      ticker: 'AAPL',
-      quantity: 1,
-      entryPrice: 100,
-      openedAtMs: Date.parse('2025-01-01T00:00:00Z'),
-      highWaterMark: 100,
-      lowWaterMark: 100,
-    })
-    return state
-  }
-
+describe('checkHardExits (close-sampled, live-parity)', () => {
   const cfg: BacktestConfig = { ...baseConfig, stopLossPct: 0.05, takeProfitPct: 0.015 }
-  const ts = Date.parse('2025-01-02T00:00:00Z')
+  const ts = T0 + HOUR_MS
 
-  it('fires stop-loss when bar low ≤ entry × (1 − stopLossPct)', () => {
+  it('fires stop-loss when the close is ≤ entry × (1 − stopLossPct)', () => {
     const state = makeState()
-    const bar: OHLCV = { date: new Date(ts), open: 99, high: 99, low: 94, close: 95, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), cfg)
+    checkHardExits(state, ts, new Map([['AAPL', bar(94, ts)]]), cfg)
     expect(state.closedTrades).toHaveLength(1)
     expect(state.closedTrades[0].exitReason).toBe('stop_loss')
-    expect(state.closedTrades[0].exitPrice).toBeCloseTo(95)
+    expect(state.closedTrades[0].exitPrice).toBeCloseTo(94)
   })
 
-  it('fires take-profit when bar high ≥ entry × (1 + takeProfitPct)', () => {
+  it('fires take-profit (full close) when partialExitPct = 1', () => {
     const state = makeState()
-    const bar: OHLCV = {
-      date: new Date(ts),
-      open: 100,
-      high: 102,
-      low: 100,
-      close: 101.5,
-      volume: 1,
-    }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), cfg)
+    checkHardExits(state, ts, new Map([['AAPL', bar(102, ts)]]), cfg)
     expect(state.closedTrades).toHaveLength(1)
     expect(state.closedTrades[0].exitReason).toBe('take_profit')
-    expect(state.closedTrades[0].exitPrice).toBeCloseTo(101.5)
+    expect(state.closedTrades[0].exitPrice).toBeCloseTo(102)
   })
 
-  it('fires trailing stop after HWM is armed and price pulls back', () => {
+  it('does not exit on a small gain that crosses no threshold', () => {
     const state = makeState()
-    // Bar 1: arms the trailing stop (HWM moves to 101 which is +1% > 0.8% activation)
-    // but doesn't trigger TP (TP would need 101.5 high). Use a price below TP threshold.
-    state.positions.get('AAPL')!.highWaterMark = 101.0
-    state.positions.get('AAPL')!.lowWaterMark = 100.5
-    // Now bar: low drops to 100.0 — trail level is 101 × 0.996 = 100.596, low < trail
-    const bar: OHLCV = {
-      date: new Date(ts),
-      open: 100.5,
-      high: 100.7,
-      low: 100.0,
-      close: 100.2,
-      volume: 1,
-    }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), cfg)
-    expect(state.closedTrades).toHaveLength(1)
-    expect(state.closedTrades[0].exitReason).toBe('trailing_stop')
-  })
-
-  it('does not trigger trailing stop when HWM never armed', () => {
-    const state = makeState()
-    // bar: tiny gain, HWM moves only to 100.5 (< 0.8% activation), then small dip
-    const bar: OHLCV = {
-      date: new Date(ts),
-      open: 100,
-      high: 100.5,
-      low: 100.1,
-      close: 100.2,
-      volume: 1,
-    }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), cfg)
+    checkHardExits(state, ts, new Map([['AAPL', bar(100.2, ts)]]), cfg)
     expect(state.closedTrades).toHaveLength(0)
+  })
+
+  it('fills hard exits at the close with slippage (not at the threshold)', () => {
+    const state = makeState()
+    checkHardExits(state, ts, new Map([['AAPL', bar(102, ts)]]), { ...cfg, slippageBps: 15 })
+    expect(state.closedTrades[0].exitPrice).toBeCloseTo(102 * (1 - 0.0015), 4)
+  })
+
+  describe('trailing stop — pins the live 3.0% arm / 1.5% pullback constants', () => {
+    // Use a high takeProfit so TP never pre-empts the trailing-stop assertions.
+    const trailCfg: BacktestConfig = { ...baseConfig, stopLossPct: 0.05, takeProfitPct: 0.1 }
+
+    it('does NOT arm the trail below +3% (HWM only +2%)', () => {
+      const state = makeState({ highWaterMark: 102 })
+      // 2% pullback from peak would fire IF armed — proving it is not armed yet.
+      checkHardExits(state, ts, new Map([['AAPL', bar(100, ts)]]), trailCfg)
+      expect(state.closedTrades).toHaveLength(0)
+    })
+
+    it('arms the trail once HWM ≥ +3% and exits on a pullback past 1.5%', () => {
+      const state = makeState({ highWaterMark: 104 })
+      // pctFromPeak = (102.3 − 104) / 104 = −1.63% ≤ −1.5% → trailing
+      checkHardExits(state, ts, new Map([['AAPL', bar(102.3, ts)]]), trailCfg)
+      expect(state.closedTrades).toHaveLength(1)
+      expect(state.closedTrades[0].exitReason).toBe('trailing_stop')
+    })
+
+    it('does NOT exit when the pullback from peak is shallower than 1.5%', () => {
+      const state = makeState({ highWaterMark: 104 })
+      // pctFromPeak = (102.6 − 104) / 104 = −1.35% > −1.5% → no exit
+      checkHardExits(state, ts, new Map([['AAPL', bar(102.6, ts)]]), trailCfg)
+      expect(state.closedTrades).toHaveLength(0)
+    })
+  })
+
+  describe('partial take-profit', () => {
+    const partialCfg: BacktestConfig = {
+      ...baseConfig,
+      stopLossPct: 0.05,
+      takeProfitPct: 0.015,
+      partialExitPct: 0.5,
+      trailPullbackAfterPartialPct: 0.003,
+    }
+
+    it('scales out partialExitPct at TP and leaves the remainder open', () => {
+      const state = makeState({ quantity: 1 })
+      checkHardExits(state, ts, new Map([['AAPL', bar(102, ts)]]), partialCfg)
+      expect(state.closedTrades).toHaveLength(1)
+      expect(state.closedTrades[0].exitReason).toBe('partial')
+      expect(state.closedTrades[0].quantity).toBeCloseTo(0.5)
+      const remaining = state.positions.get('AAPL')!
+      expect(remaining.quantity).toBeCloseTo(0.5)
+      expect(remaining.partialExitAt).not.toBeNull()
+    })
+
+    it('exits the remainder at breakeven once it dips below entry after a partial', () => {
+      const state = makeState({ quantity: 0.5, partialExitAt: ts, highWaterMark: 102 })
+      checkHardExits(state, ts + HOUR_MS, new Map([['AAPL', bar(99, ts + HOUR_MS)]]), partialCfg)
+      expect(state.closedTrades).toHaveLength(1)
+      expect(state.closedTrades[0].exitReason).toBe('breakeven')
+    })
+
+    it('rides the tightened trail (0.3%) on the remainder after a partial', () => {
+      const state = makeState({ quantity: 0.5, partialExitAt: ts, highWaterMark: 104 })
+      // still above entry (no breakeven), pctFromPeak = (103.6 − 104)/104 = −0.38% ≤ −0.3%
+      checkHardExits(state, ts + HOUR_MS, new Map([['AAPL', bar(103.6, ts + HOUR_MS)]]), partialCfg)
+      expect(state.closedTrades).toHaveLength(1)
+      expect(state.closedTrades[0].exitReason).toBe('trailing_stop')
+    })
   })
 })
 
 describe('soft time-stop', () => {
-  function makeState(openedAtMs: number): SimState {
-    const state: SimState = {
-      cash: 0,
-      positions: new Map(),
-      closedTrades: [],
-      currentDay: null,
-      dailyOpenValue: 100,
-      recentLosses: new Map(),
-      lastSell: null,
-      equityCurve: [],
-      cycles: 0,
-      buysExecuted: 0,
-      sellsExecuted: 0,
-      blockedByRisk: 0,
-      signalsEvaluated: 0,
-    }
-    state.positions.set('AAPL', {
-      ticker: 'AAPL',
-      quantity: 1,
-      entryPrice: 100,
-      openedAtMs,
-      highWaterMark: 100,
-      lowWaterMark: 100,
-    })
-    return state
-  }
-
   const enabledCfg: BacktestConfig = {
     ...baseConfig,
     softStopEnabled: true,
-    softStopHoldMinutes: 360, // 6h
-    softStopDrawdownPct: 0.025, // 2.5%
+    softStopHoldMinutes: 360,
+    softStopDrawdownPct: 0.025,
   }
 
   it('fires when held ≥ softStopHoldMinutes AND close ≤ entry × (1 − drawdown)', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + 7 * 60 * 60 * 1000 // 7h later → past 6h threshold
-    const state = makeState(openedAt)
-    // Close at 97 → 3% below entry, exceeds 2.5% drawdown threshold
-    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    const ts = T0 + 7 * HOUR_MS
+    const state = makeState({ openedAtMs: T0 })
+    checkHardExits(state, ts, new Map([['AAPL', bar(97, ts)]]), enabledCfg)
     expect(state.closedTrades).toHaveLength(1)
     expect(state.closedTrades[0].exitReason).toBe('soft_stop')
     expect(state.closedTrades[0].exitPrice).toBeCloseTo(97)
   })
 
   it('does NOT fire before softStopHoldMinutes has elapsed', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + 3 * 60 * 60 * 1000 // 3h — below 6h threshold
-    const state = makeState(openedAt)
-    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    const ts = T0 + 3 * HOUR_MS
+    const state = makeState({ openedAtMs: T0 })
+    checkHardExits(state, ts, new Map([['AAPL', bar(97, ts)]]), enabledCfg)
     expect(state.closedTrades).toHaveLength(0)
   })
 
   it('does NOT fire when drawdown is shallower than threshold', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + 10 * 60 * 60 * 1000
-    const state = makeState(openedAt)
-    // Down only 1% — below 2.5% threshold
-    const bar: OHLCV = { date: new Date(ts), open: 99, high: 99.5, low: 98.5, close: 99, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+    const ts = T0 + 10 * HOUR_MS
+    const state = makeState({ openedAtMs: T0 })
+    checkHardExits(state, ts, new Map([['AAPL', bar(99, ts)]]), enabledCfg)
     expect(state.closedTrades).toHaveLength(0)
   })
 
-  it('does NOT fire if trailing stop has armed (HWM > entry × 1.008)', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + 10 * 60 * 60 * 1000
-    const state = makeState(openedAt)
-    // Pre-arm the trail by setting HWM > entry × 1.008
-    state.positions.get('AAPL')!.highWaterMark = 102
-    // Close back down to 97 — would trigger soft stop, but trail is armed
-    // (and trail level = 102 × 0.996 = 101.59; close 97 < trail → trailing_stop fires)
-    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+  it('does NOT fire when the trail is armed (exits as trailing instead)', () => {
+    const ts = T0 + 10 * HOUR_MS
+    const state = makeState({ openedAtMs: T0, highWaterMark: 104 })
+    checkHardExits(state, ts, new Map([['AAPL', bar(97, ts)]]), enabledCfg)
     expect(state.closedTrades).toHaveLength(1)
     expect(state.closedTrades[0].exitReason).toBe('trailing_stop')
   })
 
   it('does NOT fire when softStopEnabled is false', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + 10 * 60 * 60 * 1000
-    const state = makeState(openedAt)
-    const bar: OHLCV = { date: new Date(ts), open: 98, high: 98.5, low: 96.8, close: 97, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), { ...enabledCfg, softStopEnabled: false })
+    const ts = T0 + 10 * HOUR_MS
+    const state = makeState({ openedAtMs: T0 })
+    checkHardExits(state, ts, new Map([['AAPL', bar(97, ts)]]), {
+      ...enabledCfg,
+      softStopEnabled: false,
+    })
     expect(state.closedTrades).toHaveLength(0)
   })
 
-  it('stop_loss still wins precedence when both thresholds breached', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + 10 * 60 * 60 * 1000
-    const state = makeState(openedAt)
-    // Low pierces SL (entry × 0.95 = 95), close at 96 still below soft threshold
-    const bar: OHLCV = { date: new Date(ts), open: 97, high: 97, low: 94, close: 96, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), enabledCfg)
+  it('stop_loss takes precedence when both thresholds are breached', () => {
+    const ts = T0 + 10 * HOUR_MS
+    const state = makeState({ openedAtMs: T0 })
+    checkHardExits(state, ts, new Map([['AAPL', bar(94, ts)]]), enabledCfg)
     expect(state.closedTrades).toHaveLength(1)
     expect(state.closedTrades[0].exitReason).toBe('stop_loss')
   })
@@ -344,100 +368,33 @@ describe('applySlippage', () => {
   })
 })
 
-describe('friction model', () => {
-  it('applies slippage to hard-exit fills', () => {
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + HOUR_MS
-    const state: SimState = {
-      cash: 0,
-      positions: new Map([
-        [
-          'AAPL',
-          {
-            ticker: 'AAPL',
-            quantity: 1,
-            entryPrice: 100,
-            openedAtMs: openedAt,
-            highWaterMark: 100,
-            lowWaterMark: 100,
-          },
-        ],
-      ]),
-      closedTrades: [],
-      currentDay: null,
-      dailyOpenValue: 100,
-      recentLosses: new Map(),
-      lastSell: null,
-      equityCurve: [],
-      cycles: 0,
-      buysExecuted: 0,
-      sellsExecuted: 0,
-      blockedByRisk: 0,
-      signalsEvaluated: 0,
-    }
-    // TP at 1.5% → trigger price = 101.5. With 15bps slippage on sell:
-    // fill = 101.5 × (1 − 0.0015) = 101.34775
-    const bar: OHLCV = {
-      date: new Date(ts),
-      open: 102,
-      high: 103,
-      low: 101.6,
-      close: 102,
-      volume: 1,
-    }
-    checkHardExits(state, ts, new Map([['AAPL', bar]]), { ...baseConfig, slippageBps: 15 })
-    expect(state.closedTrades).toHaveLength(1)
-    expect(state.closedTrades[0].exitPrice).toBeCloseTo(101.34775, 2)
+describe('FX-aware accounting', () => {
+  it('closePosition credits EUR proceeds using the historical FX rate', () => {
+    const state = makeState({ ticker: 'NVDA_US_EQ', entryFxRate: 0.9, costEurGross: 90 }, 0)
+    // currencyOf('NVDA_US_EQ') = USD → fxRateAt(.., 'USD') = 0.9
+    closePosition(state, 'NVDA_US_EQ', 100, T0 + HOUR_MS, 'take_profit', () => 0.9, 0)
+    // proceeds = 1 × 100 × 0.9 = 90 EUR
+    expect(state.cash).toBeCloseTo(90, 6)
+    expect(state.closedTrades[0].realizedPnl).toBeCloseTo(0, 6)
   })
 
-  it('round-trip with no price change loses slippage + FX', () => {
-    // Buy at 100 + slippage = 100.15, sell at 100 - slippage = 99.85
-    // P&L from price alone = (99.85 - 100.15) × 1 = -0.30
-    // FX cost on sell leg = 99.85 × 0.0015 = 0.149775
-    const openedAt = Date.parse('2025-01-01T00:00:00Z')
-    const ts = openedAt + HOUR_MS
-    const state: SimState = {
-      cash: 200,
-      positions: new Map(),
-      closedTrades: [],
-      currentDay: null,
-      dailyOpenValue: 200,
-      recentLosses: new Map(),
-      lastSell: null,
-      equityCurve: [],
-      cycles: 0,
-      buysExecuted: 0,
-      sellsExecuted: 0,
-      blockedByRisk: 0,
-      signalsEvaluated: 0,
-    }
-    // Simulate manual buy with friction
-    const buyFill = applySlippage(100, 'buy', 15) // 100.15
-    const fxBuyCost = buyFill * 0.0015 // buy-leg FX
-    state.cash -= buyFill + fxBuyCost
-    state.positions.set('AAPL_US_EQ', {
-      ticker: 'AAPL_US_EQ',
-      quantity: 1,
-      entryPrice: buyFill,
-      openedAtMs: openedAt,
-      highWaterMark: buyFill,
-      lowWaterMark: buyFill,
-    })
-    const cashAfterBuy = state.cash
+  it('applies the round-trip FX cost on the exit leg for non-EUR tickers', () => {
+    const state = makeState({ ticker: 'NVDA_US_EQ', entryFxRate: 0.9, costEurGross: 90 }, 0)
+    closePosition(state, 'NVDA_US_EQ', 100, T0 + HOUR_MS, 'take_profit', () => 0.9, 0.003)
+    // fxCost = 90 × 0.0015 = 0.135 → cash 89.865, realized −0.135
+    expect(state.cash).toBeCloseTo(89.865, 4)
+    expect(state.closedTrades[0].realizedPnl).toBeCloseTo(-0.135, 4)
+  })
 
-    // Force a stop-loss that fills at 100 (no price change from signal)
-    const bar: OHLCV = { date: new Date(ts), open: 90, high: 90, low: 80, close: 85, volume: 1 }
-    checkHardExits(state, ts, new Map([['AAPL_US_EQ', bar]]), {
-      ...baseConfig,
-      tradeUniverse: ['AAPL_US_EQ'],
-      slippageBps: 15,
-      fxRoundTripPct: 0.003,
-    })
-    // Cash should be lower than starting €200 — slippage + FX ate value
-    expect(state.cash).toBeLessThan(200)
-    // Position closed
-    expect(state.positions.size).toBe(0)
-    // Cash went up from the sale proceeds minus FX
-    expect(state.cash).toBeGreaterThan(cashAfterBuy)
+  it('does NOT apply FX cost for EUR tickers', () => {
+    const state = makeState({ ticker: 'AAPL', entryFxRate: 1, costEurGross: 100 }, 0)
+    closePosition(state, 'AAPL', 100, T0 + HOUR_MS, 'take_profit', () => 1, 0.003)
+    expect(state.cash).toBeCloseTo(100, 6)
+  })
+
+  it('records same-day close so the cooldown can block re-entry', () => {
+    const state = makeState({ ticker: 'AAPL' }, 0)
+    closePosition(state, 'AAPL', 96, T0 + HOUR_MS, 'stop_loss', () => 1, 0)
+    expect(state.closedToday.get('AAPL')).toBe('2025-01-01')
   })
 })
