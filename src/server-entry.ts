@@ -6,6 +6,8 @@ import { createEngine } from './engine/EngineService.js'
 import { getOrCreateT212Client } from './api/trading212.js'
 import { getUserApiKeys, getUserMarketConfig } from './http/routes/users.js'
 import { getMarketSpec } from './markets/registry.js'
+import { installDbFxPersistence } from './api/fx-persistence.js'
+import { seedFxCacheFromDb } from './api/fx.js'
 
 process.on('unhandledRejection', (reason) => {
   console.error('[server] Unhandled promise rejection:', reason)
@@ -54,6 +56,12 @@ async function autoStartEngines(): Promise<void> {
 
 async function main() {
   await runMigrations()
+
+  // FX: persist resolved rates and seed the in-memory cache from the DB so a
+  // transient Frankfurter failure (or this fresh process) never falls back to
+  // a 1.0 rate that would record native value as EUR.
+  installDbFxPersistence()
+  await seedFxCacheFromDb()
 
   const server = createHttpServer()
   server.listen(PORT, () => {

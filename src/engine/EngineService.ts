@@ -29,7 +29,7 @@ import {
 } from '../analytics/journal.js'
 import { pickDecision, lastSellFromRecentDecisions } from '../strategy/picker.js'
 import { Trading212Client, type PortfolioSnapshot, type T212Position } from '../api/trading212.js'
-import { getAllHistories, getLivePrice } from '../api/marketdata.js'
+import { getAllHistoriesRange, getLivePrice } from '../api/marketdata.js'
 import { generateSignals } from '../strategy/signals.js'
 import type { TickerSignal } from '../strategy/signals.js'
 import { resolveFxRates } from '../api/fx.js'
@@ -63,6 +63,9 @@ const TRAIL_ACTIVATION_PCT = 3.0
 const TRAIL_STOP_PCT = 1.5
 const CASH_COMMITMENT_TTL_MS = 90_000
 const MAX_FINGERPRINT_SKIPS = 4
+// Lookback window for the 1h signal history fetch. ~45 calendar days of hourly
+// bars warms up SMA50/MACD with margin while staying inside Yahoo's ~60d 1h cap.
+const SIGNAL_HISTORY_DAYS = 45
 // Reject a buy if the live intraday price differs from the signal (daily close)
 // by more than this. Catches gap-ups/gap-downs where the signal is stale.
 const GAP_REJECT_PCT = 0.05
@@ -234,64 +237,83 @@ export class EngineService {
           .getOrderHistory()
           .catch(() => [] as Awaited<ReturnType<typeof this.t212.getOrderHistory>>),
       ])
-      const liveTickers = new Set(liveSnapshot.positions.map((p) => p.ticker))
-      const pendingOrderTickers = new Set(openOrders.map((o) => o.ticker))
-      for (const pos of openPositions) {
-        if (!liveTickers.has(pos.ticker) && !pendingOrderTickers.has(pos.ticker)) {
-          const openedAtMs = new Date(pos.openedAt).getTime()
-          const lastSellFill = orderHistory
-            .filter(
-              (o) =>
-                o.ticker === pos.ticker &&
-                o.quantity < 0 &&
-                o.filledPrice != null &&
-                new Date(o.dateModified ?? o.dateCreated).getTime() >= openedAtMs
-            )
-            .sort(
-              (a, b) =>
-                new Date(b.dateModified ?? b.dateCreated).getTime() -
-                new Date(a.dateModified ?? a.dateCreated).getTime()
-            )[0]
-          const exitPrice = lastSellFill?.filledPrice ?? null
-          const closedAt = lastSellFill?.dateModified ?? new Date().toISOString()
-          const inferredCurrency = pos.ticker.endsWith('_US_EQ') ? 'USD' : null
-          const fxRate = await (async () => {
-            if (inferredCurrency === null) return 1 as number | null
-            const sameCurrency = liveSnapshot.positions.find(
-              (p) =>
-                p.currencyCode === inferredCurrency && Number.isFinite(p.fxRate) && p.fxRate > 0
-            )
-            if (sameCurrency) return sameCurrency.fxRate
-            const rates = await resolveFxRates([
-              {
-                currencyCode: inferredCurrency,
-                currentPrice: exitPrice ?? 0,
-                averagePrice: exitPrice ?? 0,
-                quantity: 1,
-                ppl: 0,
-                fxPpl: null,
-              },
-            ])
-            return rates.get(inferredCurrency) ?? null
-          })()
-          const exitPriceEur = exitPrice != null && fxRate != null ? exitPrice * fxRate : null
-          await closeAiPosition(
-            pos.ticker,
-            exitPrice,
-            closedAt,
-            this.userId,
-            this.market,
-            exitPriceEur,
-            'manual'
-          )
-          console.log(
-            `${tag} ${pos.ticker} not in T212 — marked closed${exitPrice != null ? ` at ${exitPrice} (T212 fill)` : ' (no fill found)'}`
-          )
-        }
-      }
+      await this._reconcileClosedPositions(openPositions, liveSnapshot, openOrders, orderHistory)
       await this._reconcileEntryPrices(openPositions, liveSnapshot.positions)
     }
     console.log(`${tag} Ready. Universe: ${this.userConfig.tradeUniverse.join(', ')}`)
+  }
+
+  // ── Closed-position reconciliation ──────────────────────────────────────
+  // Closes any open ai_position that is no longer held at T212 and has no
+  // pending order — i.e. it was sold (manually or by a missed close) outside
+  // the engine's bookkeeping. The exit is priced from the actual T212 sell
+  // fill so realized P&L is accurate; positions with no matching fill are
+  // closed at NULL (no fabricated P&L). Runs at init AND every cycle so a
+  // position that disappears mid-session is reconciled without a restart —
+  // this is what stops long-dead orphans from inflating open exposure forever.
+  private async _reconcileClosedPositions(
+    openPositions: AiPosition[],
+    liveSnapshot: PortfolioSnapshot,
+    openOrders: Awaited<ReturnType<Trading212Client['getOpenOrders']>>,
+    orderHistory: Awaited<ReturnType<Trading212Client['getOrderHistory']>>
+  ): Promise<number> {
+    const tag = `[engine:${this.userId}:${this.market}]`
+    const liveTickers = new Set(liveSnapshot.positions.map((p) => p.ticker))
+    const pendingOrderTickers = new Set(openOrders.map((o) => o.ticker))
+    let reconciled = 0
+    for (const pos of openPositions) {
+      if (liveTickers.has(pos.ticker) || pendingOrderTickers.has(pos.ticker)) continue
+      const openedAtMs = new Date(pos.openedAt).getTime()
+      const lastSellFill = orderHistory
+        .filter(
+          (o) =>
+            o.ticker === pos.ticker &&
+            o.quantity < 0 &&
+            o.filledPrice != null &&
+            new Date(o.dateModified ?? o.dateCreated).getTime() >= openedAtMs
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.dateModified ?? b.dateCreated).getTime() -
+            new Date(a.dateModified ?? a.dateCreated).getTime()
+        )[0]
+      const exitPrice = lastSellFill?.filledPrice ?? null
+      const closedAt = lastSellFill?.dateModified ?? new Date().toISOString()
+      const inferredCurrency = pos.ticker.endsWith('_US_EQ') ? 'USD' : null
+      const fxRate = await (async () => {
+        if (inferredCurrency === null) return 1 as number | null
+        const sameCurrency = liveSnapshot.positions.find(
+          (p) => p.currencyCode === inferredCurrency && Number.isFinite(p.fxRate) && p.fxRate > 0
+        )
+        if (sameCurrency) return sameCurrency.fxRate
+        const rates = await resolveFxRates([
+          {
+            currencyCode: inferredCurrency,
+            currentPrice: exitPrice ?? 0,
+            averagePrice: exitPrice ?? 0,
+            quantity: 1,
+            ppl: 0,
+            fxPpl: null,
+          },
+        ])
+        return rates.get(inferredCurrency) ?? null
+      })()
+      const exitPriceEur = exitPrice != null && fxRate != null ? exitPrice * fxRate : null
+      await closeAiPosition(
+        pos.ticker,
+        exitPrice,
+        closedAt,
+        this.userId,
+        this.market,
+        exitPriceEur,
+        lastSellFill ? 'manual' : 'orphaned'
+      )
+      reconciled++
+      console.log(
+        `${tag} ${pos.ticker} not in T212 — marked closed${exitPrice != null ? ` at ${exitPrice} (T212 fill)` : ' as orphaned (no fill found)'}`
+      )
+    }
+    return reconciled
   }
 
   // ── Fill-price reconciliation ───────────────────────────────────────────
@@ -749,6 +771,15 @@ export class EngineService {
 
     const openForReconcile = await getOpenAiPositions(this.userId, this.market)
     if (openForReconcile.length > 0) {
+      const [openOrders, orderHistory] = await Promise.all([
+        this.t212
+          .getOpenOrders()
+          .catch(() => [] as Awaited<ReturnType<Trading212Client['getOpenOrders']>>),
+        this.t212
+          .getOrderHistory()
+          .catch(() => [] as Awaited<ReturnType<Trading212Client['getOrderHistory']>>),
+      ])
+      await this._reconcileClosedPositions(openForReconcile, snapshot, openOrders, orderHistory)
       await this._reconcileEntryPrices(openForReconcile, snapshot.positions)
     }
 
@@ -813,7 +844,17 @@ export class EngineService {
     console.log(
       `${tag} Fetching price history for ${this.userConfig.tradeUniverse.length} tickers...`
     )
-    const histories = await getAllHistories(this.userConfig.tradeUniverse, 90)
+    // Hourly bars (matching the backtester) so the 2h engine reacts intraday
+    // rather than to stale daily closes. SIGNAL_HISTORY_DAYS of 1h data is
+    // ample for SMA50/MACD warmup (≈7 trading hours/day × weekdays).
+    const historyEnd = new Date()
+    const historyStart = new Date(historyEnd.getTime() - SIGNAL_HISTORY_DAYS * 24 * 60 * 60 * 1000)
+    const histories = await getAllHistoriesRange(
+      this.userConfig.tradeUniverse,
+      historyStart,
+      historyEnd,
+      '1h'
+    )
 
     const manualTickers = new Set(
       snapshot.positions.map((p) => p.ticker).filter((t) => !botQtyByTicker.has(t))
@@ -1167,18 +1208,21 @@ export class EngineService {
       }
 
       const livePosition = snapshot.positions.find((p) => p.ticker === decision.ticker)
+      const openInstruments = await this.t212.getInstruments()
+      const currencyCode =
+        livePosition?.currencyCode ??
+        openInstruments.get(decision.ticker)?.currencyCode ??
+        (decision.ticker.endsWith('_US_EQ') ? 'USD' : 'EUR')
       const fxRate = await (async () => {
         if (livePosition?.fxRate) return livePosition.fxRate
-        const ticker = decision.ticker!
-        const currency = livePosition?.currencyCode ?? (ticker.endsWith('_US_EQ') ? 'USD' : null)
-        if (!currency || currency === 'EUR') return 1
+        if (currencyCode === 'EUR') return 1
         const sameCurrency = snapshot.positions.find(
-          (p) => p.currencyCode === currency && Number.isFinite(p.fxRate) && p.fxRate > 0
+          (p) => p.currencyCode === currencyCode && Number.isFinite(p.fxRate) && p.fxRate > 0
         )
         if (sameCurrency) return sameCurrency.fxRate
         const rates = await resolveFxRates([
           {
-            currencyCode: currency,
+            currencyCode,
             currentPrice: estimatedPriceNative,
             averagePrice: estimatedPriceNative,
             quantity: decision.quantity ?? 1,
@@ -1186,9 +1230,15 @@ export class EngineService {
             fxPpl: null,
           },
         ])
-        return rates.get(currency) ?? 1
+        return rates.get(currencyCode) ?? 1
       })()
-      const estimatedPriceEur = estimatedPriceNative * fxRate
+      // Guard against recording native value as EUR. For a non-EUR instrument a
+      // resolved rate of ~1.0 means FX resolution failed (USD≈0.85, GBX≈0.012),
+      // so persist NULL entry_price_eur rather than a wrong value — analytics
+      // falls back per migration 013, and the close path books the real rate.
+      const fxResolved = currencyCode !== 'EUR' && Math.abs(fxRate - 1) < 1e-6 ? null : fxRate
+      const estimatedPriceEur = fxResolved != null ? estimatedPriceNative * fxResolved : null
+      const estimatedCostEur = decision.quantity * estimatedPriceNative * fxRate
 
       const recentLossCount =
         decision.action === 'buy'
@@ -1245,7 +1295,7 @@ export class EngineService {
 
         if (decision.action === 'buy') {
           this._cashCommitments.push({
-            amount: decision.quantity * estimatedPriceEur,
+            amount: estimatedCostEur,
             expiresAt: Date.now() + CASH_COMMITMENT_TTL_MS,
           })
           await openAiPosition(
@@ -1256,7 +1306,7 @@ export class EngineService {
             this.userId,
             this.market,
             estimatedPriceEur,
-            livePosition?.currencyCode ?? null
+            currencyCode
           )
         } else if (decision.action === 'sell') {
           await closeAllAiPositions(

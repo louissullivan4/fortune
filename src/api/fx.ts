@@ -26,6 +26,48 @@ const MIN_DERIVE_PPL_EUR = 0.2
 const cache = new Map<string, FxCacheEntry>()
 cache.set('EUR', { rate: 1, expiresAt: Number.POSITIVE_INFINITY })
 
+// ── Optional DB persistence ─────────────────────────────────────────────────
+// Injected at app startup (see api/fx-persistence.ts) so this module stays
+// DB-free and unit-testable. When set, every resolved rate is written back and
+// the in-memory cache is seeded from the DB on boot — that combination means a
+// transient Frankfurter failure (or a freshly redeployed process) reuses the
+// last-known good rate via the stale-cache branch below, never 1.0.
+export interface FxPersistence {
+  load: () => Promise<ReadonlyArray<{ currency: string; rate: number }>>
+  save: (currency: string, rate: number) => Promise<void>
+}
+
+let persistence: FxPersistence | null = null
+
+export function setFxPersistence(p: FxPersistence | null): void {
+  persistence = p
+}
+
+/** Seed the in-memory cache from persisted rates. Best-effort; safe to call once at startup. */
+export async function seedFxCacheFromDb(): Promise<void> {
+  if (!persistence) return
+  try {
+    const rows = await persistence.load()
+    for (const { currency, rate } of rows) {
+      if (currency === 'EUR' || !Number.isFinite(rate) || rate <= 0) continue
+      // Seed as already-expired so a live fetch is still attempted, but the
+      // stale-cache fallback can use it when fetching fails.
+      cache.set(currency, { rate, expiresAt: 0 })
+    }
+  } catch (err) {
+    console.warn(`[fx] Failed to seed FX cache from DB: ${(err as Error).message}`)
+  }
+}
+
+function rememberRate(currency: string, rate: number, expiresAt: number): void {
+  cache.set(currency, { rate, expiresAt })
+  if (persistence && currency !== 'EUR') {
+    persistence.save(currency, rate).catch((err) => {
+      console.warn(`[fx] Failed to persist rate for ${currency}: ${(err as Error).message}`)
+    })
+  }
+}
+
 export function deriveFxFromPosition(position: {
   currentPrice: number
   averagePrice: number
@@ -75,7 +117,7 @@ export async function resolveFxRates(
     const derived = deriveFxFromPosition(pos)
     if (derived !== null) {
       rates.set(pos.currencyCode, derived)
-      cache.set(pos.currencyCode, { rate: derived, expiresAt: now + CACHE_TTL_MS })
+      rememberRate(pos.currencyCode, derived, now + CACHE_TTL_MS)
     }
   }
 
@@ -90,9 +132,14 @@ export async function resolveFxRates(
     }
     const fetched = await fetchFxToEur(currency)
     if (fetched !== null) {
-      cache.set(currency, { rate: fetched, expiresAt: now + CACHE_TTL_MS })
+      rememberRate(currency, fetched, now + CACHE_TTL_MS)
       rates.set(currency, fetched)
     } else if (cached) {
+      // Stale in-memory entry (incl. rates seeded from the DB on startup) — far
+      // better than 1.0, which would record native value as EUR.
+      console.warn(
+        `[fx] Live fetch failed for ${currency} — reusing last-known rate ${cached.rate}`
+      )
       rates.set(currency, cached.rate)
     } else {
       console.warn(`[fx] No rate available for ${currency} — using 1.0 (will overstate EUR value)`)
