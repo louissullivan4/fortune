@@ -811,6 +811,17 @@ export async function reconcileAiPositions(
     ).rows.map((r) => r.key)
   )
 
+  const partialExits = new Set(
+    (
+      await pool.query<{ key: string }>(
+        `SELECT ticker || '|' || to_char(partial_exit_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS key
+         FROM ai_positions
+         WHERE partial_exit_at IS NOT NULL AND user_id = $1 AND market_code = $2`,
+        [userId, market]
+      )
+    ).rows.map((r) => r.key)
+  )
+
   let inserted = 0
   for (const t of trades) {
     if (t.action === 'buy') {
@@ -821,7 +832,7 @@ export async function reconcileAiPositions(
       inserted++
     } else {
       const closeKey = `${t.ticker}|${t.timestamp}`
-      if (alreadyClosed.has(closeKey)) continue
+      if (alreadyClosed.has(closeKey) || partialExits.has(closeKey)) continue
       await closeAiPosition(t.ticker, t.estimated_price, t.timestamp, userId, market)
       alreadyClosed.add(closeKey)
       inserted++
